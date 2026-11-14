@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,6 +37,9 @@ LABEL = "io.ai-coach.browser-run"
 # releases it even when the runner is killed, so a lock file nobody holds marks
 # a run whose containers a later run may remove (#2721).
 LOCK_DIR = Path(tempfile.gettempdir()) / "pacecraft-browser-runs"
+# A sweep leaves younger lock files alone, so a run that has just created its
+# file and not locked it yet never loses it to a parallel sweep.
+LOCK_GRACE_SECONDS = 120
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 # The fixture's other fake credential (e2e/fixture_runtime.py); redacted like the password.
 FAKE_OPENAI_KEY = "e2e-fixture-openai-key"
@@ -628,17 +631,30 @@ def _lock(handle, take=True):
 def hold_run_lock(run_id):
     """Hold this run's lock file until release_run_lock or the process ends."""
     LOCK_DIR.mkdir(exist_ok=True)
-    handle = (LOCK_DIR / f"{run_id}.lock").open("a+b")
-    if not _lock(handle):
+    path = LOCK_DIR / f"{run_id}.lock"
+    for _ in range(5):
+        handle = path.open("a+b")
+        # A write refreshes the file time that the sweep's grace period reads.
+        handle.write(b"1")
+        handle.flush()
+        if _lock(handle):
+            # The locked file must still be the one at the path: a sweep may
+            # have unlinked it between our open and lock.
+            with suppress(FileNotFoundError):
+                if os.path.samestat(os.fstat(handle.fileno()), path.stat()):
+                    return handle
+            _lock(handle, take=False)
         handle.close()
-        raise RunnerError("Browser run lock unavailable")
-    return handle
+        time.sleep(0.2)
+    raise RunnerError("Browser run lock unavailable")
 
 
 def release_run_lock(handle, run_id):
     _lock(handle, take=False)
     handle.close()
-    (LOCK_DIR / f"{run_id}.lock").unlink(missing_ok=True)
+    # A leftover unheld file is harmless: the next sweep removes it.
+    with suppress(OSError):
+        (LOCK_DIR / f"{run_id}.lock").unlink(missing_ok=True)
 
 
 def sweep_stale(processes):
@@ -652,6 +668,9 @@ def sweep_stale(processes):
     for path in sorted(LOCK_DIR.glob("*.lock")) if LOCK_DIR.is_dir() else []:
         if not re.fullmatch(r"[a-f0-9]{32}", path.stem):
             continue
+        with suppress(OSError):
+            if time.time() - path.stat().st_mtime < LOCK_GRACE_SECONDS:
+                continue
         with path.open("a+b") as handle:
             if not _lock(handle):
                 continue  # a live run holds it

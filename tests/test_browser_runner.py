@@ -4,12 +4,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from collections import Counter
 from contextlib import redirect_stderr
@@ -1179,9 +1181,52 @@ class StaleRunTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def old_lock(self, run_id):
+        """An unheld lock file older than the sweep's grace period."""
+        path = self.locks / f"{run_id}.lock"
+        path.write_bytes(b"")
+        past = time.time() - runner.LOCK_GRACE_SECONDS - 60
+        os.utime(path, (past, past))
+        return path
+
+    def test_a_young_unheld_lock_is_left_for_a_starting_run(self):
+        # The run created its file but has not locked it yet (Gitar on #2726).
+        young = "9" * 32
+        (self.locks / f"{young}.lock").write_bytes(b"")
+        fake = FakeProcesses()
+        fake.other_runs = {young: f"{'7' * 12} acb-{young}-net-0\n"}
+        self.assertEqual(runner.sweep_stale(fake), 0)
+        self.assertEqual(fake.commands, [])
+        self.assertTrue((self.locks / f"{young}.lock").exists())
+
+    @unittest.skipIf(os.name == "nt", "Windows cannot unlink an open file, so no race")
+    def test_a_lock_file_replaced_before_locking_is_taken_again(self):
+        run_id = "8" * 32
+        real_lock = runner._lock
+        calls = []
+
+        def lock_after_a_sweep(handle, take=True):
+            if take and not calls:
+                calls.append(1)
+                (self.locks / f"{run_id}.lock").unlink()  # a sweep's unlink
+            return real_lock(handle, take)
+
+        with mock.patch.object(runner, "_lock", side_effect=lock_after_a_sweep):
+            handle = runner.hold_run_lock(run_id)
+        path = self.locks / f"{run_id}.lock"
+        self.assertTrue(os.path.samestat(os.fstat(handle.fileno()), path.stat()))
+        runner.release_run_lock(handle, run_id)
+
+    def test_a_failed_lock_file_removal_does_not_escape(self):
+        run_id = "7" * 32
+        handle = runner.hold_run_lock(run_id)
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("open")):
+            runner.release_run_lock(handle, run_id)
+        self.assertTrue(handle.closed)
+
     def test_only_runs_whose_lock_nobody_holds_are_removed(self):
         dead, live, unknown = "a" * 32, "b" * 32, "c" * 32
-        (self.locks / f"{dead}.lock").write_bytes(b"")
+        self.old_lock(dead)
         held = runner.hold_run_lock(live)
         self.addCleanup(runner.release_run_lock, held, live)
         fake = FakeProcesses()
@@ -1201,7 +1246,7 @@ class StaleRunTests(unittest.TestCase):
 
     def test_a_failed_removal_keeps_the_lock_for_the_next_sweep(self):
         dead = "d" * 32
-        (self.locks / f"{dead}.lock").write_bytes(b"")
+        self.old_lock(dead)
         fake = FakeProcesses()
         fake.other_runs = {dead: f"{'5' * 12} acb-{dead}-fixture-0-0\n"}
         with mock.patch.object(fake, "run", side_effect=runner.RunnerError("busy")):
@@ -1220,7 +1265,7 @@ class StaleRunTests(unittest.TestCase):
 
     def test_cleanup_stale_only_sweeps_and_exits(self):
         dead = "f" * 32
-        (self.locks / f"{dead}.lock").write_bytes(b"")
+        self.old_lock(dead)
         fake = FakeProcesses()
         fake.other_runs = {dead: f"{'6' * 12} acb-{dead}-fixture-0-0\n"}
         with (
