@@ -1996,6 +1996,31 @@ class MorningReadinessTests(unittest.TestCase):
         (point,) = projected["points"]
         self.assertEqual(point["value"], 78)
 
+    def test_a_non_text_context_is_an_ordinary_reading(self) -> None:
+        # #2870: provider data is untrusted; a list or a mapping as inputContext
+        # neither breaks the mapper nor counts as a re-score or a wake-up.
+        for context in (["AFTER_WAKEUP_RESET"], {"name": "UPDATE_REALTIME_VARIABLES"}):
+            with self.subTest(context=type(context).__name__):
+                odd = {**_AFTERNOON, "inputContext": context, "score": 55}
+                for section in ("readiness", "training_readiness_history"):
+                    result = _map({section: [odd]})
+                    self.assertEqual(
+                        _find(result, MetricKind.READINESS).value.value, 55.0
+                    )
+                    self.assertEqual(
+                        _find(
+                            _map({section: [odd, _MORNING]}), MetricKind.READINESS
+                        ).value.value,
+                        78.0,
+                    )
+                    codes = map_garmin_status_codes(
+                        section,
+                        [odd],
+                        source_record_id=section,
+                        retrieved_at=RETRIEVED_AT,
+                    )
+                    self.assertEqual([code.code for code in codes], ["LOW"])
+
     def test_readiness_level_follows_the_morning_reading(self) -> None:
         for section in ("readiness", "training_readiness_history"):
             with self.subTest(section=section):
