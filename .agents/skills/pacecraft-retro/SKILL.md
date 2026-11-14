@@ -1,6 +1,6 @@
 ---
 name: pacecraft-retro
-description: Use when the user asks for a retrospective or lessons learned, and after every issue a deliver-issue run delivers. Find process friction, skill improvements, and application defects from evidence.
+description: Find process friction, skill improvements, and application defects from the evidence of a delivery. Use after every issue a deliver-issue run delivers, at the end of a lane, and when the user asks for a retrospective or lessons learned.
 ---
 
 # Development retrospective

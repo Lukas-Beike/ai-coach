@@ -1,9 +1,7 @@
 ---
 name: pacecraft-pwa-e2e
-description: Validate browser and PWA behavior with the isolated SQLCipher fixture runtime and Playwright projects, and host fixture screenshots for UI PRs.
+description: Validate browser and PWA behavior with the isolated SQLCipher fixture runtime and Playwright projects, and host fixture screenshots for UI PRs. Use for frontend, HTTP contract, streaming, responsive layout, or PWA changes.
 ---
-
-Use for frontend, HTTP contracts, streaming, responsive layout, or PWA changes.
 
 - Read scoped instructions and follow [browser-validation.md](references/browser-validation.md); never use the real environment, data mount, or browser profile.
 - Run affected projects first, then the full matrix for shared contracts, authentication, cache, or chat lifecycle changes.
