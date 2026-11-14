@@ -339,6 +339,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "source",
                 "as_of",
                 "metrics",
+                "personal_records",
                 "thresholds",
                 "current_load",
                 "recovery",

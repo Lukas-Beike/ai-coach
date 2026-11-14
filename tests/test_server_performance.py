@@ -121,6 +121,7 @@ class ServerPerformanceTests(ServerTestCase):
                     "seconds": 5772.0,
                     "date": "2025-04-12",
                     "source": "Garmin Connect",
+                    "label": "Garmin",
                 }
             ],
         )

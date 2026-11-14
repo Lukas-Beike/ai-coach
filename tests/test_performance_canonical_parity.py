@@ -66,9 +66,10 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 )
 # One unbounded read per kind: the body-history kinds, the current-metric kinds,
 # the Garmin performance kinds (with the twelve training load and load balance
-# kinds and the four history-chart kinds), the daily totals (with resting energy)
-# and the recovery kinds not read before (the weekly HRV average).
-_UNIT_READS = 40
+# kinds, the four history-chart kinds and the five personal-record kinds, #2806),
+# the daily totals (with resting energy) and the recovery kinds not read before
+# (the weekly HRV average).
+_UNIT_READS = 45
 
 
 class StubObservationReader(ObservationReader):
