@@ -15,7 +15,8 @@ worked. The outcome is an evidence-backed, prioritized improvement plan.
 Run when the user asks, after every issue a `deliver-issue` run delivers (in a
 lane too: one retro per issue, right after its merge and close), and once more
 over the whole run at the end of a lane for patterns across its issues. Report
-and file every actionable finding; there is no limit per issue or per thread.
+every actionable finding; there is no limit per issue or per thread. Whether a
+finding becomes an issue follows "Decide each finding" below.
 Scale depth to the work; a short run needs only a few evidence-backed lines, or
 "no actionable findings". Do not review the retro itself.
 

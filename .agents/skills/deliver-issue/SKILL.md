@@ -158,6 +158,7 @@ issue maintenance from the authorization above. Report delivered behavior, accep
 evidence and limits, spec changes, and the PR URL with merge state. If blocked,
 give the exact phase, state, and smallest next action. Then run the
 [retro](../pacecraft-retro/SKILL.md) over this issue, also inside a lane, and
-file every actionable finding as that skill describes (no limit). A lane
+report every actionable finding (no limit); that skill decides which become
+issues. A lane
 additionally ends with one retro over the whole run, before any closing
 sentence.
