@@ -37,9 +37,11 @@ from backend.db.schema import initialize_schema
 from backend.performance import mean_max_curve
 from backend.performance.canonical_detail import CanonicalDetailReader
 from backend.performance.mean_max_curve import SessionCurveReader
+from backend.performance.power_profile import running_profile
 from backend.performance.report_service import TrainingProfileSelectionService
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from tests.test_power_profile import steady_run
 
 STAMP = "2026-10-18T08:00:00+00:00"
 RETRIEVED = datetime(2026, 10, 18, 8, 0, tzinfo=UTC)
@@ -920,6 +922,37 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertNotEqual(groups[180][1], groups[720][1])
         reordered = service.power_profiles(records[::-1])["windows"]["90"]
         self.assertEqual(window["input_fingerprint"], reordered["input_fingerprint"])
+
+    def test_running_distance_bests_run_up_to_the_marathon(self):
+        records = [
+            {
+                **activity,
+                "activity_id": activity_id,
+                "fingerprint": activity_id,
+                "running_profile": running_profile(activity),
+            }
+            for activity_id, activity in (
+                ("long", steady_run(43, speed=3.0, day="2026-09-01")),
+                ("fast", steady_run(12, speed=4.0, day="2026-10-10")),
+            )
+        ]
+        service = TrainingProfileSelectionService(lambda: date(2026, 10, 18))
+
+        window = service.power_profiles(records)["windows"]["90"]
+
+        self.assertEqual(
+            [
+                (1000, "fast"),
+                (5000, "fast"),
+                (10000, "fast"),
+                (21097.5, "long"),
+                (42195, "long"),
+            ],
+            [
+                (point["distance_meters"], point["activity_id"])
+                for point in window["running"]["distance"]
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -77,10 +77,11 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(segments).toHaveText(["Laufen", "Radfahren", "Belastung", "Erholung"]);
   await expect(page.locator('[data-analysis-segment="running"]')).toHaveAttribute("aria-current", "page");
   const best = page.locator("#runningBestEfforts");
-  await expect(best.locator('[data-running-best="speed:60"] td')).toHaveText(["3:20 min/km", "01.10.2026"]);
+  // Running bests are the five race distances only; a missing best keeps its row with a dash (#2786).
+  await expect(best.locator("tbody th")).toHaveText(["1 km", "5 km", "10 km", "Halbmarathon", "Marathon"]);
   await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText(["19:48", "20.09.2026"]);
-  await expect(best.locator('[data-running-best="speed:1200"] td')).toHaveText(["nicht erfasst", ""]);
-  await expect(best.locator("tbody tr")).toHaveCount(3);
+  await expect(best.locator('[data-running-best="distance:42195"] td')).toHaveText(["–", ""]);
+  await expect(best).not.toContainText("min/km");
   await expect(page.locator("#currentPerformance table[data-analysis-sport='run']")).toBeVisible();
   await expect(page.locator("#currentPerformance table[data-analysis-sport='ride']")).toBeHidden();
   await expect(page.locator("#cyclingPowerProfile")).toBeHidden();
