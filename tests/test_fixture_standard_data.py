@@ -30,7 +30,6 @@ from backend.canonical.vocabulary import StreamChannel
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
-from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
@@ -133,7 +132,7 @@ class StandardFixtureTestCase(unittest.TestCase):
         with TemporaryDirectory(prefix=prefix) as directory:
             root = Path(directory)
             try:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 server.CONFIG_HOLDER.value = replace(
                     server.CONFIG_HOLDER.value, app_password=""
                 )
@@ -142,7 +141,7 @@ class StandardFixtureTestCase(unittest.TestCase):
                 server.LOG_PATH = root / "fixture.log"
                 yield server
             finally:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 (
                     server.CONFIG_HOLDER.value,
                     server.DATA_DIR,
@@ -485,7 +484,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         with TemporaryDirectory(prefix="fixture-demo-test-") as directory:
             root = Path(directory)
             try:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 server.CONFIG_HOLDER.value = replace(
                     server.CONFIG_HOLDER.value, app_password=""
                 )
@@ -549,7 +548,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                         "SELECT COUNT(*) AS count FROM external_calendar_events WHERE uid LIKE 'fixture-%'"
                     ).fetchone()["count"]
             finally:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 (
                     server.CONFIG_HOLDER.value,
                     server.DATA_DIR,
@@ -753,7 +752,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
         with TemporaryDirectory(prefix="fixture-restart-test-") as directory:
             root = Path(directory)
             try:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 server.CONFIG_HOLDER.value = replace(
                     server.CONFIG_HOLDER.value, app_password=""
                 )
@@ -774,7 +773,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
                 feature_ids = self._snapshot_activity_ids(server)
                 feature_garmin = self._garmin_snapshot(server)
             finally:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
                 (
                     server.CONFIG_HOLDER.value,
                     server.DATA_DIR,
@@ -1173,7 +1172,7 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                 with TemporaryDirectory(prefix="fixture-stage-test-") as directory:
                     root = Path(directory)
                     try:
-                        DATABASE_MANAGER_CACHE.reset()
+                        server.database_manager.reset()
                         server.CONFIG_HOLDER.value = replace(
                             server.CONFIG_HOLDER.value, app_password=""
                         )
@@ -1207,7 +1206,7 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                                     ).fetchone()["payload"]
                                 )
                     finally:
-                        DATABASE_MANAGER_CACHE.reset()
+                        server.database_manager.reset()
                         (
                             server.CONFIG_HOLDER.value,
                             server.DATA_DIR,

@@ -20,7 +20,6 @@ from support import canonical_backfill_stopped, wire_step
 
 from backend.coach import dialogue as coach_dialogue
 from backend.coach import streams as coach_streams
-from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
@@ -607,7 +606,7 @@ with patch.object(Path, 'read_text', deny):
                         server.SYNC_JOB_QUEUE.store().claim()["id"], job["id"]
                     )
                 finally:
-                    DATABASE_MANAGER_CACHE.reset()
+                    server.database_manager.reset()
 
     def test_chat_reset_changes_history_generation(self):
         before = server.HTTP_API.chat_history_page_service().page()["generation"]
