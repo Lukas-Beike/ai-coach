@@ -68,9 +68,10 @@ Mapped sections and their canonical kinds:
 * ``personal_records``: PERSONAL_RECORD_1K, _5K, _10K, _HALF and _FULL in seconds
   for running, from ``value`` by the ``typeId`` the pinned SDK documents (1, 3, 4,
   5, 6). Each record is dated by its own ``prStartTimeLocalFormatted`` (else the
-  ``prStartTimeLocal`` epoch); one without a day is MISSING. Records of another
-  ``activityType`` and the running mile (2) and longest run (7) are skipped; any
-  other running type is UNKNOWN_VALUE. The source record id is
+  ``prStartTimeLocal`` epoch); one without a day is MISSING, an unreadable day
+  INVALID_TYPE. Records without a running ``activityType`` (another sport, or none
+  for steps and goals) and the running mile (2) and longest run (7) are skipped;
+  any other or non-integer running type is UNKNOWN_VALUE. The source record id is
   ``personal_records:<day>:<kind>``.
 * ``endurance_score``: ENDURANCE_SCORE from ``overallScore``, after unwrapping the
   ``enduranceScoreDTO`` or ``enduranceScoreDTOList`` wrappers. The per-sport
@@ -1480,7 +1481,12 @@ class _HealthMapping:
             named = _named_value(record, _PERSONAL_RECORD_DAY_KEYS)
             day = None if named is None else _raw_day(named[1])
             if not isinstance(day, date):
-                self.issue(ref, _PERSONAL_RECORD_DAY_KEYS[0], IssueReason.MISSING)
+                field, reason = (
+                    (_PERSONAL_RECORD_DAY_KEYS[0], IssueReason.MISSING)
+                    if named is None
+                    else (named[0], IssueReason.INVALID_TYPE)
+                )
+                self.issue(ref, field, reason)
                 continue
             seconds = self._number(record, ("value",), ref)
             if seconds is not None:
@@ -1491,13 +1497,15 @@ class _HealthMapping:
     def _personal_record_kind(
         self, record: Mapping[str, object], ref: str
     ) -> MetricKind | None:
-        """The kind of a running record; another sport is skipped without an issue,
-        an undocumented running type is UNKNOWN_VALUE."""
+        """The kind of a running record; a record of another sport or of none
+        (steps, goals) is skipped without an issue, an undocumented or
+        non-integer running type is UNKNOWN_VALUE."""
         sport = record.get("activityType")
-        if isinstance(sport, str) and _heart_rate_sport(sport) is not Sport.RUN:
+        if not isinstance(sport, str) or _heart_rate_sport(sport) is not Sport.RUN:
             return None
         type_id = coerce_number(record.get("typeId"))
-        number = None if type_id is None else int(type_id)
+        whole = type_id is not None and float(type_id).is_integer()
+        number = int(type_id) if whole and type_id is not None else None
         if number in _UNMAPPED_RUNNING_RECORDS:
             return None
         kind = _PERSONAL_RECORD_KINDS.get(number) if number is not None else None

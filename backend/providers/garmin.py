@@ -153,6 +153,7 @@ def targeted_analysis_sources() -> dict[str, dict[str, tuple[str | None, Any]]]:
                 lambda method, _first, _last: method(latest=True),
             ),
             "race_predictions": ("get_race_predictions", no_dates),
+            "personal_records": ("get_personal_record", no_dates),
             "max_metrics": ("get_max_metrics_range", date_range),
             "cycling_ftp_history": (
                 "get_functional_threshold_power_range",

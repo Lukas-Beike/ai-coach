@@ -125,6 +125,27 @@ class ServerPerformanceTests(ServerTestCase):
                 }
             ],
         )
+        # A later answer with a faster record replaces it; when Garmin withdraws
+        # that record again (its activity deleted), the earlier record is back,
+        # although the withdrawn one keeps its newer day as history.
+        record = {"typeId": 5, "activityType": "running"}
+        for synced_at, seconds, day in (
+            ("2026-08-31T08:00:00+00:00", 5000.0, "2026-08-20"),
+            ("2026-09-01T08:00:00+00:00", 5772.0, "2025-04-12"),
+        ):
+            save_garmin(
+                {
+                    "synced_at": synced_at,
+                    "personal_records": [
+                        {**record, "value": seconds, "prStartTimeLocalFormatted": day}
+                    ],
+                },
+                replace=False,
+            )
+            records = _mapped_performance_context(snapshot, today)["personal_records"]
+            self.assertEqual(
+                [(row["seconds"], row["date"]) for row in records], [(seconds, day)]
+            )
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])

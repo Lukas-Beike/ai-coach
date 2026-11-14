@@ -1804,7 +1804,16 @@ class RacePredictionTests(unittest.TestCase):
                 "personal_records": [
                     {"typeId": 99, "activityType": "running", "value": 300},
                     {"activityType": "running", "value": 300},
+                    {"typeId": 3.5, "activityType": "running", "value": 300},
                     {"typeId": 3, "activityType": "running", "value": 1236},
+                    {
+                        "typeId": 3,
+                        "activityType": "running",
+                        "value": 1236,
+                        "prStartTimeLocalFormatted": "12.04.2025",
+                    },
+                    # Step and goal records carry no activity type: no issue.
+                    {"typeId": 12, "activityType": None, "value": 30_000},
                 ]
             }
         )
@@ -1815,10 +1824,16 @@ class RacePredictionTests(unittest.TestCase):
             [
                 ("personal_records[0]", "typeId", IssueReason.UNKNOWN_VALUE),
                 ("personal_records[1]", "typeId", IssueReason.UNKNOWN_VALUE),
+                ("personal_records[2]", "typeId", IssueReason.UNKNOWN_VALUE),
                 (
-                    "personal_records[2]",
+                    "personal_records[3]",
                     "prStartTimeLocalFormatted",
                     IssueReason.MISSING,
+                ),
+                (
+                    "personal_records[4]",
+                    "prStartTimeLocalFormatted",
+                    IssueReason.INVALID_TYPE,
                 ),
             ],
         )

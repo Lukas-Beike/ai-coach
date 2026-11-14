@@ -1833,9 +1833,10 @@ The module docstring says deeper nesting is not searched; the code searches nest
 #### Personal records (`personal_records`)
 
 One record per running type, read by the `typeId` that garminconnect 0.3.20 documents in `get_personal_record`. Day =
-`prStartTimeLocalFormatted`, else the `prStartTimeLocal` epoch milliseconds; a record without either is MISSING. A record
-whose `activityType` is not running is skipped; running type 2 (mile) and 7 (longest run) are skipped; another running
-type is UNKNOWN_VALUE. Source record id `personal_records:<day>:<kind>`.
+`prStartTimeLocalFormatted`, else the `prStartTimeLocal` epoch milliseconds; a record without either is MISSING, an
+unreadable one INVALID_TYPE. A record without a running `activityType` (another sport, or none for steps and goals) is
+skipped; running type 2 (mile) and 7 (longest run) are skipped; another or non-integer running type is UNKNOWN_VALUE.
+Source record id `personal_records:<day>:<kind>`.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
