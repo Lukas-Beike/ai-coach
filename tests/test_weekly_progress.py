@@ -4,9 +4,9 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import Mock
 
+from server_test_support import server
 from support import GOLDEN_FIRST, golden_history
 
-import server
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
