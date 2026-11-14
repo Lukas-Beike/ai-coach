@@ -221,6 +221,12 @@ class MaintenanceGateTests(unittest.TestCase):
         restoring = threading.Thread(target=restore)
         restoring.start()
         self.assertFalse(restore_body.wait(0.05))
+        with (
+            self.assertRaises(AppError) as blocked,
+            gate.operation(),
+        ):
+            pass
+        self.assertEqual(blocked.exception.status, 503)
         release.set()
         self.assertTrue(restore_body.wait(1))
         worker.join(1)
