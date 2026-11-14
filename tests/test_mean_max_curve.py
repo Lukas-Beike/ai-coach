@@ -707,6 +707,40 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertNotIn("all_time", coach)
         self.assertEqual(_without_all_time(cards), coach)
 
+    def test_a_background_build_keeps_the_last_records_and_pauses_after_a_failure(self):
+        add_session(self.db, "act_1")
+        builds = []
+        reader = SessionCurveReader(self.session_records, spawn=builds.append)
+
+        def broken():
+            raise ValueError("unreadable stream")
+
+        self.assertIsNone(
+            reader.background_records(self.db, ["act_1"], "a", lambda: [{"n": 1}])
+        )
+        builds.pop()()
+        (first,) = reader.background_records(self.db, ["act_1"], "a", list)
+        # Changed inputs build again in the background; the last records show meanwhile.
+        self.assertEqual(
+            (first,), reader.background_records(self.db, ["act_1"], "b", broken)
+        )
+        with self.assertLogs("intervals_coach", "ERROR"):
+            builds.pop()()
+        with self.assertRaises(RuntimeError):
+            reader.background_records(self.db, ["act_1"], "b", broken)
+        self.assertEqual([], builds)
+        later = SimpleNamespace(monotonic=lambda: float("inf"))
+        with patch.object(mean_max_curve, "time", later):
+            reader.background_records(self.db, ["act_1"], "b", broken)
+        self.assertEqual(1, len(builds))
+        # A thread that cannot start leaves no build marked as running.
+        spawn = Mock(side_effect=RuntimeError("can't start new thread"))
+        failing = SessionCurveReader(self.session_records, spawn=spawn)
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                failing.background_records(self.db, ["act_1"], "a", list)
+        self.assertEqual(2, spawn.call_count)
+
     def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
         summaries = []
         for activity_id, peak, assist in (

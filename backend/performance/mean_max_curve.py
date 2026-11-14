@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -53,10 +54,11 @@ from backend.performance.session_execution import (
 )
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
-# About 9 KB per session; room for a long all-time history (#2694).
 _LOGGER = logging.getLogger("intervals_coach")
 # About 9 KB per session; room for a long all-time history (#2694).
 _DEFAULT_CAPACITY: Final = 2048
+# A failed background build is tried again after this pause.
+_RETRY_AFTER_S: Final = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,7 @@ class SessionCurveReader:
         self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._building = False
+        self._failed: tuple[str, float] | None = None
         self._spawn = spawn or _daemon_thread
         self._lock = threading.Lock()
 
@@ -157,41 +160,57 @@ class SessionCurveReader:
         key: object,
         build: Callable[[], Iterable[Mapping[str, Any]]],
     ) -> tuple[Mapping[str, Any], ...] | None:
-        """Return records built off the caller's path; None while they build (#2694).
+        """Return records built off the caller's path (#2694).
 
-        Stamped like ``shared_records``, in a slot of its own. A miss never
-        builds in the caller: it starts ``build`` once in the background (it opens
-        its own reads; the per-session memo makes a rebuild after a new session
-        cheap) and returns None. A build that ends after the inputs changed keeps
-        its result under its own stamp, so the next call starts the next build.
-        A failed build is logged and tried again on the next call.
+        Stamped like ``shared_records``, in a slot of its own. A changed stamp
+        never builds in the caller: it starts ``build`` once in the background
+        (it opens its own reads; the per-session memo keeps a rebuild after a new
+        session cheap) and returns the last finished records meanwhile, None
+        before the first. A failed build is logged; for ``_RETRY_AFTER_S`` the
+        same stamp raises RuntimeError instead of building again.
         """
         stamp = _stamp(db, activity_ids, key)
         with self._lock:
-            if self._background and self._background[0] == stamp:
-                return self._background[1]
-            if self._building:
-                return None
+            ready = self._background
+            if ready and ready[0] == stamp:
+                return ready[1]
+            failed = self._failed
+            if (
+                failed
+                and failed[0] == stamp
+                and time.monotonic() - failed[1] < _RETRY_AFTER_S
+            ):
+                raise RuntimeError("background session curves failed")
+            start = not self._building
             self._building = True
-
-        def run() -> None:
-            built = None
+        if start:
             try:
-                built = tuple(MappingProxyType(record) for record in build())
-            except Exception:
-                _LOGGER.exception(
-                    "Background session curves failed",
-                    extra={"event": "background_session_curves_failed"},
-                )
-            with self._lock:
-                if built is not None:
-                    self._background = (stamp, built)
-                self._building = False
-
-        self._spawn(run)
+                self._spawn(lambda: self._build_in_background(stamp, build))
+            except BaseException:
+                with self._lock:
+                    self._building = False
+                raise
         with self._lock:
             ready = self._background
-        return ready[1] if ready and ready[0] == stamp else None
+        return None if ready is None else ready[1]
+
+    def _build_in_background(
+        self, stamp: str, build: Callable[[], Iterable[Mapping[str, Any]]]
+    ) -> None:
+        built = None
+        try:
+            built = tuple(MappingProxyType(record) for record in build())
+        except Exception:
+            _LOGGER.exception(
+                "Background session curves failed",
+                extra={"event": "background_session_curves_failed"},
+            )
+        with self._lock:
+            if built is None:
+                self._failed = (stamp, time.monotonic())
+            else:
+                self._background, self._failed = (stamp, built), None
+            self._building = False
 
 
 def _daemon_thread(run: Callable[[], None]) -> None:

@@ -727,8 +727,10 @@ async function renderCyclingPowerProfile() {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
     // The server reads the all-time bests in the background; the cards keep loading until then (#2694).
-    if (result?.all_time?.status === "pending") {
-      invalidateAnalysisReport("/api/analysis/power-profiles");
+    const allTime = result?.all_time?.status;
+    if (allTime === "pending" || allTime === "failed") invalidateAnalysisReport("/api/analysis/power-profiles");
+    if (allTime === "failed") throw new Error("Konnte nicht geladen werden.");
+    if (allTime === "pending") {
       setTimeout(() => { if (generation === cyclingPowerProfileGeneration) void renderCyclingPowerProfile(); }, ALL_TIME_RETRY_MS);
       return;
     }
@@ -790,7 +792,8 @@ function renderRunningBestEfforts(result) {
   }
   if (values) {
     const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Lauf-Bestwerte");
-    scroll.append(h("table", "race-predictions-table", body)); root.append(scroll);
+    const head = h("thead", null, h("tr", null, ["Dauer / Strecke", "Bestwert", "Datum"].map((label) => h("th", { scope: "col" }, label))));
+    scroll.append(h("table", "race-predictions-table", head, body)); root.append(scroll);
   } else root.append(h("p", "muted", "Noch keine Lauf-Bestwerte."));
   const criticalSpeed = criticalPowerLine(result, "run", values > 0);
   if (criticalSpeed) root.append(criticalSpeed);
