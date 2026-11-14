@@ -9,7 +9,12 @@ python "$root/scripts/check_push_secrets.py" || exit $?
 tree="$(mktemp -d)" || exit 1
 trap 'rm -rf "$tree"' EXIT
 git -C "$root" archive --format=tar HEAD | tar -xf - -C "$tree" || exit 1
-if ! (cd "$tree" && PACECRAFT_NODE_MODULES="$root/node_modules" python tools/quality_baseline.py); then
-  echo "Push blocked: the quality ratchet found new findings in HEAD (see above). Fix them, or install requirements-dev.txt if a tool is missing." >&2
+(cd "$tree" && PACECRAFT_NODE_MODULES="$root/node_modules" python tools/quality_baseline.py)
+status=$?
+if [ "$status" -eq 2 ]; then
+  echo "Push blocked: the quality ratchet could not run (see above). Install the missing tool: npm ci for ESLint, requirements-dev.txt for Ruff and mypy." >&2
+  exit 1
+elif [ "$status" -ne 0 ]; then
+  echo "Push blocked: the quality ratchet found new findings in HEAD (see above). Fix them." >&2
   exit 1
 fi
