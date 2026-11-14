@@ -1899,6 +1899,13 @@ class MorningReadinessTests(unittest.TestCase):
             78.0,
         )
 
+    def test_a_nested_training_readiness_wrapper_projects_no_readiness(self) -> None:
+        wrapper = {"calendarDate": DAY, "trainingReadinessScore": 78}
+        result = _map({"readiness": {"trainingReadiness": wrapper}})
+        self.assertEqual(
+            [o for o in result.records if o.kind is MetricKind.READINESS], []
+        )
+
     def test_without_a_wake_up_flag_the_earliest_reading_wins(self) -> None:
         late = {key: _AFTERNOON[key] for key in ("calendarDate", "score")}
         late["timestamp"] = "2026-10-10T13:00:00.0"

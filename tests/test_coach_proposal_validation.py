@@ -24,6 +24,18 @@ class CoachProposalValidationTests(unittest.TestCase):
         self.assertEqual(raised.exception.message, expected_message)
         self.assertEqual(values, unchanged)
 
+    def test_a_valid_preview_returns_its_normalized_parts(self):
+        self.assertEqual(
+            validated_coach_action_preview_input(self.undo),
+            (
+                "undo_change",
+                "local",
+                self.undo["object_ids"],
+                self.undo["diff"],
+                self.undo["payload"],
+            ),
+        )
+
     def test_rejects_invalid_top_level_action_and_target_types(self):
         object_error = "Die Aktionsvorschau muss ein Objekt sein."
         self.assert_invalid(None, object_error)

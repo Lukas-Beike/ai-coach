@@ -104,14 +104,33 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
 
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 61)
-        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 57.4)
+        self.assertEqual(
+            result["running_vo2max_ml_kg_min"],
+            {
+                "value": 57.4,
+                "unit": "ml/kg/min",
+                "source": GARMIN_PERFORMANCE_SOURCE,
+                "source_provider": "garmin",
+                "note": "Garmin Connect max metrics",
+                "freshness": "unknown",
+                "fetched_at": None,
+                "observed_at": None,
+                "measurement_status": "unknown",
+                "measurement_age_days": None,
+            },
+        )
         self.assertEqual(result["run_5k_seconds"]["value"], 1310)
         self.assertEqual(result["run_10k_seconds"]["value"], 2740)
         self.assertEqual(result["run_half_marathon_seconds"]["value"], 6150)
         self.assertEqual(result["run_marathon_seconds"]["value"], 2400)
         self.assertEqual(result["run_5k_seconds"]["source"], GARMIN_PERFORMANCE_SOURCE)
+        # The latest generic reading of a range payload is the running value.
+        generic = {"max_metrics": snapshot["max_metrics"][:2]}
         self.assertEqual(
-            result["running_vo2max_ml_kg_min"]["source"], GARMIN_PERFORMANCE_SOURCE
+            garmin_payload_performance_metrics(generic, CURRENT_DATE)[
+                "running_vo2max_ml_kg_min"
+            ]["value"],
+            55,
         )
 
     def test_maxmet_daily_rows_date_each_vo2max_by_its_own_reading(self):
@@ -189,6 +208,10 @@ class GarminPerformanceMetricTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     result["run_threshold_pace_seconds_per_km"]["value"], expected
+                )
+                self.assertEqual(
+                    result["run_threshold_pace_seconds_per_km"]["source"],
+                    GARMIN_PERFORMANCE_SOURCE,
                 )
 
         result = garmin_payload_performance_metrics(
@@ -272,6 +295,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
 
         self.assertEqual(result["weight_kg"]["value"], 72.8)
+        self.assertEqual(result["weight_kg"]["source"], GARMIN_PERFORMANCE_SOURCE)
         self.assertEqual(result["weight_kg"]["freshness"], "partial")
         self.assertEqual(result["weight_kg"]["fetched_at"], "2026-09-07T12:00:00Z")
         self.assertEqual(result["weight_kg"]["measurement_age_days"], 1)

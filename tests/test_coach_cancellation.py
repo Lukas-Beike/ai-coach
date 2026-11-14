@@ -41,6 +41,19 @@ class CoachCancellationServiceTests(unittest.TestCase):
         finally:
             self.streams.unregister("session", operation_id)
 
+    def test_cancel_also_closes_a_response_kept_under_the_legacy_attribute(self):
+        self.submissions.active.return_value = None
+        operation_id, event = self.streams.register("session")
+        response = Mock()
+        event._openai_response = response
+        try:
+            result = self.service.cancel("session", operation_id)
+            self.assertEqual(result["status"], "cancelling")
+            response.close.assert_called_once_with()
+            self.assertTrue(event.is_set())
+        finally:
+            self.streams.unregister("session", operation_id)
+
     def test_attached_cancel_persists_cancel_on_the_matching_durable_job_only(self):
         operation_id, event = self.streams.register("session")
         durable = {

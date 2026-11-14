@@ -76,6 +76,16 @@ class IntervalsApiClientTests(unittest.TestCase):
         self.assertEqual(rows, [{"id": 1}, {"id": 2}, {"id": 3}])
         self.assertEqual(request.call_count, 2)
 
+    def test_a_full_default_page_asks_for_the_next_offset(self):
+        full_page = [{"id": index} for index in range(500)]
+        request = Mock(side_effect=[full_page, [{"id": 500}]])
+        client = IntervalsApiClient(api_key="key", request=request)
+
+        rows = client.get_paged_collection("/items", {}, "items")
+
+        self.assertEqual(len(rows), 501)
+        self.assertIn("limit=500&offset=500", request.call_args_list[1].args[1])
+
     def test_pagination_errors_are_app_errors(self):
         for response, message in (
             ({"not": "a list"}, "Invalid items page"),

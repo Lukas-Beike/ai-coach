@@ -151,7 +151,8 @@ class MorningRecordTests(unittest.TestCase):
         record = morning_body_battery_record(
             CHECKIN_DATE,
             sleep,
-            [{"bodyBatteryValuesArray": readings}],
+            # A daily "charged" total is no reading: the timestamped levels decide.
+            [{"charged": 100, "bodyBatteryValuesArray": readings}],
             attempted_at="2026-09-04T05:45:00Z",
         )
         self.assertEqual(record["status"], "ready")

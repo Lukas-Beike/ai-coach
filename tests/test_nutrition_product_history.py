@@ -242,6 +242,42 @@ class NutritionProductHistoryTests(unittest.TestCase):
         )
         self.assertEqual(entry["filled_fields"], {})
 
+    def test_undo_of_a_gap_fill_names_its_products_and_keeps_an_earlier_fill(
+        self,
+    ) -> None:
+        own = self.catalog.save_product({**PRODUCT, "name": "Synthetic skyr"})
+        food: dict[str, Any] = {
+            "id": "off:4006381333931",
+            "name": "Synthetic bar",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 500},
+        }
+        self.mirror.refresh([food])
+        self.catalog.fill_product_gaps(
+            [{"id": food["id"], "values": {"fat_g": 30}, "origin": "manual"}]
+        )
+        result, changes = self.collected(
+            lambda: self.catalog.fill_product_gaps(
+                [
+                    {"id": own["id"], "values": {"salt_g": 0.2}, "origin": "manual"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "manual"},
+                ]
+            )
+        )
+        self.assertEqual(
+            [(item["name"], item["written"][0]["field"]) for item in result["changes"]],
+            [("Synthetic skyr", "salt_g"), ("Synthetic bar", "salt_g")],
+        )
+
+        self.undo(changes)
+
+        self.assertIsNone(self.catalog.get_product(own["id"])["salt_g"])
+        restored = self.stored_food(food["id"])
+        self.assertNotIn("salt_g", restored["per_100"])
+        self.assertEqual(restored["per_100"]["fat_g"], 30)
+        self.assertEqual(restored["filled_fields"]["fat_g"]["origin"], "manual")
+
     def test_undo_of_a_gap_fill_is_refused_after_the_food_changed(self) -> None:
         food: dict[str, Any] = {
             "id": "yazio:0a1b2c3d-0000-4000-8000-000000000001",

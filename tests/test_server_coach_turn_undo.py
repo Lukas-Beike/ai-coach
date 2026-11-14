@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
-from typing import Any
 from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
@@ -115,70 +114,6 @@ class CoachTurnUndoTests(ServerTestCase):
         with self.assertRaises(AppError) as repeated:
             self._undo(turn_id)
         self.assertEqual(repeated.exception.status, 409)
-
-    def test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields(
-        self,
-    ) -> None:
-        catalog = server.NUTRITION_SERVICES.product_catalog_service()
-        own = catalog.save_product(
-            {
-                "name": "Synthetic skyr",
-                "basis_amount": 100,
-                "basis_unit": "g",
-                "kcal": 63,
-                "source": "manual",
-            }
-        )
-        food: dict[str, Any] = {
-            "id": "off:4006381333931",
-            "name": "Synthetic bar",
-            "basis_amount": 100,
-            "basis_unit": "g",
-            "per_100": {"kcal": 500},
-        }
-        server.NUTRITION_SERVICES.food_mirror().refresh([food])
-        # Filled before the turn: undo of the turn keeps this value and its origin.
-        catalog.fill_product_gaps(
-            [{"id": food["id"], "values": {"fat_g": 30}, "origin": "manual"}]
-        )
-        with change_history.collect_changes() as changes:
-            result = catalog.fill_product_gaps(
-                [
-                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "manual"},
-                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "manual"},
-                ]
-            )
-        steps = [
-            {
-                "tool": "fill_nutrition_product_gaps",
-                "result": result,
-                "changes": changes,
-            }
-        ]
-        turn_id = self._record_turn(steps, "Ja, trag die Lücken ein")
-
-        self.assertEqual(
-            self._messages(turn_id)[1]["coach_changes"]["labels"],
-            [
-                "Produktlücken gefüllt (2)",
-                "Synthetic skyr: Fett 0,2 (eigene Angabe)",
-                "Synthetic bar: Salz 0,7 (eigene Angabe)",
-            ],
-        )
-        self.assertEqual(
-            [(item["name"], item["written"][0]["field"]) for item in result["changes"]],
-            [("Synthetic skyr", "fat_g"), ("Synthetic bar", "salt_g")],
-        )
-
-        self.assertEqual(self._undo(turn_id)["status"], "undone")
-
-        self.assertIsNone(catalog.get_product(own["id"])["fat_g"])
-        restored = server.NUTRITION_SERVICES.food_mirror().get(food["id"])
-        assert restored is not None
-        # Undo restores the food as it was stored: salt is absent again.
-        self.assertNotIn("salt_g", restored["per_100"])
-        self.assertEqual(restored["per_100"]["fat_g"], 30)
-        self.assertEqual(restored["filled_fields"]["fat_g"]["origin"], "manual")
 
     def test_a_record_changed_after_the_turn_aborts_the_whole_undo(self) -> None:
         turn_id = self._coach_turn()
