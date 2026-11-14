@@ -43,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
+      # 'true' only on a pull request that changes documentation alone (#2747).
+      docs_only: ${{ steps.changes.outputs.docs_only }}
     steps:
       - name: Check out workflow source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +62,13 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true) && inputs.release_tag || '' }}
           EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
         run: python .github/scripts/release_source.py
+      # Push, release and dispatch runs never classify, so they run every suite.
+      - name: Classify changed files
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: python .github/scripts/ci_changes.py
 
   image:
     needs: source
@@ -105,21 +114,37 @@ jobs:
     env:
       # Fail on a missing AGENTS.md instead of silently skipping the AI docs contract.
       AI_DOCS_REQUIRED: '1'
+      DOCS_ONLY: ${{ needs.source.outputs.docs_only }}
+    # The steps, not the job, skip on a docs-only pull request: a skipped
+    # matrix job would not report the required "Test shard N/4" names.
     steps:
       - name: Check out repository
+        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+          # The base parent of the merge commit, for the changed-test selection.
+          fetch-depth: 2
       - name: Set up Python
+        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - name: Install dependencies
+        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Run unit tests
+        if: env.DOCS_ONLY != 'true'
         run: coverage run tests/run_tests.py --shard "${{ matrix.shard }}" --total "$PYTHON_TEST_SHARDS"
+      - name: Run the tests the documentation change affects
+        if: env.DOCS_ONLY == 'true' && matrix.shard == 1
+        run: python tests/run_tests.py --changed --base HEAD^1
+      - name: Report the docs-only skip
+        if: env.DOCS_ONLY == 'true' && matrix.shard != 1
+        run: 'echo "docs-only: suites skipped; shard 1 runs the changed-test selection."'
       - name: Upload shard coverage
+        if: env.DOCS_ONLY != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-coverage-${{ matrix.shard }}
@@ -146,6 +171,7 @@ jobs:
 
   container_tests:
     needs: [source, image]
+    if: needs.source.outputs.docs_only != 'true'
     name: Container unit tests
     runs-on: ubuntu-latest
     steps:
@@ -187,11 +213,12 @@ jobs:
 
   test:
     if: always()
-    needs: [test_shards, syntax, container_tests, image_sbom]
+    needs: [source, test_shards, syntax, container_tests, image_sbom]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate test and syntax results
         env:
+          DOCS_ONLY: ${{ needs.source.outputs.docs_only }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
           SYNTAX_RESULT: ${{ needs.syntax.result }}
           CONTAINER_TESTS_RESULT: ${{ needs.container_tests.result }}
@@ -199,16 +226,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$TEST_SHARDS_RESULT" != "success" || "$SYNTAX_RESULT" != "success" || "$CONTAINER_TESTS_RESULT" != "success" || "$IMAGE_SBOM_RESULT" != "success" ]]; then
-            echo "Test shards: $TEST_SHARDS_RESULT; syntax: $SYNTAX_RESULT; container tests: $CONTAINER_TESTS_RESULT; image SBOM: $IMAGE_SBOM_RESULT"
+          # Only a docs-only pull request may skip the container tests.
+          container_expected=success
+          if [[ "$DOCS_ONLY" == "true" ]]; then
+            container_expected=skipped
+          fi
+          if [[ "$TEST_SHARDS_RESULT" != "success" || "$SYNTAX_RESULT" != "success" || "$CONTAINER_TESTS_RESULT" != "$container_expected" || "$IMAGE_SBOM_RESULT" != "success" ]]; then
+            echo "Test shards: $TEST_SHARDS_RESULT; syntax: $SYNTAX_RESULT; container tests: $CONTAINER_TESTS_RESULT (expected $container_expected); image SBOM: $IMAGE_SBOM_RESULT"
             exit 1
           fi
-          echo "All native shards, syntax checks, and container tests passed."
+          if [[ "$DOCS_ONLY" == "true" ]]; then
+            echo "docs-only: suites skipped; the affected tests, syntax checks and image SBOM passed."
+          else
+            echo "All native shards, syntax checks, and container tests passed."
+          fi
 
   quality:
     name: Incremental quality checks
     needs: [source, test]
-    if: needs.test.result == 'success'
+    if: needs.test.result == 'success' && needs.source.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -300,6 +336,7 @@ jobs:
   e2e:
     # Browser checks start with the current-source image, beside the native suite.
     needs: [source, image]
+    if: needs.source.outputs.docs_only != 'true'
     name: Browser checks (${{ matrix.project }}${{ matrix.shards > 1 && format(' {0}/{1}', matrix.shard, matrix.shards) || '' }})
     runs-on: ubuntu-latest
     strategy:
@@ -383,20 +420,25 @@ jobs:
 
   browser:
     if: always()
-    needs: e2e
+    needs: [source, e2e]
     name: Browser checks
     runs-on: ubuntu-latest
+    env:
+      DOCS_ONLY: ${{ needs.source.outputs.docs_only }}
     steps:
       - name: Check out repository
+        if: env.DOCS_ONLY != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
       - name: Set up Python
+        if: env.DOCS_ONLY != 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - name: Download browser evidence
+        if: env.DOCS_ONLY != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           # All attempts: a partial rerun keeps earlier passing shards; the
@@ -409,6 +451,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$DOCS_ONLY" == "true" && "$E2E_RESULT" == "skipped" ]]; then
+            echo "docs-only: suites skipped; no browser project ran."
+            exit 0
+          fi
           if [[ "$E2E_RESULT" != "success" ]]; then
             echo "Browser checks: $E2E_RESULT"
             exit 1

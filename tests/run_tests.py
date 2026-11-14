@@ -12,7 +12,7 @@ full run, for example inside the image used by run_sqlcipher_tests.ps1.
 CONTAINER_SUITE_PATTERNS. The default ``--suite all`` runs everything.
 ``--changed`` keeps only the modules changed_tests.py finds affected by the
 diff against ``--base``; it falls back to the whole suite where that selector
-says so, and CI never uses it. ``--module`` (repeatable) runs only the named
+says so; CI uses it only on a documentation-only pull request. ``--module`` (repeatable) runs only the named
 test modules, for focused runs in the SQLCipher container.
 """
 
