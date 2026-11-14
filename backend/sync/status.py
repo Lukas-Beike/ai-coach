@@ -107,22 +107,30 @@ def project_sync_status(
     provider_freshness: list[dict[str, Any]],
     maintenance: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Build the public sync-status DTO from explicitly supplied state."""
-    status = get_value("sync_operation_status") or ("running" if running else "idle")
+    """Build the public sync-status DTO from explicitly supplied state.
+
+    The operation fields describe the Garmin data operation. While another
+    provider runs and that operation is not running, they report a running
+    sync without the finished operation's message or id (#2706).
+    """
+    stored = get_value("sync_operation_status")
+    other = running and stored not in (None, "", "running")
+    operation = (lambda _key: None) if other else get_value
+    status = operation("sync_operation_status") or ("running" if running else "idle")
     try:
-        progress = max(0, min(int(get_value("sync_operation_progress") or 0), 100))
+        progress = max(0, min(int(operation("sync_operation_progress") or 0), 100))
     except TypeError, ValueError:
         progress = 0
     return {
         "status": status,
-        "phase": get_value("sync_operation_phase")
+        "phase": operation("sync_operation_phase")
         or ("running" if running else "idle"),
         "progress": progress,
-        "operation_id": get_value("sync_operation_id"),
+        "operation_id": operation("sync_operation_id"),
         "running": running,
-        "message": get_value("sync_operation_message") or None,
-        "started_at": get_value("sync_operation_started_at"),
-        "finished_at": get_value("sync_operation_finished_at"),
+        "message": operation("sync_operation_message") or None,
+        "started_at": operation("sync_operation_started_at"),
+        "finished_at": operation("sync_operation_finished_at"),
         "last_error": get_value("last_sync_error") or None,
         "state_versions": dict(state_versions),
         "provider_freshness": provider_freshness,

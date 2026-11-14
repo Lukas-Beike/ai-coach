@@ -729,7 +729,18 @@ class SyncStateReaderTests(OrchestrationCase):
         running[0] = False
         idle_state = service.state(freshness=[], jobs=[])
 
-        self.assertEqual({key: state[key] for key in expected}, expected)
+        # While Wahoo runs, the finished Garmin operation is not shown as the
+        # running one (#2706); the general error stays.
+        self.assertEqual(
+            {
+                **dict.fromkeys(expected),
+                "status": "running",
+                "phase": "running",
+                "progress": 0,
+                "last_error": "fake-last-sync-error",
+            },
+            {key: state[key] for key in expected},
+        )
         self.assertNotIn(UNREAD_VALUE, json.dumps(state, default=str))
         self.assertTrue(state["running"], "only a probe sets running")
         self.assertEqual({key: idle_state[key] for key in expected}, expected)

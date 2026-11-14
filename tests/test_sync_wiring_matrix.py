@@ -537,7 +537,7 @@ class ConfiguredForJobTests(unittest.TestCase):
 
 
 class RunningProbeWiringTests(unittest.TestCase):
-    def test_the_composition_root_gives_the_public_state_the_wahoo_probe(self) -> None:
+    def test_the_composition_root_gives_the_public_state_both_probes(self) -> None:
         root = Path(__file__).resolve().parents[1] / "server.py"
         tree = ast.parse(root.read_text(encoding="utf-8"))
         probes = [
@@ -550,7 +550,11 @@ class RunningProbeWiringTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(probes))
         probe = cast(ast.Dict, probes[0])
-        self.assertEqual(["WAHOO_ID"], [ast.unparse(key) for key in probe.keys if key])
+        self.assertEqual(
+            ["GARMIN_ID", "WAHOO_ID"], [ast.unparse(key) for key in probe.keys if key]
+        )
+        # A Garmin run sets running, like the operation fields it writes (#2706).
+        self.assertIn("GARMIN_ASSEMBLY.sync_service().running()", ast.unparse(probe))
         self.assertIn("WAHOO_SYNC.sync_service().running()", ast.unparse(probe))
 
 

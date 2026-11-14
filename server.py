@@ -821,7 +821,10 @@ PUBLIC_STATE = build_public_state(
     key_value_service=key_value_service,
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
     provider_resync=lambda: PROVIDER_RESYNC,
-    running_probes={WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running()},
+    running_probes={
+        GARMIN_ID: lambda: GARMIN_ASSEMBLY.sync_service().running(),
+        WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running(),
+    },
     sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
     all_sync_days=ALL_SYNC_DAYS,
     external_calendar_window_days=lambda: (
