@@ -82,7 +82,7 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
-from backend.nutrition.macro_context import macro_context
+from backend.nutrition.macro_context import body_weight, macro_context
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
@@ -95,6 +95,7 @@ from backend.performance.source_policy import (
 )
 from backend.planning import season as planning_season
 from backend.planning.compact_activities import ActivitySummarySource
+from backend.planning.race_plan import read_race_plan
 from backend.planning.race_results import with_race_results
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -465,6 +466,13 @@ def _read_routes(
                 activity_read().summaries_on_days,
             ),
             first_threshold_service=athlete.first_threshold,
+            race_plan=partial(
+                read_race_plan,
+                ctx.planning.competition,
+                partial(
+                    body_weight, public.performance_state_service, athlete.profile
+                ),
+            ),
         ),
         DiagnosticsGetRoutes(
             ctx.diagnostics.recent_log_entries_service,

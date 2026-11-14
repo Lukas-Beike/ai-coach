@@ -168,11 +168,15 @@ The system SHALL present the planning segment as `Wettkämpfe`, with individuall
 Evidence: `public/plan-views.js:renderCompetitions`, `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionDistance`, `public/plan-views.js:competitionDate`; `tests/competition-overview.test.cjs` (distance and invalid-date tests); `e2e/competitions.spec.js` (summaries, ordering, past-only lists).
 
 ### Requirement: CS10 Saved event details and historical archive
-The system SHALL reveal saved optional event details only on expansion, omit empty optional fields, and group past events in an initially collapsed archive ordered newest first. Expansion SHALL remain keyboard accessible and render untrusted event text safely.
+The system SHALL reveal saved optional event details only on expansion, omit empty optional fields, and group past events in an initially collapsed archive ordered newest first. Expansion SHALL remain keyboard accessible and render untrusted event text safely. Expanding an upcoming event SHALL also read and show its race plan, with loading and retry states; past and undated events show none.
 
 #### Scenario: Expand an event
 - **WHEN** the athlete expands a competition
 - **THEN** its saved start time, target, expected duration, course profile, description and notes are shown where present, and other entries retain their expansion state.
+
+#### Scenario: Race plan of an upcoming event
+- **WHEN** the athlete expands an upcoming competition
+- **THEN** a "Rennplan" block shows the pacing table and the carbohydrates with their rule and source badges, read again on every opening and kept nowhere on the device; a meal window before midnight names the day before; a failed read offers "Erneut laden" without hiding the saved facts.
 
 #### Scenario: Historical and empty lists
 - **WHEN** only past competitions exist or no competitions exist
@@ -182,14 +186,14 @@ The system SHALL reveal saved optional event details only on expansion, omit emp
 - **WHEN** event text contains markup or provider-supplied instructions
 - **THEN** it is displayed as safe content and never executed or treated as authorization.
 
-Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`; `e2e/competitions.spec.js` (saved details, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
+Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`, `public/plan-views.js:loadRacePlan`; `tests/competition-overview.test.cjs` (race plan pacing and carbohydrates); `e2e/competitions.spec.js` (saved details, race plan, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
 
 ### Requirement: CS11 Overview excludes training analysis
 The competition overview SHALL exclude date-derived training phases, weekly training volume/history, preparation evidence and long-session analysis. Reading the overview SHALL remain usable without activity analyses.
 
 #### Scenario: Athlete checks competition dates
 - **WHEN** the competition overview is loaded or an event is expanded
-- **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, or phase labels.
+- **THEN** only competition facts, the race plan of an expanded upcoming event and existing event-workflow access are presented, without weekly charts, evidence tables, or phase labels.
 
 Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile and desktop); `e2e/training-feature-panels.spec.js`.
 

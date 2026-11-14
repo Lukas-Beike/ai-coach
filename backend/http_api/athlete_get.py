@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import unquote
 
 from backend.athlete.profile import ProfileService
 from backend.coach.context import CoachContextPreviewService
+from backend.errors import AppError
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
@@ -17,6 +19,7 @@ from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
 ZONES_PATH = "/api/zones"
+RACE_PLAN_PATH = "/api/competitions/{id}/race-plan"
 _LOGGER = logging.getLogger("intervals_coach")
 
 
@@ -35,8 +38,10 @@ class AthleteGetRoutes:
         race_results: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
         | None = None,
         first_threshold_service: Callable[[], Any] | None = None,
+        race_plan: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> None:
         self._first_threshold_service = first_threshold_service
+        self._race_plan = race_plan
         self._race_results = race_results
         self._public_performance_state_service = public_performance_state_service
         self._profile_service = profile_service
@@ -79,6 +84,10 @@ class AthleteGetRoutes:
         ]
         if self._zone_service is not None:
             routes.append(Route("GET", ZONES_PATH, Access.SESSION, self._zones))
+        if self._race_plan is not None:
+            routes.append(
+                Route("GET", RACE_PLAN_PATH, Access.SESSION, self._race_plan_read)
+            )
         return routes
 
     def _performance(self, handler: Any, _request: RouteRequest) -> None:
@@ -169,3 +178,30 @@ class AthleteGetRoutes:
         Errors: none beyond the common ones.
         """
         handler.send_json(200, self._coach_context_preview_service().preview())
+
+    def _race_plan_read(self, handler: Any, request: RouteRequest) -> None:
+        """Race plan of one stored competition, computed from local data.
+
+        Request: path `id`, the competition id; no body.
+
+        Response: 200 with `ok` and `race_plan`: `competition_id`,
+        `method_version`, `duration` (`seconds`, `source` `target` or
+        `planned_duration`; null when unknown), `pacing` (`status` `ready` with
+        `method` `equal_effort` or `power_variation`, `sections_from`,
+        `profile_rejected`, `sections` and for cycling `target_w`, or
+        `unavailable` with `reason` `sport`, `distance` or `duration`) and
+        `carbohydrates` (`source`, `during`, `before`, `weight`). It changes no
+        state and calls no provider.
+
+        Errors: 404 `competition_not_found` "Dieser Wettkampf ist lokal nicht
+        vorhanden." when the id is unknown.
+        """
+        assert self._race_plan is not None
+        plan = self._race_plan(unquote(request.params["id"]))
+        if plan is None:
+            raise AppError(
+                404,
+                "Dieser Wettkampf ist lokal nicht vorhanden.",
+                reason="competition_not_found",
+            )
+        handler.send_json(200, {"ok": True, "race_plan": plan})

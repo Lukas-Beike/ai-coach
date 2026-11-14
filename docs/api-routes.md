@@ -52,6 +52,7 @@ handler's docstring. Regenerate it with
 | POST | `/api/coach/actions/cancel` | Session + CSRF | after access | Cancel a Coach proposal. |
 | POST | `/api/coach/actions/confirm` | Session + CSRF | after access | Confirm a Coach proposal. |
 | POST | `/api/coach/actions/execute` | Session + CSRF | after access | Execute a confirmed Coach proposal. |
+| GET | `/api/competitions/{id}/race-plan` | Session | no | Race plan of one stored competition, computed from local data. |
 | GET | `/api/context-preview` | Session | no | Preview of the context the Coach receives. |
 | GET | `/api/diagnostics` | Session | no | Diagnostic report. |
 | POST | `/api/diagnostics/delete` | Session + CSRF | after access | Clear the stored diagnostics. |
@@ -485,6 +486,22 @@ Coach-Auftrag ist nicht mehr gültig.", "Der freigegebene Coach-Auftrag
 gehört nicht mehr zu dieser Sitzung." or "Der ursprüngliche Nutzerauftrag
 ist nicht mehr verfügbar."; 503 "Die Coach-Aktionsausführung ist nicht
 verfügbar.". Validation errors of the underlying write are passed through.
+
+### `GET /api/competitions/{id}/race-plan`
+
+Request: path `id`, the competition id; no body.
+
+Response: 200 with `ok` and `race_plan`: `competition_id`,
+`method_version`, `duration` (`seconds`, `source` `target` or
+`planned_duration`; null when unknown), `pacing` (`status` `ready` with
+`method` `equal_effort` or `power_variation`, `sections_from`,
+`profile_rejected`, `sections` and for cycling `target_w`, or
+`unavailable` with `reason` `sport`, `distance` or `duration`) and
+`carbohydrates` (`source`, `during`, `before`, `weight`). It changes no
+state and calls no provider.
+
+Errors: 404 `competition_not_found` "Dieser Wettkampf ist lokal nicht
+vorhanden." when the id is unknown.
 
 ### `GET /api/context-preview`
 

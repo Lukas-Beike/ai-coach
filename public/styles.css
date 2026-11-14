@@ -1135,6 +1135,16 @@ h2 {
 .competition-card-facts span { color: var(--subtle); font-size: .72rem; }
 .competition-card-facts strong { color: var(--muted); font-size: .78rem; font-weight: 500; overflow-wrap: anywhere; }
 .competition-sync-state { display: block; margin-top: 12px; color: var(--subtle); line-height: 1.4; }
+.race-plan { display: grid; gap: 8px; min-width: 0; margin-top: 16px; color: var(--muted); font-size: .8rem; }
+.race-plan h4 { margin: 0; color: var(--ink); font-size: .85rem; }
+.race-plan h5 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--muted); font-size: .78rem; font-weight: 600; }
+.race-plan-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.race-plan-table th { padding: 4px 0; color: var(--subtle); font-weight: 500; text-align: left; }
+.race-plan-table td { padding: 6px 0; border-top: 1px solid var(--line); color: var(--ink); }
+.race-plan-table :is(th, td):not(:first-child) { text-align: right; }
+.race-plan-rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.race-plan-rows strong { color: var(--ink); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.race-plan-gap { margin: 0; }
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
 
 @media (max-width: 479px) {
