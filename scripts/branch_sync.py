@@ -3,8 +3,8 @@
     python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <file>]
 
 Refuses on develop, main, a detached HEAD and a dirty working tree. Fetches
-origin (retrying a ref lock held by a parallel worktree), rebases, checks every commit subject against the Conventional Commit
-types, and with --push pushes with --force-with-lease through the repository
+origin (retrying a lock held by a parallel worktree), rebases, checks every
+commit subject against the Conventional Commit types, and with --push pushes with --force-with-lease through the repository
 hooks (never --no-verify). The hooks need the SonarQube CLI on PATH. A push
 that adds a file at the repository root is refused unless --allow-root names it.
 
@@ -29,6 +29,11 @@ from gh_cli import CliError, git
 PROTECTED = {"develop", "main"}
 TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 SUBJECT = re.compile(rf"^(?:{TYPES})(?:\([a-z0-9][a-z0-9-]*\))?!?: \S")
+FETCH_ATTEMPTS = 3
+TRANSIENT_FETCH = re.compile(
+    r"cannot lock ref '[^']+': is at \w+ but expected|\.lock': File exists"
+    r"|Operation too slow|timed out"
+)
 
 
 def sonar_dirs(env: Mapping[str, str], home: Path) -> list[Path]:
@@ -52,23 +57,30 @@ def push_env(env: Mapping[str, str], home: Path) -> dict[str, str]:
     )
 
 
-FETCH_ATTEMPTS = 3
-
-
 def fetch() -> None:
-    """Fetch origin; retry while a parallel worktree holds a ref lock (#2828).
+    """Fetch origin; retry while a parallel worktree holds a lock (#2828).
 
-    A persistent failure raises, so the rebase never runs on a stale target.
+    Worktrees share one .git: a ref moved under a parallel fetch, a packed-refs
+    lock file, or a stalled transfer (aborted below 1 KB/s for 60 s) is retried.
+    A ref name conflict and every other failure raise at once, so the rebase
+    never runs on a stale target.
     """
+    env = {
+        **os.environ,
+        "LC_ALL": "C",  # English messages for the checks below
+        "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+        "GIT_HTTP_LOW_SPEED_TIME": "60",
+    }
     for attempt in range(1, FETCH_ATTEMPTS + 1):
         try:
-            git("fetch", "origin")
+            git("fetch", "origin", env=env)
             return
         except CliError as exc:
-            if "cannot lock ref" not in str(exc) or attempt == FETCH_ATTEMPTS:
+            if not TRANSIENT_FETCH.search(str(exc)) or attempt == FETCH_ATTEMPTS:
                 raise
             print(
-                f"fetch hit a ref lock (attempt {attempt}); retrying", file=sys.stderr
+                f"fetch hit a lock or stall (attempt {attempt}); retrying",
+                file=sys.stderr,
             )
             time.sleep(attempt)
 

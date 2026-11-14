@@ -11,7 +11,9 @@ python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <fi
 
 - Refuses on `develop`, `main`, a detached HEAD and uncommitted tracked changes.
   Fetches `origin`, rebases, then lists commit subjects that do not match
-  `<type>(<scope>): <description>`.
+  `<type>(<scope>): <description>`. A fetch blocked by a parallel worktree's
+  lock or a stalled transfer is retried up to 3 times ("retrying" on stderr);
+  if it persists, the script exits 2 naming the ref, before any rebase.
 - Exit 0: in sync (and pushed with `--push`); prints the new HEAD and the
   ahead/behind counts. Exit 1: refused, a rebase conflict (left in progress:
   resolve it and `git rebase --continue`, or `git rebase --abort`) or invalid

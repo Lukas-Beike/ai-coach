@@ -96,35 +96,44 @@ class BranchSyncTests(unittest.TestCase):
         self.assertEqual(git(self.work, "log", "-1", "--format=%s"), "feat(ui): add c")
 
     def test_fetch_retries_a_ref_lock_and_fails_loudly_when_it_stays(self):
-        # #2828: a parallel worktree's fetch holds refs/remotes/origin/develop.
-        lock = CliError(
-            "git fetch origin failed: error: cannot lock ref "
-            "'refs/remotes/origin/develop': is at 1111 but expected 2222"
+        # #2828: a parallel worktree's fetch holds a lock in the shared .git.
+        moved = (
+            "error: cannot lock ref 'refs/remotes/origin/develop': "
+            "is at 1111 but expected 2222"
+        )
+        packed = "fatal: Unable to create '/r/.git/packed-refs.lock': File exists."
+        clash = (
+            "error: cannot lock ref 'refs/remotes/origin/foo': "
+            "'refs/remotes/origin/foo/bar' exists"
         )
         real = branch_sync.git
         self.advance_develop()
-        for failures, expect in ((3, 2), (1, 0)):  # the stale case first
+        # (message, failing fetches, exit, sleeps); the stale cases run first.
+        for message, failures, expect, sleeps in (
+            (moved, 3, 2, 2),  # stays locked: fail loudly, ref named
+            (clash, 1, 2, 0),  # a name conflict is permanent: no retry
+            (packed, 1, 0, 1),  # retried once, then rebased
+        ):
             left = [failures]
 
-            def flaky(*args, left=left, **kwargs):
+            def flaky(*args, left=left, message=message, **kwargs):
                 if args[:1] == ("fetch",) and left[0]:
                     left[0] -= 1
-                    raise lock
+                    raise CliError(f"git fetch origin failed: {message}")
                 return real(*args, **kwargs)
 
             with (
-                self.subTest(failures=failures),
+                self.subTest(message=message),
                 mock.patch.object(branch_sync, "git", flaky),
                 mock.patch.object(branch_sync.time, "sleep") as sleep,
             ):
                 code, _, err = self.sync()
-                self.assertEqual(code, expect)
-                self.assertEqual(sleep.call_count, failures - (expect == 2))
-                if expect:  # the rebase never ran on the stale target
-                    self.assertIn("refs/remotes/origin/develop", err)
-                    self.assertFalse((self.work / "b.txt").exists())
-                else:
-                    self.assertTrue((self.work / "b.txt").exists())
+                self.assertEqual((code, sleep.call_count), (expect, sleeps))
+                self.assertEqual(err.count("retrying"), sleeps)
+                rebased = (self.work / "b.txt").exists()
+                self.assertEqual(rebased, expect == 0)  # never on a stale target
+                if expect:
+                    self.assertIn(message.split("'")[1], err)
 
     def test_conflict_stays_in_progress_and_lists_files(self):
         commit(self.work, "a.txt", "mine\n", "fix: mine")
