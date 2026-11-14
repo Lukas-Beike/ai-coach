@@ -533,6 +533,42 @@ class ReprojectionTests(BackfillFixture):
 
         self.assertEqual(self.canonical_snapshot(), live)
 
+    def test_a_day_of_readiness_snapshots_keeps_the_wake_up_reading(self) -> None:
+        # #2844: Garmin returns several readiness snapshots a day; the stored value
+        # is the wake-up reading in the live ingest and in the re-projection.
+        day = "2026-10-03"
+        afternoon = {"calendarDate": day, "timestamp": f"{day}T14:00:00", "score": 40}
+        wake_up = {
+            "calendarDate": day,
+            "timestamp": f"{day}T06:10:00",
+            "inputContext": "AFTER_WAKEUP_RESET",
+            "score": 64,
+        }
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                readiness=[afternoon, wake_up],
+                training_readiness_history=[afternoon, wake_up],
+            ),
+        )
+        query = (
+            "SELECT value, owner_record_id FROM observations "
+            "WHERE metric = 'readiness' AND state = 'active'"
+        )
+        self.assertEqual(
+            self.rows(query),
+            [{"value": 64.0, "owner_record_id": f"readiness/{day}#1"}],
+        )
+        live = self.canonical_snapshot()
+
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(self.make_backfill())
+
+        self.assertEqual(self.canonical_snapshot(), live)
+
     def garmin_activity_rows(self) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT details, load, mapper_version FROM activity_records "
