@@ -20,8 +20,9 @@ It checks health, logs in with the password read from the file, reads
 `/api/diagnostics`, and logs out with the CSRF token. One line per check:
 version and schema against the expected values, whether `sync.last_error` is
 set (never its text), provider and calendar refresh ages, stuck plan-sync
-jobs, unsynced plan units with error kinds (never error text), record counts,
-and process memory. With `--compare`, a lower record count is a `FAIL`: an
+jobs, unsynced plan units with error kinds (never error text), the recent plan
+pushes per provider (job and item status counts and error kinds), record
+counts, process memory and storage. With `--compare`, a lower record count is a `FAIL`: an
 unexplained drop stops the check. `external_calendar_events` is only `info`:
 the calendar sync refills it from today on every refresh.
 

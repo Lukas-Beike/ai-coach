@@ -41,6 +41,7 @@ STORAGE = ("file_bytes", "wal_bytes", "data_dir_free_bytes")
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
+WORD = re.compile(r"[a-z][a-z_]{0,31}")
 # What `--section` prints of a section: dotted paths of numbers and flags, and
 # state words from STATES; nothing else of the section is printed (#2779, #2781).
 SECTION_FIELDS = {
@@ -123,6 +124,35 @@ def plan_errors(jobs: list[dict[str, Any]]) -> dict[str, int]:
     return kinds
 
 
+def plan_pushes(jobs: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per provider: job and item status counts and error kinds (#2849).
+
+    Providers and statuses are printed only as short lower-case words; any
+    other value is counted as `other`, so no free text reaches the output.
+    """
+    result: dict[str, dict[str, int]] = {}
+
+    def word(value: Any) -> str:
+        text = str(value or "")
+        return text if WORD.fullmatch(text) else "other"
+
+    for job in jobs:
+        counts = result.setdefault(word(job.get("provider")), {})
+        for kind, item in [
+            ("job", job),
+            *(("item", i) for i in job.get("items") or []),
+        ]:
+            for key in (f"{kind} {word(item.get('status'))}", error_key(item)):
+                if key:
+                    counts[key] = counts.get(key, 0) + 1
+    return result
+
+
+def error_key(item: dict[str, Any]) -> str:
+    kind = str(item.get("error_class") or "")[:64]
+    return f"error {kind}" if kind else ""
+
+
 def stuck_jobs(jobs: list[dict[str, Any]], now: datetime) -> int:
     return sum(
         1
@@ -165,6 +195,7 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
             1 for unit in plan.get("unsynced_units") or [] if unit.get("has_error")
         ),
         "plan_error_classes": plan_errors(jobs),
+        "plan_pushes": plan_pushes(jobs),
         "stuck_jobs": stuck_jobs(jobs, now),
         "memory": {key: memory[key] for key in MEMORY if key in memory},
         "storage": numbers(storage),
@@ -252,6 +283,16 @@ def plan_line(result: dict[str, Any]) -> tuple[str, str]:
     return ("info", f"{text}; error kinds: {kinds}" if kinds else text)
 
 
+def push_lines(result: dict[str, Any]) -> list[tuple[str, str]]:
+    """One line per provider of the recent plan pushes, sorted."""
+    return [
+        ("info", f"plan push {provider}: " + ", ".join(
+            f"{key} {count}" for key, count in sorted(counts.items())
+        ))
+        for provider, counts in sorted((result.get("plan_pushes") or {}).items())
+    ]  # fmt: skip
+
+
 def comparison_lines(
     result: dict[str, Any], previous: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
@@ -308,6 +349,7 @@ def checks(
             result["stuck_jobs"] == 0, f"stuck plan-sync jobs: {result['stuck_jobs']}"
         ),
         plan_line(result),
+        *push_lines(result),
         (
             "info",
             "workout library: "

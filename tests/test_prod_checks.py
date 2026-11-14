@@ -51,11 +51,18 @@ def report(messages=40):
             "unsynced_units": [{"has_error": True}, {"has_error": False}],
             "recent_jobs": [
                 {
+                    "provider": "garmin",
                     "status": "failed",
                     "error_class": "HTTPError",
                     "created_at": RECENT,
                     "items": [{"status": "failed", "error_class": "HTTPError"}],
-                }
+                },
+                {
+                    "provider": "intervals",
+                    "status": "completed",
+                    "items": [{"status": "synced"}, {"status": "synced"}],
+                },
+                {"provider": "text never printed", "status": "Done!"},
             ],
         },
         "runtime": {"process_memory": {"rss_bytes": 1000}},
@@ -173,6 +180,13 @@ class ProdChecksTests(unittest.TestCase):
         self.assertIn("info provider wahoo last sync never", text)
         self.assertIn("2 unsynced, 1 with error; error kinds: HTTPError 2", text)
         self.assertIn("info workout library: pending 1", text)
+        # Per provider (#2849); words outside the vocabulary count as `other`.
+        self.assertIn(
+            "info plan push garmin: error HTTPError 2, item failed 1, job failed 1",
+            text,
+        )
+        self.assertIn("info plan push intervals: item synced 2, job completed 1", text)
+        self.assertIn("info plan push other: job other 1", text)
         self.assertIn("ok logout 200", text)
         self.assertEqual(FakeApp.state["logouts"], 1)
         self.assertEqual(json.loads(result.read_text())["counts"]["messages"], 40)
