@@ -23,20 +23,26 @@ def run_hook(command: str, tool: str = "Bash") -> subprocess.CompletedProcess:
 class GuardShellBackslashesTests(unittest.TestCase):
     def test_backslash_edits_are_blocked_with_the_hint(self) -> None:
         for command in (
+            # Python "\\\\" is the doubled backslash the shell tool collapses.
             "python - <<'EOF'\ntext = text.replace('a\\\\nb', 'c')\nEOF",
-            'python3 - <<"PY"\nprint("\\n")\nPY',
+            'python3.12 - <<"PY"\nprint("\\\\n")\nPY',
             "cat <<'EOF' | python -\nx = '\\\\'\nEOF",
             "node - <<EOF\nconsole.log('a\\\\b')\nEOF",
-            "bash -s <<'EOF'\nprintf 'a\\nb'\nEOF",
-            "cat > scripts/x.py <<'EOF'\npattern = r'\\s+'\nEOF",
-            "cat <<-'EOF' | tee notes.md\n\tC:\\Users\\x\n\tEOF",
-            "py.exe - <<'EOF'\nprint('\\\\')",
-            # One-liners and in-place edits with a doubled backslash.
-            "python -c \"print('a\\\\\\\\b')\"",
-            "node -e \"s.replace(/\\\\\\\\/g, '')\"",
-            "perl -pi -e 's/\\\\\\\\s/x/' f.txt",
+            "bash -s <<'EOF'\nprintf 'a\\\\nb'\nEOF",
+            "python<<\\EOF\nx = '\\\\'\nEOF",
+            "python - <<'END-PY'\nx = 'a\\\\b'\nEND-PY",
+            "cat > scripts/x.py <<'EOF'\npattern = r'\\\\s+'\nEOF",
+            "cat <<-'EOF' | tee notes.md\n\tC:\\\\Users\\x\n\tEOF",
+            "py.exe - <<'EOF'\nprint('\\\\')\nEOF",
+            # Inline programs and in-place edits with a doubled backslash.
+            "python -c \"print('a\\\\b')\"",
+            "node --eval \"s.replace(/\\\\\\\\/g, '')\"",
+            "perl -pi -e 's/\\\\s/x/' f.txt",
+            "pwsh -Command \"'a\\\\b' -replace 'x'\"",
             "sed -i 's/(?:\\\\s+x\\\\b)/y/' scripts/issue_status.py",
-            "cd repo && sed -i.bak 's/a\\\\\\\\b/c/' f",
+            "cd repo && sed -i.bak 's/a\\\\b/c/' f",
+            "sed --in-place 's/a\\\\b/c/' f",
+            "sed -e 's/a\\\\b/c/' -i f",
         ):
             with self.subTest(command=command):
                 result = run_hook(command)
@@ -46,8 +52,13 @@ class GuardShellBackslashesTests(unittest.TestCase):
     def test_other_commands_pass(self) -> None:
         for command in (
             "git commit -q -F - <<'EOF'\nfix(x): subject\n\nBody text.\nEOF",
-            "python - <<'EOF'\nprint('no backslash here')\nEOF",
-            "cat <<'EOF'\nC:\\Users\\x shown, not written\nEOF",
+            "git commit -q -F - <<'EOF'\nbuild: block python -c and sed -i with \\\\\nEOF",
+            "git commit -q -F - <<'EOF' >/dev/null\nfix: C:\\\\Users\nEOF",
+            "python - <<'EOF'\nprint('a single \\n stays')\nEOF",
+            "cat <<'EOF'\nC:\\\\Users\\x shown, not written\nEOF",
+            "python -I scripts/x.py --pattern 'a\\\\b'",
+            "sed -i 's/a/b/' f && grep -E 'a\\\\b' g",
+            "python -I -c \"s = '<<EOF'\"\necho done",
             "sed -n 's/a\\\\\\\\b/c/p' f.txt",
             "sed -i 's/tests +12 \\/ -3/tests +11 \\/ -3/' pr.md",
             "grep -E 'a\\\\\\\\|b' f.txt",
@@ -63,13 +74,15 @@ class GuardShellBackslashesTests(unittest.TestCase):
         self.assertEqual(run_hook(command, tool="PowerShell").returncode, 0)
 
     def test_unreadable_input_is_blocked(self) -> None:
-        result = subprocess.run(
-            [sys.executable, str(HOOK)],
-            input=b"not json",
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 2)
+        for body in (b"not json", b"[]", b'{"tool_input": "x"}'):
+            with self.subTest(body=body):
+                result = subprocess.run(
+                    [sys.executable, str(HOOK)],
+                    input=body,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":
