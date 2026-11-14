@@ -1294,10 +1294,8 @@ class ReprojectionTests(BackfillFixture):
         """Patch the plan the backfill uses; the real mapper runs, then ``transform`` edits it."""
         real = backfill_module.reprojection_plan
 
-        def plan(
-            raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
-        ) -> Any:
-            result = real(raw_row, zone=zone, training_loads=training_loads)
+        def plan(raw_row: Mapping[str, Any], **kwargs: Any) -> Any:
+            result = real(raw_row, **kwargs)
             return None if result is None else transform(raw_row, result)
 
         return patch(

@@ -14,7 +14,7 @@ with the payload's latest sync time.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
@@ -36,6 +36,7 @@ from backend.canonical.local_time import (
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.section_items import (
+    SectionItem,
     key_of,
     record_id,
     section_of,
@@ -64,6 +65,7 @@ from backend.providers.garmin_status_mapping import (
     STATUS_SECTIONS as GARMIN_STATUS_SECTIONS,
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
+from backend.providers.garmin_training_mapping import morning_readiness
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.providers.sleep_period_mapping import map_sleep_periods
@@ -333,6 +335,12 @@ def garmin_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | 
 
 # Returns the stored dedicated training-load row of one Garmin activity id.
 type TrainingLoadLookup = Callable[[str], Any]
+# The stored elements of a Garmin section on one day: (section, day) -> elements.
+type DayItemsLookup = Callable[[str, str], Sequence[SectionItem]]
+# Sections whose mapper keeps one reading a day, the wake-up one. Each reading is
+# stored as its own element, so the day's reading is chosen across the day's
+# elements and only that element emits observations (#2844).
+GARMIN_MORNING_SECTIONS: Final = frozenset({"readiness", "training_readiness_history"})
 
 
 def _garmin_activity_mapper(
@@ -466,6 +474,19 @@ def _stored_garmin_batch(
     )
 
 
+def garmin_morning_keys(
+    section: str, items: Sequence[SectionItem]
+) -> frozenset[str] | None:
+    """The keys of the elements that keep their day's reading; None keeps every element."""
+    if section not in GARMIN_MORNING_SECTIONS:
+        return None
+    return frozenset(item.key for item in morning_readiness(items, _item_record))
+
+
+def _item_record(item: SectionItem) -> Mapping[str, Any]:
+    return item.value if isinstance(item.value, Mapping) else {}
+
+
 def _garmin_section_observations(
     section: str,
     value: object,
@@ -481,12 +502,14 @@ def _garmin_section_observations(
     added to ``owners`` with its day; the observations of any other element have
     no owner.
     """
-    for item in split_section(value):
+    items = split_section(value)
+    morning = garmin_morning_keys(section, items)
+    for item in items:
         element_id = record_id(section, item.key)
         owner = element_id if element_id in raw_ids else None
         if owner is not None:
             owners[owner] = _element_day(item.observed_on, retrieved_at, zone)
-        if item.value is None:
+        if item.value is None or (morning is not None and item.key not in morning):
             continue
         health = map_garmin_health(
             wrapped(section, item), zone=zone, retrieved_at=retrieved_at
@@ -756,12 +779,15 @@ def reprojection_plan(
     *,
     zone: tzinfo,
     training_loads: TrainingLoadLookup | None = None,
+    day_items: DayItemsLookup | None = None,
 ) -> IngestPlan | None:
     """Plan the canonical rows that one stored raw record projects to today.
 
     The stored payload and its fetch time are the inputs, plus, for a Garmin
-    activity, its stored dedicated training-load row (``training_loads``), so the
-    result equals what an ingest produces under the same mapper version. Returns None
+    activity, its stored dedicated training-load row (``training_loads``), and for
+    a reading of a ``GARMIN_MORNING_SECTIONS`` section the other stored readings of
+    its day (``day_items``), so the result equals what an ingest produces under the
+    same mapper version. Returns None
     when the record kind has no mapper. A row whose payload or fetch time is unusable
     counts as one invalid row.
     """
@@ -794,7 +820,7 @@ def reprojection_plan(
         return _threshold_observation_plan(
             provider, profile, source_id, local_date(fetched, zone).isoformat()
         )
-    return _reprojected_health(provider, source_id, payload, zone, fetched)
+    return _reprojected_health(provider, source_id, payload, zone, fetched, day_items)
 
 
 def _threshold_observation_plan(
@@ -857,6 +883,7 @@ def _reprojected_health(
     payload: Mapping[str, Any],
     zone: tzinfo,
     fetched: datetime,
+    day_items: DayItemsLookup | None = None,
 ) -> IngestPlan:
     """Re-map one stored health element, which holds the exact mapper input.
 
@@ -875,9 +902,20 @@ def _reprojected_health(
     health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
     item = unwrapped(section, key_of(section_name), payload)
     day = _element_day(item.observed_on if item else None, fetched, zone)
+    morning = (
+        garmin_morning_keys(section, day_items(section, item.observed_on))
+        if section in GARMIN_MORNING_SECTIONS
+        and day_items is not None
+        and item is not None
+        and item.observed_on
+        else None
+    )
+    emits = morning is None or (item is not None and item.key in morning)
     return IngestPlan(
         provider=provider,
-        observations=tuple(
+        observations=()
+        if not emits
+        else tuple(
             ObservationItem(
                 observation,
                 GARMIN_HEALTH_VERSION,

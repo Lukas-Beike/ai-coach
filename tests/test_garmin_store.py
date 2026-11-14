@@ -101,6 +101,23 @@ class GarminStoreTests(unittest.TestCase):
         removed = self.put("sleep", days("2026-10-02"), replace=True).removed
         self.assertEqual(removed, 1)
 
+    def test_the_elements_of_a_day_are_read_through_the_day_index(self) -> None:
+        # #2844: a re-projection reads the day's readings of every readiness
+        # element, so the read must not scan every stored record.
+        self.put("readiness", days("2026-10-01", "2026-10-02") * 2)
+        self.put("sleep", days("2026-10-01"))
+        statements: list[str] = []
+        self.db.set_trace_callback(statements.append)
+        items = garmin_store.day_items(self.db, "readiness", "2026-10-01")
+        self.db.set_trace_callback(None)
+
+        self.assertEqual([item.key for item in items], ["2026-10-01", "2026-10-01#1"])
+        (query,) = (text for text in statements if "provider_records" in text)
+        plan = " ".join(
+            str(row[3]) for row in self.db.execute(f"EXPLAIN QUERY PLAN {query}")
+        )
+        self.assertIn("idx_provider_records_observed", plan)
+
     def test_windowed_pruning_keeps_elements_outside_the_window(self) -> None:
         self.put("sleep", days("2026-09-01", "2026-10-01", "2026-10-05"))
         keep = {record_id("sleep", "2026-10-05")}

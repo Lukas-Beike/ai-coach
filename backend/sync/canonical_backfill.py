@@ -77,17 +77,22 @@ from backend.activities.session_linking import (
     link_activity_sessions,
     split_unmatched_sessions,
 )
+from backend.canonical.section_items import key_of, section_of, unwrapped
 from backend.canonical.vocabulary import ProviderId
-from backend.db import canonical_domain_store, canonical_store
+from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
+    GARMIN_MORNING_SECTIONS,
+    HEALTH_RECORD_KIND,
     ActivityItem,
+    DayItemsLookup,
     DomainBatch,
     IngestPlan,
     ObservationItem,
     RawRecord,
     current_mapper_versions,
+    garmin_morning_keys,
     observation_mapper_versions,
     reprojection_mapper_version,
     reprojection_plan,
@@ -392,11 +397,13 @@ class CanonicalBackfill:
             current = state["reproject_current"]
             row, version = pending
             loads = stored_training_loads(db)
+            days = partial(garmin_store.day_items, db)
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
-                f"{version}:{zone}:{row['payload']}:{_training_load_text(row, loads)}",
-                partial(_reprojection_work, row, zone, loads),
+                f"{version}:{zone}:{row['payload']}:{_training_load_text(row, loads)}"
+                f":{_morning_text(row, days)}",
+                partial(_reprojection_work, row, zone, loads, days),
             )
             count, finished = _drain(
                 work,
@@ -661,11 +668,40 @@ def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> 
     return json.dumps(loads(str(row["source_record_id"])), sort_keys=True)
 
 
+def _morning_text(row: Mapping[str, Any], days: DayItemsLookup) -> str:
+    """The readings of its day a Garmin morning-section element re-projects with."""
+    source_id = str(row["source_record_id"])
+    section = section_of(source_id)
+    if (
+        row["provider"] != _GARMIN
+        or row["record_kind"] != HEALTH_RECORD_KIND
+        or section not in GARMIN_MORNING_SECTIONS
+    ):
+        return ""
+    try:
+        payload = json.loads(row["payload"])
+    except TypeError, ValueError:
+        return ""
+    item = (
+        unwrapped(section, key_of(source_id), payload)
+        if isinstance(payload, dict)
+        else None
+    )
+    if item is None or not item.observed_on:
+        return ""
+    return json.dumps(
+        sorted(garmin_morning_keys(section, days(section, item.observed_on)) or ())
+    )
+
+
 def _reprojection_work(
-    row: Mapping[str, Any], zone: tzinfo, loads: Callable[[str], Any] | None = None
+    row: Mapping[str, Any],
+    zone: tzinfo,
+    loads: Callable[[str], Any] | None = None,
+    days: DayItemsLookup | None = None,
 ) -> _Work:
     try:
-        plan = reprojection_plan(row, zone=zone, training_loads=loads)
+        plan = reprojection_plan(row, zone=zone, training_loads=loads, day_items=days)
         return _Work() if plan is None else _work_from_plan(plan)
     except Exception as exc:  # noqa: BLE001 - one bad record must not block the pass
         # Content-free: neither the payload nor the exception text is logged.

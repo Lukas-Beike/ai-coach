@@ -324,6 +324,24 @@ def _items(
             yield decoded
 
 
+def day_items(db: Any, section: str, day: str) -> list[SectionItem]:
+    """Return the active stored elements of ``section`` on ``day``, in key order.
+
+    The day is matched exactly and the few rows are sorted here, so the
+    ``observed_on`` index serves the read instead of a scan of every record.
+    """
+    clause, params = _section_clause([section])
+    cursor = db.execute(
+        "SELECT source_record_id, payload FROM provider_records WHERE provider = ? "
+        "AND record_kind = ? AND observed_on = ? AND state = ? AND " + clause,
+        (GARMIN_PROVIDER, HEALTH_RECORD_KIND, day, _ACTIVE, *params),
+    )
+    items = [
+        decoded[1] for row in cursor if (decoded := _decoded_item(row)) is not None
+    ]
+    return sorted(items, key=lambda item: item.key)
+
+
 def stored_keys(db: Any, section: str) -> set[str]:
     """Return the keys of the active stored elements of ``section``, unread."""
     clause, params = _section_clause([section])

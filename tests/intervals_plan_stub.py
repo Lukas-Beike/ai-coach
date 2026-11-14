@@ -355,11 +355,17 @@ def intervals_test_world(*, bump: int = 0, coverage: bool = False) -> Iterator[N
     real_plan = canonical_plans.reprojection_plan
 
     def plan(
-        raw_row: Mapping[str, Any], *, zone: tzinfo, training_loads: Any = None
+        raw_row: Mapping[str, Any],
+        *,
+        zone: tzinfo,
+        training_loads: Any = None,
+        day_items: Any = None,
     ) -> IngestPlan | None:
         if raw_row["provider"] == provider:
             return intervals_reprojection_plan(raw_row, zone=zone)
-        return real_plan(raw_row, zone=zone, training_loads=training_loads)
+        return real_plan(
+            raw_row, zone=zone, training_loads=training_loads, day_items=day_items
+        )
 
     with (
         patch.object(

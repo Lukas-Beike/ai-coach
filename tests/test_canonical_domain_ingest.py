@@ -148,9 +148,7 @@ class IngestDomainTests(IngestFixture):
 def reprojecting(codes: Mapping[str, tuple[str, ...]]) -> Any:
     """Patch the re-projection plan: health record ``id`` emits ``codes[id]``."""
 
-    def plan(
-        raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
-    ) -> IngestPlan | None:
+    def plan(raw_row: Mapping[str, Any], **_: Any) -> IngestPlan | None:
         source_id = str(raw_row["source_record_id"])
         result = IngestPlan(provider=PROVIDER)
         if source_id not in codes:
@@ -287,9 +285,7 @@ class BackfillReprojectionTests(BackfillFixture):
     def test_a_batch_of_another_record_is_rejected(self) -> None:
         backfill = self.populate()
 
-        def plan(
-            raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
-        ) -> IngestPlan:
+        def plan(raw_row: Mapping[str, Any], **_: Any) -> IngestPlan:
             return IngestPlan(
                 provider=PROVIDER, domain_batches=(batch(day_id(9), "PRODUCTIVE"),)
             )
