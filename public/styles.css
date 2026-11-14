@@ -890,7 +890,7 @@ h2 {
 .planned-week-number { margin-right: auto; color: var(--muted); font-size: .75rem; }
 .planned-week-step { font-size: 1.5rem; line-height: 1; cursor: pointer; }
 .planned-week-step:disabled { opacity: .4; cursor: default; }
-.planned-week-heading > :is(.planned-week-summary, .planned-week-metrics, .planned-week-sync) { flex-basis: 100%; }
+.planned-week-heading > :is(.planned-week-summary, .planned-week-metrics, .planned-week-sync, .planned-sport-filter) { flex-basis: 100%; }
 .planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
 /* Timeline: a date column with a connecting line beside each day's units (#2189). */
 .planned-week-days { display: grid; padding: 6px 0; }

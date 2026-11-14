@@ -1775,6 +1775,39 @@ function plannedViewSwitch() {
   return group;
 }
 
+// Sport filter (#2810): it hides the units of other sports and their figures, never calendar
+// appointments; the choice is a per-device convenience and never reaches the server.
+const CALENDAR_SPORT_KEY = "pacecraft-calendar-sport";
+// Chip label, then the sport labels (activitySportLabel) the chip shows.
+const CALENDAR_SPORTS = { all: ["Alle", []], run: ["Lauf", ["Laufen"]], ride: ["Rad", ["Radfahren", "Rad indoor"]], strength: ["Kraft", ["Kraft"]] };
+
+function readCalendarSport() {
+  try {
+    const value = localStorage.getItem(CALENDAR_SPORT_KEY);
+    return Object.hasOwn(CALENDAR_SPORTS, value) ? value : "all";
+  } catch { return "all"; }
+}
+
+function calendarSportShown(entry, sport = calendarSport) {
+  return sport === "all" || CALENDAR_SPORTS[sport][1].includes(activitySportLabel(calendarSportType(calendarActualActivity(entry) || entry)));
+}
+
+function plannedSportFilter() {
+  const group = h("div", { className: "chip-group planned-sport-filter", "aria-label": "Sportart" });
+  group.setAttribute("role", "radiogroup");
+  for (const [value, [label]] of Object.entries(CALENDAR_SPORTS)) {
+    const input = h("input", { type: "radio", name: "plannedSport", value, checked: calendarSport === value });
+    input.addEventListener("change", () => {
+      calendarSport = value;
+      try { localStorage.setItem(CALENDAR_SPORT_KEY, value); } catch { }
+      renderPlanned(renderedCalendar);
+      $("#plannedCalendar")?.querySelector(`.planned-sport-filter input[value="${value}"]`)?.focus();
+    });
+    group.append(h("label", "chip", input, h("span", null, label)));
+  }
+  return group;
+}
+
 function monthStartKey(dateKey, offset = 0) {
   const date = dateFromKey(`${dateKey.slice(0, 8)}01`);
   date.setMonth(date.getMonth() + offset);
@@ -1843,7 +1876,7 @@ function renderPlannedMonth(view) {
   const heading = h("header", "planned-week-heading", title,
     plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(monthStartKey(monthKey, -1))) : null, "month"),
     plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
-    plannedViewSwitch());
+    plannedViewSwitch(), plannedSportFilter());
   const names = h("div", { className: "planned-month-row planned-month-names", "aria-hidden": "true" }, ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So", "KW"].map((name) => h("span", null, name)));
   const grid = h("div", "planned-month-grid", names);
   for (let weekKey = planWeekStart(monthKey); weekKey < nextMonthKey; weekKey = addDateKey(weekKey, 7)) grid.append(plannedMonthRow(view, weekKey, monthKey));
@@ -1886,9 +1919,12 @@ function plannedWeekStep(step, target) {
 
 
 function renderPlannedWeek(view) {
-  const { eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
+  const { allEventsByDate, eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
   const weekEndKey = addDateKey(weekKey, 6);
-  const weekEntries = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat();
+  const weekOf = (byDate) => Array.from({ length: 7 }, (_, offset) => byDate.get(addDateKey(weekKey, offset)) || []).flat();
+  const weekEntries = weekOf(eventsByDate);
+  // The week sync builds its jobs, remote removals included, from every unit of the week, whatever the sport filter.
+  const allWeekEntries = weekOf(allEventsByDate);
   const week = h("section", { className: "planned-week", dataset: { weekKey }, "aria-labelledby": "plannedWeekTitle" });
   const heading = h("header", "planned-week-heading",
     h("h4", { id: "plannedWeekTitle" }, planWeekLabel(weekKey)),
@@ -1896,20 +1932,24 @@ function renderPlannedWeek(view) {
     plannedWeekStep(-1, weekKey > firstWeekKey ? addDateKey(weekKey, -7) : ""),
     plannedWeekStep(1, weekKey < lastWeekKey ? addDateKey(weekKey, 7) : ""),
     calendarView === "week" ? plannedViewSwitch() : null,
+    calendarView === "week" ? plannedSportFilter() : null,
     h("span", "planned-week-summary", calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten"));
   const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
   const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
   const totals = plannedWeekMetrics(planned, actual);
   if (totals) heading.append(totals);
-  const syncButton = plannedWeekSyncButton(weekKey, weekEntries, view.leftoversByWeek?.get(weekKey), todayKey);
+  const syncButton = plannedWeekSyncButton(weekKey, allWeekEntries, view.leftoversByWeek?.get(weekKey), todayKey);
   if (syncButton) heading.append(h("div", "planned-week-sync", syncButton));
   week.append(heading);
   const days = h("div", "planned-week-days");
-  for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset), planned.length > 0));
+  // "Zusätzlich" depends on the whole week's plan, not on the shown sport.
+  const weekHasPlan = allWeekEntries.some((entry) => !entry.is_completed_activity);
+  for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset), weekHasPlan));
   week.append(days);
   const legend = plannedZoneLegend(days);
   if (legend) week.append(legend);
-  if (weekEntries.length) {
+  // The plan compliance counts the whole week, so a sport filter leaves it out.
+  if (weekEntries.length && calendarSport === "all") {
     const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
     const summary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weeklyCompliance.get(weekKey), todayKey);
     week.append(h("p", "planned-week-totals", additionalCompleted && planned.length ? `${summary} · +${additionalCompleted} zusätzlich` : summary));
@@ -1960,6 +2000,7 @@ function openDefaultPlannedEntry(week) {
 let plannedRenderSnapshot = null;
 let selectedWeekKey = "";
 let calendarView = "week";
+let calendarSport = readCalendarSport();
 let selectedDayKey = "";
 let renderedCalendar = [];
 // The last day the calendar shows; a move stays inside it, so the moved card and its receipt stay visible.
@@ -2032,7 +2073,7 @@ function renderPlanned(trainingCalendar) {
   const lastDateKey = addDateKey(lastWeekKey, 6);
   plannedLastDateKey = lastDateKey;
   keepPlannedSelection(todayKey, lastDateKey);
-  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name]), state.data?.external_calendar?.undecided_upcoming]);
+  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, calendarSport, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name]), state.data?.external_calendar?.undecided_upcoming]);
   if (snapshot === plannedRenderSnapshot && root.childElementCount) {
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
     return;
@@ -2061,11 +2102,14 @@ function renderPlanned(trainingCalendar) {
       .filter((item) => item?.date)
       .map((item) => [String(item.date).slice(0, 10), item]),
   );
+  const allEventsByDate = new Map();
   const eventsByDate = new Map();
   entries.forEach((entry) => {
     const key = plannedEventDate(entry);
-    if (!eventsByDate.has(key)) eventsByDate.set(key, []);
-    eventsByDate.get(key).push(entry);
+    for (const byDate of calendarSportShown(entry) ? [allEventsByDate, eventsByDate] : [allEventsByDate]) {
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(entry);
+    }
   });
 
   const upcomingDays = Array.from({ length: (pastWeeks + futureWeeks + 1) * 7 }, (_, offset) => addDateKey(firstWeekKey, offset))
@@ -2074,6 +2118,7 @@ function renderPlanned(trainingCalendar) {
   const view = {
     calendarEventsByDate: plannedEventsByDate(todayKey),
     leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
+    allEventsByDate,
     eventsByDate,
     dayKey: selectedDayKey,
     // No earliest week: paging back is unlimited.

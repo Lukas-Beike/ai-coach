@@ -45,3 +45,13 @@ test("activity names show without the athlete's own place, other names stay inta
   ]) assert.equal(calendarDisplayName(stored, "Emsdetten, Deutschland"), shown, stored);
   assert.equal(calendarDisplayName("Emsdetten - 3 x 10 Min Schwelle", ""), "Emsdetten - 3 x 10 Min Schwelle");
 });
+
+test("the calendar sport filter shows a unit by the sport it was done in, else its plan", () => {
+  const { calendarSportShown, readCalendarSport } = loadPublicScript(["performance-view.js", "plan-views.js"]);
+  const matched = { type: "Run", compliance: { actual_activity: { sport: "ride", environment: "virtual" } } };
+  const units = [{ type: "Run" }, { sport: "ride", environment: "virtual", is_completed_activity: true }, { sport: "strength", is_completed_activity: true }, { type: "Swim" }, matched];
+  const shown = (sport) => units.filter((unit) => calendarSportShown(unit, sport)).length;
+  assert.deepEqual(["all", "run", "ride", "strength"].map(shown), [5, 1, 2, 1]);
+  // Without browser storage the calendar shows every sport (#2810).
+  assert.equal(readCalendarSport(), "all");
+});
