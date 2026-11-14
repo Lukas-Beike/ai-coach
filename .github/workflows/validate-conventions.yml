@@ -49,6 +49,34 @@ jobs:
             exit 1
           fi
 
+      - name: Keep APP_VERSION at or above the base branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A conflict resolution once reverted the released version (#2733). Both
+          # files are read through the API, so no pull-request code runs here.
+          version() {
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/$REPOSITORY/contents/server.py?ref=$1" \
+              | sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p'
+          }
+          base="$(version "$BASE_SHA")"
+          head="$(version "$HEAD_SHA")"
+          if [[ -z "$base" || -z "$head" ]]; then
+            echo "APP_VERSION not found in server.py (base '${base}', head '${head}')."
+            exit 1
+          fi
+          lowest="$(printf '%s\n%s\n' "$base" "$head" | sort -V | head -n 1)"
+          if [[ "$head" != "$base" && "$lowest" == "$head" ]]; then
+            echo "APP_VERSION $head is lower than $base on the base branch; keep the released version when resolving a conflict."
+            exit 1
+          fi
+
       - name: Require an issue link in the PR body
         if: github.event.pull_request.user.type != 'Bot'
         env:
