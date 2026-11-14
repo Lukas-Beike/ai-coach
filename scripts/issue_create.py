@@ -20,6 +20,8 @@ from gh_cli import CliError, gh, gh_json, read_body
 TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 TITLE = re.compile(rf"^(?:{TYPES})(?:\([a-z0-9][a-z0-9-]*\))?!?: (?P<text>\S.*\S)$")
 MAX_TITLE = 120
+# difflib SequenceMatcher ratio (0-1) of the normalized titles: from DUPLICATE
+# the issue is refused (exit 1) unless --force-new, from SIMILAR only listed.
 DUPLICATE = 0.85
 SIMILAR = 0.6
 STOP_WORDS = frozenset(

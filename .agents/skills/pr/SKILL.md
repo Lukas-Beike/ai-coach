@@ -11,6 +11,17 @@ authorizes the steps below: committing the task changes, rewriting and pushing
 the feature branch, creating the PR, enabling squash auto-merge, and fixing
 conflicts, CI failures, and review feedback through the merge.
 
+Copy this checklist into your response and tick it as you go:
+
+```text
+- [ ] 1 Prepare: committed by path, rebased, run-tests-changed, OpenSpec and spec drift, Sonar
+- [ ] 2 Review: one fresh review of the final head, its SHA in the PR body; findings fixed
+      or listed; Sonar again if the fixes changed the head
+- [ ] 3 Publish: pushed with hooks; PR with merge danger, line balance and Part of/Closes;
+      open PRs checked against a new guard; auto-merge once Gitar reviewed and no feedback is open
+- [ ] 4 Monitor: merged per pr-state; threads handled; develop runs checked; unwatched
+```
+
 ## 1. Prepare
 
 - Work in this session's task worktree (`git rev-parse --show-toplevel`). If it

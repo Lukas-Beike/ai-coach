@@ -131,6 +131,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         "--apply", action="store_true", help="remove (default: dry run)"
     )
     parser.add_argument("--idle-days", type=float, default=3.0)
+    # Warns below this free space on the primary checkout's drive.
     parser.add_argument("--min-free-gb", type=float, default=10.0)
     parser.add_argument("--base", default="origin/develop")
     args = parser.parse_args(argv)
