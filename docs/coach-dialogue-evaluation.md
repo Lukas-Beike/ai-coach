@@ -135,8 +135,17 @@ model call once it reaches 300 calls (`--max-calls`, the write gate's classifier
 included) or when that call, priced like the dearest call so far, would pass an
 estimated 5 USD (`--max-cost-usd`, from the response token counts and the
 model's prices per million tokens given as `--price-input` and
-`--price-output`), and lists the cases not run. Only a loopback endpoint or the
-OpenAI API is accepted. Each case runs the real Coach turn loop on a fresh
+`--price-output`), and lists the cases not run. `--provider` names the model
+API explicitly, `openai` (Responses) or `anthropic` (Messages), with no default
+and no fallback: only that provider gets the key (an Anthropic key, `sk-ant-`,
+is required for Anthropic's API and refused for OpenAI's), and only a loopback
+endpoint or that provider's API is accepted. For Anthropic, `--model` is the Claude
+family setting the app uses (`claude-opus`, `claude-sonnet` or `claude-haiku`);
+the preflight resolves it to the newest model of the family, every case uses that
+model and the report names it. Claude's usage counts cache reads and writes as
+input, so cache reads are priced at 0.1 and all other input tokens at 1.25 times
+the base input price (the cache-write rate). A call that fails after it was sent
+is priced like the dearest call so far. Each case runs the real Coach turn loop on a fresh
 temporary database with the catalogue's synthetic state; providers stay
 unconfigured and no remote proposal is approved. Food databases and the product
 web search are offline stand-ins (Open Food Facts unreachable, BLS empty, web
@@ -150,6 +159,7 @@ baseline run are recorded on the issue.
 
 ```powershell
 $env:COACH_EVAL_API_KEY = '<evaluation key>'  # never stored or logged
-python tests/coach_live_eval.py --base-url https://api.openai.com/v1 --model <id> --thinking low --price-input <usd> --price-output <usd>
+python tests/coach_live_eval.py --provider openai --base-url https://api.openai.com/v1 --model <id> --thinking low --price-input <usd> --price-output <usd>
+python tests/coach_live_eval.py --provider anthropic --base-url https://api.anthropic.com --model claude-sonnet --thinking low --price-input <usd> --price-output <usd>
 Remove-Item Env:COACH_EVAL_API_KEY
 ```
