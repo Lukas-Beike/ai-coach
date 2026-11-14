@@ -3,7 +3,7 @@
     python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <file>]
 
 Refuses on develop, main, a detached HEAD and a dirty working tree. Fetches
-origin, rebases, checks every commit subject against the Conventional Commit
+origin (retrying a ref lock held by a parallel worktree), rebases, checks every commit subject against the Conventional Commit
 types, and with --push pushes with --force-with-lease through the repository
 hooks (never --no-verify). The hooks need the SonarQube CLI on PATH. A push
 that adds a file at the repository root is refused unless --allow-root names it.
@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -49,6 +50,27 @@ def push_env(env: Mapping[str, str], home: Path) -> dict[str, str]:
         "the pre-push hook needs the SonarQube CLI (sonar); install it first "
         "(setup prerequisite) so it is on PATH."
     )
+
+
+FETCH_ATTEMPTS = 3
+
+
+def fetch() -> None:
+    """Fetch origin; retry while a parallel worktree holds a ref lock (#2828).
+
+    A persistent failure raises, so the rebase never runs on a stale target.
+    """
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            git("fetch", "origin")
+            return
+        except CliError as exc:
+            if "cannot lock ref" not in str(exc) or attempt == FETCH_ATTEMPTS:
+                raise
+            print(
+                f"fetch hit a ref lock (attempt {attempt}); retrying", file=sys.stderr
+            )
+            time.sleep(attempt)
 
 
 def invalid_subjects(onto: str) -> list[str]:
@@ -116,7 +138,7 @@ def sync(onto: str, push: bool, allowed: frozenset[str] = frozenset()) -> int:
         leased = git("rev-parse", "--verify", "--quiet", f"origin/{branch}").strip()
     except CliError:
         leased = ""  # never pushed: the push only succeeds while it stays absent
-    git("fetch", "origin")
+    fetch()
     if not rebased(onto):
         return 1
     if outgoing_problems(onto, push, allowed):
