@@ -126,14 +126,6 @@ class ProviderRegistry:
             and descriptor.coach_rank is None
         )
 
-    def resync_key_map(self) -> dict[str, tuple[str, ...]]:
-        """Return full-resync state keys for providers that declare them."""
-        keys: dict[str, tuple[str, ...]] = {}
-        for descriptor in self._descriptors:
-            if descriptor.resync_keys:
-                keys[descriptor.provider_id] = descriptor.resync_keys
-        return keys
-
     def manual_routes(self) -> tuple[tuple[str, str], ...]:
         """Return (path, provider_id) for each manual sync route."""
         routes: list[tuple[str, str]] = []

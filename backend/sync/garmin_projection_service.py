@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.activity_summary import ActivitySummary
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import GARMIN_ID, ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -37,6 +37,7 @@ from backend.sync.garmin_personal_status import personal_key_state, sdk_write_re
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export_consent import enabled_fields, fields_view
+from backend.sync.state import last_sync_key
 
 # The recovery context shows the latest record; two weeks cover a missed sync.
 COACH_RECOVERY_DAYS = 14
@@ -142,7 +143,7 @@ class GarminProjectionService:
         parsed_error = self._garmin_sync_state_service.core_error_entries() or None
         parsed_error = self._redactor.sanitize_log_value(parsed_error)
         with self._database_manager.reader() as db:
-            last_sync_at = self._key_value_repository.get(db, "last_garmin_sync_at")
+            last_sync_at = self._key_value_repository.get(db, last_sync_key(GARMIN_ID))
             metric_export_status = self._key_value_repository.get(
                 db, METRIC_EXPORT_STATUS_KEY
             )

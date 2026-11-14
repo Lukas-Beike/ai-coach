@@ -51,7 +51,6 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.executor import SyncJobExecutor
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.full_resync import (
-    PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncStateStore,
 )
@@ -688,7 +687,7 @@ class SyncStateReaderTests(OrchestrationCase):
         )
         self.resync = FullProviderResyncService(
             {GARMIN_ID: Mock(), WAHOO_ID: Mock()},
-            FullResyncStateStore(self.database, self.key_values, PROVIDER_RESYNC_KEYS),
+            FullResyncStateStore(self.database, self.key_values),
             Mock(),
         )
 

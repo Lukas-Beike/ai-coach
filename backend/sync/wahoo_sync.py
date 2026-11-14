@@ -51,11 +51,10 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
+from backend.sync.state import GENERAL_ERROR_KEY, last_error_key, last_sync_key
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 
 FRESHNESS_AREA: Final = "activities"
-LAST_SYNC_KEY: Final = "last_wahoo_sync_at"
-LAST_ERROR_KEY: Final = "last_wahoo_sync_error"
 SYNC_FAILED_MESSAGE: Final = "Die Wahoo-Synchronisierung ist fehlgeschlagen."
 # Wahoo refuses an endpoint with these statuses when the athlete's grant does not
 # cover it; the run goes on without that source and its stored rows stay as they are.
@@ -270,8 +269,8 @@ class WahooSyncService:
                     else previous.activities_retrieved_at,
                 )
             self._coverage.persist(db, coverage, zone=zone)
-            self._key_values.set(db, LAST_SYNC_KEY, synced_at.isoformat())
-            self._key_values.set(db, LAST_ERROR_KEY, "")
+            self._key_values.set(db, last_sync_key(WAHOO_ID), synced_at.isoformat())
+            self._key_values.set(db, last_error_key(WAHOO_ID), "")
             self._daily_markers().mark_in_transaction(db, WAHOO_ID)
         result: dict[str, Any] = {
             "status": "partial" if fetch.truncated else "ok",
@@ -350,7 +349,7 @@ class WahooSyncService:
         """Store the content-free error text; a failed write never hides the cause."""
         try:
             with self._database_manager().unit_of_work() as db:
-                self._key_values.set(db, LAST_ERROR_KEY, message)
+                self._key_values.set(db, last_error_key(WAHOO_ID), message)
         except Exception:  # noqa: BLE001 - a failed write must not hide the cause
             self._logger.warning(
                 "Wahoo sync error could not be stored",

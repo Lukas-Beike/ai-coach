@@ -1,9 +1,8 @@
 """The fixed table of the five providers synchronization knows.
 
 One entry per provider holds its freshness areas and labels, sync-window
-limits, the durable keys of full-resync state and the orchestration policy (job
-types, scheduling order, Coach refresh targets, manual and full-resync HTTP
-routes). A further provider is a new entry. This is the one sync module that
+limits and the orchestration policy (job types, scheduling order, Coach refresh
+targets, manual and full-resync HTTP routes). A further provider is a new entry. This is the one sync module that
 names providers; ``ProviderRegistry`` (backend/sync/provider_registry.py) reads
 the table and names none.
 
@@ -108,10 +107,6 @@ class ManualSyncRoute:
 class ProviderDescriptor:
     """Provider-neutral description of one configured data provider.
 
-    ``resync_keys`` holds the durable full-resync state keys in the order
-    running, status, last completion, error. Providers without a full resync
-    leave it empty.
-
     The orchestration fields default to the generic refresh-only behaviour.
     ``coach_rank`` of ``None`` means the provider is not a Coach refresh target.
     ``metric_exports`` names the metrics an explicit metric export may write and
@@ -123,7 +118,6 @@ class ProviderDescriptor:
     capabilities: frozenset[Capability]
     freshness_areas: tuple[FreshnessArea, ...]
     max_sync_days: int
-    resync_keys: tuple[str, ...]
     job_types: frozenset[str] = frozenset({"refresh"})
     refresh_fields: frozenset[str] = frozenset({"reason"})
     default_sync_days: int | None = None
@@ -158,7 +152,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=_INTERVALS_MAX_SYNC_DAYS,
-        resync_keys=(),
         # Accepted job types; backend/sync/jobs.py checks them via supports_job.
         job_types=_INTERVALS_OUTPUT_JOB_TYPES,
         not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
@@ -198,12 +191,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
-        resync_keys=(
-            "garmin_full_resync_running",
-            "garmin_full_resync_status",
-            "garmin_full_resync_at",
-            "garmin_full_resync_error",
-        ),
         # historical_backfill is accepted here; backend/sync/jobs.py rejects it for
         # providers that do not declare it. activity_details is the on-demand,
         # read-only Garmin detail fetch for one activity (see
@@ -252,7 +239,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
-        resync_keys=(),
         # Refresh payload fields; backend/sync/jobs.py enforces them via the registry.
         refresh_fields=frozenset({"force", "reason"}),
         schedule=SchedulePolicy(daily_rank=0, startup_rank=3, daily_marker=False),
@@ -277,7 +263,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
-        resync_keys=(),
         schedule=SchedulePolicy(daily_rank=1, startup_rank=0, daily_marker=True),
         coach_rank=3,
         manual_sync=ManualSyncRoute(
@@ -309,12 +294,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
-        resync_keys=(
-            "wahoo_full_resync_running",
-            "wahoo_full_resync_status",
-            "wahoo_full_resync_at",
-            "wahoo_full_resync_error",
-        ),
         # plan_push is the explicit library export; backend/sync/jobs.py checks it.
         # stream_backfill re-fetches the FIT streams of past workouts
         # (backend/sync/stream_backfill.py).

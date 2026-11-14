@@ -17,6 +17,7 @@ from backend.sync.intervals_state import (
     INTERVALS_OUTPUT_OK_KEY,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.state import GARMIN_STATUS_KEY
 from backend.sync.wahoo_connection import connection_status
 
 
@@ -169,9 +170,7 @@ class PublicBootstrapService:
                 },
                 "garmin_sync": {
                     "running": deps.garmin_sync_service().running(),
-                    "status": deps.key_values.get_in_transaction(
-                        db, "garmin_sync_status"
-                    )
+                    "status": deps.key_values.get_in_transaction(db, GARMIN_STATUS_KEY)
                     or None,
                 },
                 "provider_resync": {

@@ -19,8 +19,6 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.schedule_policies import WahooSchedulePolicy
 from backend.sync.wahoo_sync import (
-    LAST_ERROR_KEY,
-    LAST_SYNC_KEY,
     SYNC_FAILED_MESSAGE,
     WahooSyncClock,
     WahooSyncService,
@@ -35,6 +33,8 @@ from tests.wahoo_sync_fixture import (
     workout,
 )
 
+LAST_SYNC_KEY = "last_wahoo_sync_at"
+LAST_ERROR_KEY = "last_wahoo_sync_error"
 ALL_SCOPES = "workouts_read power_zones_read user_read"
 CYCLING_ZONE_SET = {
     "id": 1,

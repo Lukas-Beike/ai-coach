@@ -11,7 +11,7 @@ from typing import Any
 from urllib.error import HTTPError
 
 from backend.canonical.stored_sports import activity_type_environment
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import INTERVALS_ID, RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
@@ -27,6 +27,7 @@ from backend.providers.intervals_client import (
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 from backend.runtime.events import StateEventBuffer
 from backend.sync.authority import competition_push_manifest
+from backend.sync.state import last_error_key, last_sync_key
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -398,8 +399,8 @@ class CompetitionSyncService:
             reconciled = self._reconciler.reconcile(
                 plan, pushed, local_rows, now=now, fetched=self._fetched_window()
             )
-            self._set_kv("last_competition_sync_at", now)
-            self._set_kv("last_competition_sync_error", "")
+            self._set_kv(last_sync_key(INTERVALS_ID), now)
+            self._set_kv(last_error_key(INTERVALS_ID), "")
             self._publisher.publish("coach", {"status": "changed"})
             return {
                 "status": "ok",
@@ -425,7 +426,7 @@ class CompetitionSyncService:
             }
         except Exception as exc:
             error = self._redactor.redact_text(str(exc))[:1000]
-            self._set_kv("last_competition_sync_error", error)
+            self._set_kv(last_error_key(INTERVALS_ID), error)
             self._logger.exception(
                 "Competition synchronization failed",
                 extra={

@@ -29,9 +29,10 @@ from backend.db.schema import initialize_schema
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.daily import DailySyncMarkerService, daily_marker_key
+from backend.sync.daily import DailySyncMarkerService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.refresh import ProviderRefreshTracker
+from backend.sync.state import daily_marker_key
 from backend.sync.wahoo_sync import (
     WahooSyncClock,
     WahooSyncService,

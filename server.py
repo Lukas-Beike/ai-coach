@@ -170,7 +170,6 @@ from backend.sync.flow_wiring import (
     build_selected_workout_sync,
     build_workout_library_sync,
 )
-from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.garmin_login import (
     GarminLoginService,
     GarminSecretRegistry,
@@ -198,7 +197,7 @@ from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_wiring import SyncSchedulerServices, build_sync_schedulers
 from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
-from backend.sync.state import SyncStateRepository
+from backend.sync.state import SyncStateRepository, resync_reset_keys
 from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_wiring import (
     WahooConnectionServices,
@@ -486,7 +485,7 @@ def initialise_database() -> None:
             now=runtime_clock.utc_now(),
             current_time=datetime.now(UTC),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
-            provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            provider_resync_keys=resync_reset_keys(),
             retention_days=int(getattr(CONFIG_HOLDER.value, "data_retention_days", -1)),
         )
     PROVIDER_CREDENTIAL_SERVICE.refresh()

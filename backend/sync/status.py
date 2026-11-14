@@ -14,6 +14,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.state import GENERAL_ERROR_KEY, OPERATION_KEYS
 
 
 class _StateVersionProvider(Protocol):
@@ -85,17 +86,17 @@ def persist_sync_operation_state(
 ) -> None:
     """Persist bounded, non-athlete-facing state through an injected store."""
     values = {
-        "sync_operation_id": operation_id,
-        "sync_operation_status": status,
-        "sync_operation_phase": phase,
-        "sync_operation_progress": str(max(0, min(progress, 100))),
-        "sync_operation_message": message,
+        OPERATION_KEYS["id"]: operation_id,
+        OPERATION_KEYS["status"]: status,
+        OPERATION_KEYS["phase"]: phase,
+        OPERATION_KEYS["progress"]: str(max(0, min(progress, 100))),
+        OPERATION_KEYS["message"]: message,
     }
     if error is not None:
-        values["last_sync_error"] = redact(error)[:1000]
+        values[GENERAL_ERROR_KEY] = redact(error)[:1000]
     elif status == "completed":
         # A successful sync ends the error an earlier failed one left behind.
-        values["last_sync_error"] = ""
+        values[GENERAL_ERROR_KEY] = ""
     set_values(values)
 
 
@@ -108,22 +109,22 @@ def project_sync_status(
     maintenance: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the public sync-status DTO from explicitly supplied state."""
-    status = get_value("sync_operation_status") or ("running" if running else "idle")
+    status = get_value(OPERATION_KEYS["status"]) or ("running" if running else "idle")
     try:
-        progress = max(0, min(int(get_value("sync_operation_progress") or 0), 100))
+        progress = max(0, min(int(get_value(OPERATION_KEYS["progress"]) or 0), 100))
     except TypeError, ValueError:
         progress = 0
     return {
         "status": status,
-        "phase": get_value("sync_operation_phase")
+        "phase": get_value(OPERATION_KEYS["phase"])
         or ("running" if running else "idle"),
         "progress": progress,
-        "operation_id": get_value("sync_operation_id"),
+        "operation_id": get_value(OPERATION_KEYS["id"]),
         "running": running,
-        "message": get_value("sync_operation_message") or None,
-        "started_at": get_value("sync_operation_started_at"),
-        "finished_at": get_value("sync_operation_finished_at"),
-        "last_error": get_value("last_sync_error") or None,
+        "message": get_value(OPERATION_KEYS["message"]) or None,
+        "started_at": get_value(OPERATION_KEYS["started_at"]),
+        "finished_at": get_value(OPERATION_KEYS["finished_at"]),
+        "last_error": get_value(GENERAL_ERROR_KEY) or None,
         "state_versions": dict(state_versions),
         "provider_freshness": provider_freshness,
         "maintenance": dict(maintenance),

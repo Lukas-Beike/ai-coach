@@ -9,7 +9,16 @@ from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
-from backend.sync.state import SyncStateRepository
+from backend.sync.state import (
+    GARMIN_STATUS_KEY,
+    GENERAL_ERROR_KEY,
+    OPERATION_KEYS,
+    SyncStateRepository,
+    last_error_key,
+    last_sync_key,
+    resync_key,
+    resync_reset_keys,
+)
 
 NOW = "2026-09-20T12:00:00+00:00"
 DEFAULTS = {"intervals": 90, "garmin": 30}
@@ -184,6 +193,62 @@ class SyncStateRepositoryTests(unittest.TestCase):
             )
             self.repository.cursor("garmin", "data")
             self.assertEqual(self.backend.connect_count, connect_count)
+
+
+class StoredKeyNameTests(unittest.TestCase):
+    """The key names are persisted: a rename would orphan stored state."""
+
+    def test_last_sync_and_error_keys_are_the_stored_names(self):
+        stored = {
+            "garmin": ("last_garmin_sync_at", "last_garmin_error"),
+            "wahoo": ("last_wahoo_sync_at", "last_wahoo_sync_error"),
+            "calendar": (
+                "last_external_calendar_sync_at",
+                "last_external_calendar_sync_error",
+            ),
+            "intervals": ("last_competition_sync_at", "last_competition_sync_error"),
+        }
+        for provider, (at_key, error_key) in stored.items():
+            with self.subTest(provider=provider):
+                self.assertEqual(at_key, last_sync_key(provider))
+                self.assertEqual(error_key, last_error_key(provider))
+        with self.assertRaises(KeyError):
+            last_sync_key("weather")
+        with self.assertRaises(KeyError):
+            last_error_key("weather")
+
+    def test_operation_and_general_keys_are_the_stored_names(self):
+        self.assertEqual(
+            {
+                "id": "sync_operation_id",
+                "status": "sync_operation_status",
+                "phase": "sync_operation_phase",
+                "progress": "sync_operation_progress",
+                "message": "sync_operation_message",
+                "started_at": "sync_operation_started_at",
+                "finished_at": "sync_operation_finished_at",
+            },
+            dict(OPERATION_KEYS),
+        )
+        self.assertEqual("last_sync_error", GENERAL_ERROR_KEY)
+        self.assertEqual("garmin_sync_status", GARMIN_STATUS_KEY)
+
+    def test_resync_keys_are_the_stored_names_for_resync_providers_only(self):
+        self.assertEqual("garmin_full_resync_running", resync_key("garmin", "running"))
+        self.assertEqual("wahoo_full_resync_status", resync_key("wahoo", "status"))
+        self.assertEqual("garmin_full_resync_at", resync_key("garmin", "at"))
+        self.assertEqual("wahoo_full_resync_error", resync_key("wahoo", "error"))
+        self.assertEqual(
+            (
+                ("garmin_full_resync_running", "garmin_full_resync_status"),
+                ("wahoo_full_resync_running", "wahoo_full_resync_status"),
+            ),
+            resync_reset_keys(),
+        )
+        with self.assertRaisesRegex(ValueError, "no full resync"):
+            resync_key("weather", "running")
+        with self.assertRaisesRegex(ValueError, "unknown full resync field"):
+            resync_key("garmin", "last_at")
 
 
 if __name__ == "__main__":
