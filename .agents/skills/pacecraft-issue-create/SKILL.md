@@ -21,6 +21,10 @@ requires before deletion as added test lines, and says that test comes first. Th
 python scripts/issue_create.py --title "<type>(<scope>): <description>" --body-file <file> [--label <name>] [--assignee @me] [--dry-run]
 ```
 
+- Labels (one `--label` each, every one that applies): `athlete-request` when
+  the athlete asked for it, `user-visible` when it changes what the athlete
+  sees (release notes), `schema-change` when it changes the database schema,
+  `retro` when a retro opens it.
 - Exit 0: created; the script prints the URL. Exit 1: a likely duplicate was
   found. Read it, then update it with [issue-update](../pacecraft-issue-update/SKILL.md)
   instead; rerun with `--force-new` only when it is a different problem.
