@@ -61,9 +61,9 @@ class SpecValidateTests(unittest.TestCase):
             spec.parent.mkdir(parents=True)
             spec.write_text(
                 "Evidence: `tests/test_x.py:test_kept`, `tests/test_x.py::XTests.test_kept`,"
-                " `tests/test_x.py:LIMIT`, `tests/test_x.py:XTests`.\n"
+                " `tests/test_x.py:LIMIT`, `tests/test_x.py::XTests::test_kept`.\n"
                 "Evidence: `tests/test_x.py::XTests.test_gone`, `tests/test_y.py:test_kept`,"
-                " `tests/test_x.py:test_kep`.\n",
+                " `tests/test_x.py:test_kep`, `tests/test_x.py::XTests::test_gone`.\n",
                 encoding="utf-8",
             )
             self.assertEqual(
@@ -72,6 +72,7 @@ class SpecValidateTests(unittest.TestCase):
                     "openspec/specs/x/spec.md:2: tests/test_x.py:XTests.test_gone",
                     "openspec/specs/x/spec.md:2: tests/test_y.py:test_kept",
                     "openspec/specs/x/spec.md:2: tests/test_x.py:test_kep",
+                    "openspec/specs/x/spec.md:2: tests/test_x.py:XTests::test_gone",
                 ],
             )
         with mock.patch.object(

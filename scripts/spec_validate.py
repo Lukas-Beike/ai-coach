@@ -21,7 +21,9 @@ from check_changed import run_steps
 STRICT = ["--strict", "--no-interactive"]
 CHANGE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 DEFINES = r"^\s*(?:(?:async\s+)?def\s+{0}\b|class\s+{0}\b|{0}\s*[:=])"
-EVIDENCE = re.compile(r"(tests/[\w/]+\.py):{1,2}([A-Za-z_][\w.]*\w)")
+EVIDENCE = re.compile(
+    r"(tests/[\w/]+\.py):{1,2}([A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)"
+)
 
 
 def stale_evidence(root: Path) -> list[str]:
@@ -35,7 +37,7 @@ def stale_evidence(root: Path) -> list[str]:
                 text = source.read_text(encoding="utf-8") if source.is_file() else ""
                 if not text or any(
                     not re.search(DEFINES.format(re.escape(part)), text, re.MULTILINE)
-                    for part in name.split(".")
+                    for part in re.split(r"\.|::", name)
                 ):
                     where = spec.relative_to(root).as_posix()
                     stale.append(f"{where}:{number}: {path}:{name}")
