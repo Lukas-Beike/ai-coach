@@ -53,7 +53,7 @@ def settle_interrupted_refreshes(db: Any, *, now: str) -> None:
     retry hold, so the last real outcome shows instead of "syncing".
     """
     db.execute(
-        "UPDATE provider_refresh_history SET status='skipped', "
+        "UPDATE provider_refresh_history SET status='skipped', phase='interrupted', "
         "error_code='process_interrupted', finished_at=? WHERE status='running'",
         (now,),
     )
