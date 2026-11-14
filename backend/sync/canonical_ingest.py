@@ -214,6 +214,7 @@ def ingest_plan(
                 now=stamp,
                 fill_only=item.fill_only,
                 owner=item.owner,
+                yields_to=item.yields_to,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}

@@ -232,7 +232,10 @@ from backend.providers.garmin_weight_walk import (
 # Version 23: maxmet sport objects are dated by their own ``calendarDate`` (the daily
 # range leaves the row undated), so the stored range re-projects every day, today
 # included, with its precise value (#2345).
-MAPPER_VERSION: Final = 23
+# Version 24: a re-projection keeps the live ingest's value of a natural key two
+# sections share (the later retrieval, then the outranking section), so rows an
+# earlier re-projection flipped to the history section's value are repaired (#2782).
+MAPPER_VERSION: Final = 24
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"

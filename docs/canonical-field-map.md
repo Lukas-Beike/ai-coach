@@ -1587,7 +1587,7 @@ Conventions used in the tables of this part:
 
 Status: Live. `map_garmin_health` is called per stored element by `canonical_plans.py` (ingest and re-projection,
 one-element list per list section, the record itself for single-record sections) and by `snapshot_projection.py`.
-Mapper version: **23** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
+Mapper version: **24** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
 training sections and the endurance `groupMap`, see "Training sections" below), which is replayed by this module.
 Inputs: the Garmin snapshot as a mapping section name → record or list of records (`GARMIN_HEALTH_SECTION_NAMES`);
 `zone` = athlete zone (`ZoneInfo`), `retrieved_at` = fetch time of that section (`garmin_section_retrieved_at`: the
@@ -1629,7 +1629,7 @@ Garmin's own calendar day, never converted by the athlete zone. Undated records 
 Exceptions: Body Battery samples are dated by their own instant in the athlete zone (`local_date(observed_at, zone)`);
 weight epoch milliseconds are read as a UTC date (`_epoch_day`).
 
-Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAMES`; `map_sections` and the canonical plan visit sections in it): `sleep`, `hrv`, `resting_hr`, `readiness`, `max_metrics`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `heart_rate_zones`, `weight` (weight and body fat), `daily_stats`, `race_predictions`, `endurance_score`, `body_battery`, the `TRAINING_SECTIONS` (`daily_training_status`, `training_load_balance`, `training_status`, `weekly_training_status`, `running_tolerance`, `training_readiness_history`), and last `performance_history`. Ingest keeps the first value of a natural key, so when two sections emit the same key (for example `readiness` and `training_readiness_history` on one day) the earlier section wins; the order is part of the mapping.
+Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAMES`; `map_sections` and the canonical plan visit sections in it): `sleep`, `hrv`, `resting_hr`, `readiness`, `max_metrics`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `heart_rate_zones`, `weight` (weight and body fat), `daily_stats`, `race_predictions`, `endurance_score`, `body_battery`, the `TRAINING_SECTIONS` (`daily_training_status`, `training_load_balance`, `training_status`, `weekly_training_status`, `running_tolerance`, `training_readiness_history`), and last `performance_history`. Ingest keeps the first value of a natural key, so when two sections emit the same key (for example `readiness` and `training_readiness_history` on one day) the earlier section wins; the order is part of the mapping. Across records the store applies one rule (`canonical_plans.garmin_outranking`, `canonical_store.upsert_observation`), in the live ingest and the re-projection alike: the later retrieval wins, and on the same retrieval the earlier section (#2782).
 
 #### Section index (collector call → section → mapper entry)
 

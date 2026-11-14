@@ -75,16 +75,16 @@ GENERATED_IDS = frozenset({"activity_id", "merged_into", "merged_into_retained"}
 # bumped mapper versions, taken on the code before the helpers were shared.
 PINNED_ROW_DIGESTS = [
     {
-        "provider_records": "48cd921ba14bafbbb3736ed987ca126497a9728f235880efb63400ce598dbbee",
+        "provider_records": "9b60e7aee962974d98600159e027ea73f793ae243a3297ad38e302affb3c92be",
         "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
         "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
-        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+        "observations": "0966507eb4a99f456a7fb17f7a937c326afa4f4567441daa693b0a299d23fc6b",
     },
     {
-        "provider_records": "5aae914b346d01814e28bf563a7f0a913cb0bca0ca0be57216849a3a0af71e52",
+        "provider_records": "3278e0102b460563ca647869a5b950c139edca6b9b13c97197c71c22a8483819",
         "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
         "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
-        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+        "observations": "0966507eb4a99f456a7fb17f7a937c326afa4f4567441daa693b0a299d23fc6b",
     },
 ]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"

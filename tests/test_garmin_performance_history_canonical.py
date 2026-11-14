@@ -611,7 +611,10 @@ class HistoryReprojectionGoldenTests(unittest.TestCase):
 
         self.assertEqual(rows["raw_records"], ingested["raw_records"])
         self.assertEqual(rows["raw_records_sha256"], ingested["raw_records_sha256"])
-        # The re-projection is pinned by how it differs from the live ingest.
+        # The re-projection equals the live ingest (#2782): every observation,
+        # with its owner and provenance, and the Coach context.
+        self.assertEqual(rows["observations"], ingested["observations"])
+        self.assertEqual(context, ingested["coach_context"])
         before, after = set(ingested["observations"]), set(rows["observations"])
         reprojected = {
             "observations_removed": sorted(before - after),

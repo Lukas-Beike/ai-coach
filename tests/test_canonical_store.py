@@ -165,7 +165,14 @@ class CanonicalJsonTests(unittest.TestCase):
 
 
 class ProviderRecordStoreTests(StoreFixture):
-    def write(self, payload: dict[str, Any], *, version: int = 1, now: str = STAMP):
+    def write(
+        self,
+        payload: dict[str, Any],
+        *,
+        version: int = 1,
+        now: str = STAMP,
+        fetched_at: str = STAMP,
+    ):
         return canonical_store.upsert_provider_record(
             self.db,
             provider="intervals",
@@ -173,7 +180,7 @@ class ProviderRecordStoreTests(StoreFixture):
             source_record_id="rec-1",
             payload=payload,
             mapper_version=version,
-            fetched_at=STAMP,
+            fetched_at=fetched_at,
             now=now,
         )
 
@@ -190,6 +197,16 @@ class ProviderRecordStoreTests(StoreFixture):
         self.write({"name": "Ride"})
         self.assertIs(self.write({"name": "Ride"}, now=LATER), WriteOutcome.UNCHANGED)
         self.assertEqual(self.one("SELECT updated_at FROM provider_records")[0], STAMP)
+        # A later delivery of the same payload takes only its fetch time, so a
+        # re-projection stamps the time the live ingest stamped (#2782).
+        self.assertIs(
+            self.write({"name": "Ride"}, now=LATER, fetched_at=LATER),
+            WriteOutcome.UNCHANGED,
+        )
+        self.assertEqual(
+            self.one("SELECT payload, updated_at, fetched_at FROM provider_records"),
+            ('{"name":"Ride"}', STAMP, LATER),
+        )
 
     def test_changed_payload_is_updated_in_place(self) -> None:
         self.write({"name": "Ride"})

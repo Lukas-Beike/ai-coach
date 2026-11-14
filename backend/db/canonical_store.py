@@ -29,6 +29,7 @@ from backend.canonical.records import (
     Observation,
     ObservationPeriod,
 )
+from backend.canonical.section_items import section_of
 from backend.canonical.validation import MAX_ACTIVITY_DURATION_S
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
@@ -223,7 +224,10 @@ def upsert_provider_record(
 ) -> WriteOutcome:
     """Store one sanitized raw record; an unchanged hash and version is not rewritten.
 
-    ``observed_on`` is the ISO day the record belongs to, for windowed reads.
+    ``observed_on`` is the ISO day the record belongs to, for windowed reads. A
+    record delivered again unchanged keeps its row and only takes the new
+    ``fetched_at``, so a re-projection stamps its observations with the same
+    retrieval time as the live ingest (#2782).
     """
     text = canonical_json(payload)
     digest = payload_hash(text)
@@ -243,7 +247,8 @@ def upsert_provider_record(
     }
     existing = _fetch_row(
         db,
-        "SELECT payload_hash, mapped_version, state, observed_on FROM provider_records "
+        "SELECT payload_hash, mapped_version, state, observed_on, fetched_at "
+        "FROM provider_records "
         "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
         tuple(key.values()),
     )
@@ -256,6 +261,8 @@ def upsert_provider_record(
         and existing["state"] == ProviderRecordState.ACTIVE.value
         and existing["observed_on"] == observed_on
     ):
+        if existing["fetched_at"] != fetched_at:
+            update_row(db, "provider_records", {"fetched_at": fetched_at}, key)
         return WriteOutcome.UNCHANGED
     update_row(db, "provider_records", row, key)
     return WriteOutcome.UPDATED
@@ -895,6 +902,23 @@ def _observation_series(observation: Observation) -> str:
     return ""
 
 
+def _outranked(
+    existing: Mapping[str, Any],
+    values: Mapping[str, Any],
+    yields_to: Collection[str] | None,
+) -> bool:
+    """Whether the stored row of another record wins over ``values`` (#2782)."""
+    if yields_to is None:
+        return False
+    stored, new = (
+        datetime.fromisoformat(row["retrieved_at"]) if row["retrieved_at"] else None
+        for row in (existing, values)
+    )
+    if stored is None or new is None or stored == new:
+        return section_of(existing["owner_record_id"] or "") in yields_to
+    return stored > new
+
+
 def upsert_observation(
     db: Any,
     observation: Observation,
@@ -904,6 +928,7 @@ def upsert_observation(
     fill_only: bool = False,
     owner: str | None = None,
     derivation: Mapping[str, Any] | None = None,
+    yields_to: Collection[str] | None = None,
 ) -> WriteOutcome:
     """Insert or update one observation by its natural key; the row becomes active.
 
@@ -916,6 +941,12 @@ def upsert_observation(
     source record wrote; it inserts, updates its own row, revives a retired row,
     or replaces a row left at an older mapper version, which no stored record
     re-projects any more.
+
+    ``yields_to`` (the sections that outrank this one, None for no precedence)
+    makes one rule for a natural key two source records share, the same in the
+    live ingest and the re-projection (#2782): the later retrieval wins, and on
+    the same retrieval the outranking section. A record always updates its own
+    row, and a row left at an older mapper version is always replaced.
     """
     natural_key = observation_natural_key(observation)
     values = _observation_values(
@@ -945,10 +976,10 @@ def upsert_observation(
         )
         return WriteOutcome.WRITTEN
     if (
-        fill_only
-        and existing["state"] == ProjectionState.ACTIVE.value
-        and existing["source_record_id"] != values["source_record_id"]
+        existing["state"] == ProjectionState.ACTIVE.value
         and existing["mapper_version"] >= values["mapper_version"]
+        and existing["source_record_id"] != values["source_record_id"]
+        and (fill_only or _outranked(existing, values, yields_to))
     ):
         return WriteOutcome.UNCHANGED
     if owner is None:
