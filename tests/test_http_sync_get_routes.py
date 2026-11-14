@@ -153,6 +153,18 @@ class SyncGetRoutesTests(unittest.TestCase):
         self.assertEqual(
             [(200, {"activity_id": "CaseSensitive-1"})], self.handler.responses
         )
+        # A failing step comparison (#2830) never costs the session its details.
+        self.activities.planned_adherence.side_effect = RuntimeError("unit read")
+        handler = FakeHandler()
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
+            dispatch_route(self.routes, handler, "/api/activities/CaseSensitive-1")
+        self.assertEqual([(200, {"activity_id": "CaseSensitive-1"})], handler.responses)
+        self.assertEqual(
+            logs.output,
+            [
+                "WARNING:intervals_coach:planned step adherence unavailable: RuntimeError"
+            ],
+        )
 
     def test_activity_page_and_detail_are_passed_through(
         self,

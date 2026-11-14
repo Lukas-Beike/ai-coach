@@ -27,13 +27,12 @@ from backend.performance.comparable_sessions import comparable_sessions
 from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
 from backend.performance.planned_targets import (
     heart_rate_cap_execution,
-    matched_unit,
     planned_target_execution,
     unit_steps,
-    units_around,
 )
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
+from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
 # Per-field source labels, zone-time arrays and executed strength sets stay in
@@ -198,6 +197,26 @@ class CoachActivityReadToolService:
             250, future_only=True, since=day - timedelta(days=2)
         )
 
+    @staticmethod
+    def _units_around(
+        units: list[dict[str, Any]] | None, day: date | None
+    ) -> list[dict[str, Any]] | None:
+        """Units one day around the session's date.
+
+        The context window is anchored on today, so an older session would lose its
+        plan; the unit comes with the session instead.
+        """
+        if units is None or day is None:
+            return None
+        first, last = day - timedelta(days=1), day + timedelta(days=1)
+        return [
+            unit
+            for unit in units
+            if first.isoformat()
+            <= iso_date_prefix(unit.get("date"))
+            <= last.isoformat()
+        ]
+
     def _with_session_context(self, detail: dict[str, Any]) -> dict[str, Any]:
         """The detail with its planned units and the session checks.
 
@@ -206,9 +225,7 @@ class CoachActivityReadToolService:
         """
         day = self._session_day(detail)
         units = self._units_since(day)
-        # The context window is anchored on today, so an older session would lose
-        # its plan; the unit comes with the session instead.
-        around = units_around(units, day)
+        around = self._units_around(units, day)
         result = {
             **detail,
             "planned_units": None
@@ -312,7 +329,7 @@ class CoachActivityReadToolService:
         """
         if session.get("sport") != "run" or self._unit_thresholds is None:
             return None
-        unit = matched_unit(session, focus, around)
+        unit = _matched_unit(session, focus, around)
         cap = None if unit is None else stored_cap(unit)
         if unit is None or cap is None:
             return None
@@ -329,7 +346,7 @@ class CoachActivityReadToolService:
         """Work laps against the matched planned unit's steps, for runs and rides."""
         if session.get("sport") not in ("run", "ride") or self._unit_thresholds is None:
             return None
-        unit = matched_unit(session, focus, around)
+        unit = _matched_unit(session, focus, around)
         analysis = detail.get("analysis")
         execution = analysis.get("execution") if isinstance(analysis, dict) else None
         if unit is None or not isinstance(execution, dict):
@@ -422,6 +439,28 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     return sections
 
 
+def _matched_unit(
+    session: Mapping[str, Any], focus: Any, around: list[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """The focus's planned unit, else the one unit of the session's day and sport.
+
+    A unit without a session focus still has steps to compare, so the same
+    unique day-and-sport rule as the focus applies without needing a focus.
+    """
+    units = around or []
+    unit_id = focus.get("planned_unit_id") if isinstance(focus, dict) else None
+    if unit_id:
+        return next((unit for unit in units if unit.get("id") == unit_id), None)
+    day = iso_date_prefix(session.get("started_at_local"))
+    same = [
+        unit
+        for unit in units
+        if iso_date_prefix(unit.get("date")) == day
+        and planned_sport_environment(unit)[0].value == session.get("sport")
+    ]
+    return same[0] if len(same) == 1 else None
+
+
 def _strength_plan(
     detail: Mapping[str, Any],
     session: Mapping[str, Any],
@@ -432,7 +471,7 @@ def _strength_plan(
     executed = detail.get("strength_sets")
     if session.get("sport") != "strength" or not isinstance(executed, dict):
         return None
-    unit = matched_unit(session, focus, around)
+    unit = _matched_unit(session, focus, around)
     structure = None if unit is None else unit.get("strength_structure")
     if not isinstance(structure, list):
         return None

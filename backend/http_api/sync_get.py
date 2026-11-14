@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
@@ -12,6 +13,8 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
+
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 class SyncGetRoutes:
@@ -95,7 +98,13 @@ class SyncGetRoutes:
             profile={},
             today=self._local_today(),
         )
-        adherence = service.planned_adherence(payload)
+        try:
+            adherence = service.planned_adherence(payload)
+        except Exception as exc:  # noqa: BLE001 - the comparison is optional; never fail the details
+            _LOGGER.warning(
+                "planned step adherence unavailable: %s", type(exc).__name__
+            )
+            adherence = None
         if adherence is not None:
             payload["planned_adherence"] = adherence
         # Performance validation belongs to the Coach's complete context.

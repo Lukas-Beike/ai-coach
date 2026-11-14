@@ -341,16 +341,73 @@ class PlannedStepAdherenceTests(unittest.TestCase):
         )
         self.assertNotIn("start_s", steps[11])
 
-    def test_the_read_service_compares_the_unit_of_the_session_day(self) -> None:
+    def test_gaps_split_by_planned_time_and_stops_do_not_count(self) -> None:
+        cases = {
+            # 2 km at Z2 Pace's middle (3.304 m/s) is 605 s against 300 s.
+            "- 2km Z2 Pace\n- 5m Z1 Pace": ("warmup", (0, 401), None),
+            # A heart-rate distance step has no planned time: the gap stays unshared.
+            "- 1km 120-140bpm HR\n- 5m Z2 Pace": ("warmup", None, "window_unknown"),
+        }
+        for head, (role, window, unscored) in cases.items():
+            with self.subTest(head):
+                plan = f"{head}\n\n5x\n- 3m 4:20-4:30/km Pace\n- 90s Z1 Pace"
+                first = self._adherence(_run(), plan)["steps"][0]
+                self.assertEqual(first["role"], role)
+                self.assertEqual(
+                    (first.get("start_s"), first.get("end_s")) if window else None,
+                    window,
+                )
+                self.assertEqual(first.get("unscored"), unscored)
+        # 30 s standing still at the first rep's start: neither out of target nor in its mean.
+        session = _run()
+        streams = _display_streams(session)
+        speeds = streams["channels"]["speed_mps"]["values"]
+        for index, time in enumerate(streams["time_s"]):
+            if 600 <= time < 630:
+                speeds[index] = 0.0
+        result = planned_step_adherence(
+            session_execution(session),
+            structured_steps(PLAN),
+            THRESHOLDS,
+            "run",
+            streams=streams,
+        )
+        rep = result["steps"][1]
+        self.assertEqual((rep["time_in_target_pct"], rep["actual"]), (100, 263))
+
+    def test_steps_between_reps_are_recoveries_only_when_clearly_easier(self) -> None:
+        tempo = "- 10m Z2 Pace\n\n5x\n- 3m 4:20-4:30/km Pace\n- 90s 5:00-5:10/km Pace"
+        self.assertEqual(
+            [step["role"] for step in self._adherence(_run(), tempo)["steps"][:3]],
+            ["warmup", "work", "step"],
+        )
+
+    def test_a_steady_session_shares_its_span_by_planned_duration(self) -> None:
+        steady = synthetic_session([("lap", 1800, 3.0, (140.0, 145.0))], kinds=False)
+        result = self._adherence(steady, "- 10m Z1 Pace\n- 20m Z2 Pace")
+        self.assertEqual(
+            [
+                (step["role"], step["start_s"], step["end_s"])
+                for step in result["steps"]
+            ],
+            [("step", 0, 600), ("step", 600, 1800)],
+        )
+        # 3.0 m/s is inside Z1 Pace (below 3.1 m/s) and below Z2 Pace.
+        self.assertEqual(
+            [step["time_in_target_pct"] for step in result["steps"]], [100, 0]
+        )
+        self.assertEqual(result["score_pct"], 33)
+
+    def test_the_read_service_compares_the_unit_the_calendar_pairs(self) -> None:
         session = _run()
         unit = {
             "id": "unit-1",
-            "date": "2026-11-03T00:00:00",
+            "date": "2026-11-03",
             "description": PLAN,
             "type": "Run",
         }
         units = Mock()
-        units.list.return_value = [unit]
+        units.list_between.return_value = [unit]
         thresholds = Mock()
         thresholds.thresholds.return_value = THRESHOLDS
         service = ActivityAnalysisReadService(
@@ -361,8 +418,20 @@ class PlannedStepAdherenceTests(unittest.TestCase):
             planned_units=lambda: units,
             unit_thresholds=lambda: thresholds,
         )
+        summaries = [
+            {"id": key, "sport": "run", "type": "Run", "started_at_local": start}
+            for key, start in (
+                ("act_1", "2026-11-03T07:00:00"),
+                ("act_2", "2026-11-03T18:00:00"),
+            )
+        ]
+        service.summaries_between = Mock(return_value=summaries)  # type: ignore[method-assign]
         document: dict[str, Any] = {
-            "session": {"sport": "run", "started_at_local": "2026-11-03T07:00:00"},
+            "session": {
+                "activity_id": "act_1",
+                "sport": "run",
+                "started_at_local": "2026-11-03T07:00:00",
+            },
             "analysis": {"execution": session_execution(session)},
             "streams": _display_streams(session),
         }
@@ -371,10 +440,9 @@ class PlannedStepAdherenceTests(unittest.TestCase):
         self.assertEqual(
             (result["planned_unit_id"], result["score_pct"]), ("unit-1", 64)
         )
-        units.list.assert_called_once_with(
-            250, future_only=True, since=date(2026, 11, 1)
-        )
-        document["session"]["started_at_local"] = "2026-11-05T07:00:00"
+        units.list_between.assert_called_once_with(date(2026, 11, 3), date(2026, 11, 3))
+        # The evening run is the day's extra session: the calendar pairs the morning one.
+        document["session"]["activity_id"] = "act_2"
         self.assertIsNone(service.planned_adherence(document))
         document["session"]["sport"] = "strength"
         self.assertIsNone(service.planned_adherence(document))

@@ -2,18 +2,21 @@
 
 import functools
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
+from backend.activities.matching import match_planned_workouts
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
 from backend.activities.route_store import stored_route_block
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import timezone_name
+from backend.calendar.canonical import canonical_planned_workouts
+from backend.canonical.activity_summary import legacy_activity_keys, stored_activity_key
 from backend.canonical.local_time import local_date
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
@@ -38,12 +41,7 @@ from backend.performance.detail_envelope import (
 )
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.local_tss import THRESHOLD_KINDS
-from backend.performance.planned_targets import (
-    matched_unit,
-    planned_step_adherence,
-    unit_steps,
-    units_around,
-)
+from backend.performance.planned_targets import planned_step_adherence, unit_steps
 from backend.performance.session_zones import (
     dated_thresholds,
     own_configurations,
@@ -85,30 +83,34 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._unit_thresholds = unit_thresholds
 
     def planned_adherence(self, document: Mapping[str, Any]) -> dict[str, Any] | None:
-        """A run's or ride's steps against its matched local planned unit (#2830).
+        """A run's or ride's steps against its local planned unit (#2830).
 
-        ``None`` without a matched unit with a workout text, so the session
-        details show nothing; the Coach reads the laps' comparison instead.
+        The unit is the one the calendar pairs with the session on its day
+        (``match_planned_workouts``), so "Details" of an extra session shows
+        nothing. ``None`` also without an execution or a workout text; the
+        Coach reads the laps' comparison instead.
         """
         session = document.get("session")
+        analysis = document.get("analysis")
+        execution = analysis.get("execution") if isinstance(analysis, Mapping) else None
         if (
             self._planned_units is None
             or self._unit_thresholds is None
             or not isinstance(session, Mapping)
             or session.get("sport") not in ("run", "ride")
+            or not isinstance(execution, Mapping)
+            or execution.get("status") != "ok"
         ):
             return None
         try:
             day = date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
         except ValueError:
             return None
-        units = self._planned_units().list(
-            250, future_only=True, since=day - timedelta(days=2)
+        units = self._planned_units().list_between(day, day)
+        unit = _paired_unit(
+            units, self.summaries_between(day, day) or [], session.get("activity_id")
         )
-        unit = matched_unit(session, None, units_around(units, day))
-        analysis = document.get("analysis")
-        execution = analysis.get("execution") if isinstance(analysis, Mapping) else None
-        if unit is None or not isinstance(execution, Mapping):
+        if unit is None:
             return None
         steps = unit_steps(unit)
         if not isinstance(steps, list):
@@ -277,6 +279,21 @@ class ActivityAnalysisReadService(ActivityReadService):
             document["route"] = route
         _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
+
+
+def _paired_unit(
+    units: Sequence[dict[str, Any]],
+    activities: Sequence[ActivitySummary],
+    session_id: Any,
+) -> dict[str, Any] | None:
+    """The local planned unit the calendar pairs with the session, if one."""
+    planned = canonical_planned_workouts(list(units), len(units))
+    keys = [
+        planned[index].get("local_id")
+        for index, row in match_planned_workouts(planned, activities).items()
+        if str(session_id) in (stored_activity_key(row), *legacy_activity_keys(row))
+    ]
+    return next((unit for unit in units if keys == [str(unit.get("id"))]), None)
 
 
 def _add_purpose(session: dict[str, Any], summary: ActivitySummary | None) -> None:
