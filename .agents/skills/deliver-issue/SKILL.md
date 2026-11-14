@@ -13,11 +13,12 @@ Every issue handed over for delivery runs through this skill (athlete rule
 Copy this checklist into your response and tick it as you go:
 
 ```text
-- [ ] 1 Brief: issue started, no blocking question left
+- [ ] 1 Brief: parallel work ruled out; issue started; no blocking question left
 - [ ] 2 Spec: criteria in the PR body; main specs or OpenSpec change updated
-- [ ] 3 Implemented with tests; run-tests-changed and validation pass; evidence per criterion
-- [ ] 4 pr workflow to a verified merge; develop push runs green
-- [ ] 5 issue-status clean; issue closed or part ticked; ledger line; retro
+- [ ] 3 Implemented with tests (design note approved for start, storage or sync changes);
+      run-tests-changed and validation pass; evidence per criterion; OpenSpec change archived
+- [ ] 4 pr workflow to a verified merge; develop push runs checked, a red run reported
+- [ ] 5 issue-status clean; issue closed or part ticked; ledger line when orchestrated; retro
 ```
 
 ## Authorization

@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", required=True)
     parser.add_argument("--password-file", required=True)
-    # Two weeks' warning leaves time to renew the certificate.
+    # Fewer days to certificate expiry fail the check (exit 1).
     parser.add_argument("--min-tls-days", type=float, default=14)
     parser.add_argument("--ca-file")
     args = parser.parse_args(argv)

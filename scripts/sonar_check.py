@@ -30,7 +30,7 @@ SETUP_HINT = (
     "Sonar CLI not found. Install it from https://sonarsource.com/sonarqube/cli, "
     "put it on PATH, and run `sonar auth login`."
 )
-TIMEOUT = 900  # seconds; only bounds a hung analysis
+TIMEOUT = 900  # seconds; bounds any hung sonar CLI call
 SAFE_RULE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 SAFE_FILE = re.compile(r"[\w./\\@+ -]{1,200}")
 # Top-level keys that are not issue sections.
