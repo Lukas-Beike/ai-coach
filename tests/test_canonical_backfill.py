@@ -498,6 +498,41 @@ class ReprojectionTests(BackfillFixture):
 
         self.assertEqual(self.canonical_snapshot(), live)
 
+    def test_two_sections_of_one_payload_with_their_own_fetch_times(self) -> None:
+        # #2782 (Gitar): a section retained from an earlier read keeps that read's
+        # time; inside one payload the later retrieval wins as in the re-projection.
+        day = "2026-10-03"
+        payload = garmin_payload(
+            readiness=[{"calendarDate": day, "score": 81}],
+            training_readiness_history=[{"calendarDate": day, "score": 66}],
+        )
+        payload["source_freshness"] = {
+            "readiness": {"fetched_at": "2026-09-19T06:00:00+00:00"},
+            "training_readiness_history": {"fetched_at": NOW},
+        }
+        self.set_garmin(self.manager, payload)
+        live = self.canonical_snapshot()
+        self.assertEqual(
+            self.rows(
+                "SELECT value, owner_record_id FROM observations "
+                "WHERE metric = 'readiness' AND state = 'active'"
+            ),
+            [
+                {
+                    "value": 66.0,
+                    "owner_record_id": f"training_readiness_history/{day}",
+                }
+            ],
+        )
+
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(self.make_backfill())
+
+        self.assertEqual(self.canonical_snapshot(), live)
+
     def garmin_activity_rows(self) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT details, load, mapper_version FROM activity_records "
