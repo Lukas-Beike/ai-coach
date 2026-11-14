@@ -61,8 +61,9 @@ jobs:
           # A conflict resolution once reverted the released version (#2733). The
           # files are read through the API, so no pull-request code runs here.
           version() {
+            local ref="$1"
             gh api -H "Accept: application/vnd.github.raw" \
-              "repos/$REPOSITORY/contents/server.py?ref=$1" \
+              "repos/$REPOSITORY/contents/server.py?ref=$ref" \
               | sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p'
           }
           merge_base="$(gh api "repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA" \
