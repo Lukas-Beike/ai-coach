@@ -67,6 +67,13 @@
           },
           {
             "type": "command",
+            "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_shell_backslashes.py\"",
+            "shell": "powershell",
+            "timeout": 10,
+            "onFailure": "block"
+          },
+          {
+            "type": "command",
             "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_resolve_thread.py\"",
             "shell": "powershell",
             "timeout": 10,
