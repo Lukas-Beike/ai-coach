@@ -107,6 +107,20 @@ test("only the kept explanations remain as helper texts", () => {
   assert.ok(!/class="eyebrow"/.test(index));
 });
 
+// Each Coach model block says when its model is used (#2744); the entry points follow the routing.
+test("the three Coach model blocks name their entry points in an info popover", () => {
+  for (const [task, points] of [
+    ["Conversation", ["im Chat schreibst", "Morgen-Check-in", "„Besprechen“", "„Lösen“", "„Strukturieren“ im Kalender"]],
+    ["Planning", ["„Analyse &amp; Plan“", "„+“-Menü", "„Mit dem Coach analysieren“ im Kalender"]],
+    ["Nutrition", ["„Nährwerttabelle fotografieren“", "Websuche nach fehlenden Nährwerten"]],
+  ]) {
+    assert.ok(index.includes(`popovertarget="modelInfo${task}"`), `${task} info button`);
+    const tooltip = new RegExp(`<div id="modelInfo${task}" class="analysis-info-tooltip" popover="auto" role="tooltip">([^<]*)</div>`).exec(index);
+    assert.ok(tooltip, `${task} popover`);
+    for (const point of points) assert.ok(tooltip[1].includes(point), `${task} names ${point}`);
+  }
+});
+
 test("a Coach link names its host when the label does not, and escapes it", () => {
   const context = loadPublicScript("views.js", { URL });
   const differing = context.inlineMarkdown("[Mehr dazu](https://www.example.invalid/path?a=1&b=2)");

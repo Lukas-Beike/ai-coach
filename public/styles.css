@@ -1143,6 +1143,8 @@ h2 {
 
 .model-selector, .diagnostic-actions, .task-model { padding: 18px 0 10px; border-top: 1px solid var(--line); }
 .task-model h3 { margin: 0 0 8px; font-size: .8rem; font-weight: 600; }
+.task-model-heading { display: flex; align-items: center; margin: 0 0 8px; }
+.task-model-heading h3 { margin: 0; }
 .task-model-pair { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
 .task-model-pair select { width: 100%; }
 .model-notice { display: block; margin-top: 8px; color: var(--orange); font-size: .74rem; }
