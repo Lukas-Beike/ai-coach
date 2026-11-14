@@ -14,7 +14,7 @@ with the payload's latest sync time.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
@@ -36,6 +36,7 @@ from backend.canonical.local_time import (
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.section_items import (
+    SectionItem,
     key_of,
     record_id,
     section_of,
@@ -64,6 +65,7 @@ from backend.providers.garmin_status_mapping import (
     STATUS_SECTIONS as GARMIN_STATUS_SECTIONS,
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
+from backend.providers.garmin_training_mapping import morning_readiness
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.providers.sleep_period_mapping import map_sleep_periods
@@ -333,6 +335,12 @@ def garmin_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | 
 
 # Returns the stored dedicated training-load row of one Garmin activity id.
 type TrainingLoadLookup = Callable[[str], Any]
+# The stored elements of a Garmin section on one day: (section, day) -> elements.
+type DayItemsLookup = Callable[[str, str], Sequence[SectionItem]]
+# Sections whose mapper keeps one reading a day, the wake-up one. Each reading is
+# stored as its own element, so the day's reading is chosen across the day's
+# elements and only that element emits observations (#2844).
+GARMIN_MORNING_SECTIONS: Final = frozenset({"readiness", "training_readiness_history"})
 
 
 def _garmin_activity_mapper(
@@ -404,12 +412,17 @@ def garmin_ingest_plan(
             retrieved_at=activities_at,
         )
     raw_records.extend(_garmin_section_records(payload, zone=zone))
+    # A reading that does not keep its day's value keeps no level either: its
+    # empty batch retires what it wrote before (#2844).
+    unchosen = _garmin_unchosen_readings(payload)
     batches = tuple(
         batch
         for raw in raw_records
         if raw.record_kind == HEALTH_RECORD_KIND
         and (
-            batch := _stored_garmin_batch(
+            batch := DomainBatch(raw.source_record_id, GARMIN_HEALTH_VERSION)
+            if raw.source_record_id in unchosen
+            else _stored_garmin_batch(
                 raw.source_record_id, raw.payload, zone=zone, fetched=raw.retrieved_at
             )
         )
@@ -466,6 +479,52 @@ def _stored_garmin_batch(
     )
 
 
+def garmin_morning_keys(
+    section: str, items: Sequence[SectionItem]
+) -> frozenset[str] | None:
+    """The keys of the elements that keep their day's reading; None keeps every element."""
+    if section not in GARMIN_MORNING_SECTIONS:
+        return None
+    return frozenset(item.key for item in morning_readiness(items, _item_record))
+
+
+def _item_record(item: SectionItem) -> Mapping[str, Any]:
+    return item.value if isinstance(item.value, Mapping) else {}
+
+
+def garmin_day_reading(
+    source_id: str, payload: Mapping[str, Any], day_items: DayItemsLookup | None
+) -> tuple[SectionItem, ...] | None:
+    """The reading a stored morning-section element re-projects, chosen across its day.
+
+    None when no choice applies (another section, no lookup, an undated element):
+    the element maps itself. Otherwise the day's chosen stored reading, or an empty
+    tuple when the day keeps none (only re-scores), so every reading of a day
+    projects the same values whatever order the re-projection takes (#2844).
+    """
+    section = section_of(source_id)
+    if section not in GARMIN_MORNING_SECTIONS or day_items is None:
+        return None
+    item = unwrapped(section, key_of(source_id), payload)
+    if item is None or not item.observed_on:
+        return None
+    siblings = day_items(section, item.observed_on)
+    keys = garmin_morning_keys(section, siblings) or frozenset()
+    return tuple(sibling for sibling in siblings if sibling.key in keys)[:1]
+
+
+def _garmin_unchosen_readings(payload: Mapping[str, Any]) -> frozenset[str]:
+    """The record ids of the payload's readings that do not keep their day's value."""
+    unchosen: set[str] = set()
+    for section in GARMIN_MORNING_SECTIONS:
+        items = split_section(payload[section]) if section in payload else []
+        keys = garmin_morning_keys(section, items) or frozenset()
+        unchosen.update(
+            record_id(section, item.key) for item in items if item.key not in keys
+        )
+    return frozenset(unchosen)
+
+
 def _garmin_section_observations(
     section: str,
     value: object,
@@ -481,12 +540,14 @@ def _garmin_section_observations(
     added to ``owners`` with its day; the observations of any other element have
     no owner.
     """
-    for item in split_section(value):
+    items = split_section(value)
+    morning = garmin_morning_keys(section, items)
+    for item in items:
         element_id = record_id(section, item.key)
         owner = element_id if element_id in raw_ids else None
         if owner is not None:
             owners[owner] = _element_day(item.observed_on, retrieved_at, zone)
-        if item.value is None:
+        if item.value is None or (morning is not None and item.key not in morning):
             continue
         health = map_garmin_health(
             wrapped(section, item), zone=zone, retrieved_at=retrieved_at
@@ -756,12 +817,15 @@ def reprojection_plan(
     *,
     zone: tzinfo,
     training_loads: TrainingLoadLookup | None = None,
+    day_items: DayItemsLookup | None = None,
 ) -> IngestPlan | None:
     """Plan the canonical rows that one stored raw record projects to today.
 
     The stored payload and its fetch time are the inputs, plus, for a Garmin
-    activity, its stored dedicated training-load row (``training_loads``), so the
-    result equals what an ingest produces under the same mapper version. Returns None
+    activity, its stored dedicated training-load row (``training_loads``), and for
+    a reading of a ``GARMIN_MORNING_SECTIONS`` section the other stored readings of
+    its day (``day_items``), so the result equals what an ingest produces under the
+    same mapper version. Returns None
     when the record kind has no mapper. A row whose payload or fetch time is unusable
     counts as one invalid row.
     """
@@ -794,7 +858,7 @@ def reprojection_plan(
         return _threshold_observation_plan(
             provider, profile, source_id, local_date(fetched, zone).isoformat()
         )
-    return _reprojected_health(provider, source_id, payload, zone, fetched)
+    return _reprojected_health(provider, source_id, payload, zone, fetched, day_items)
 
 
 def _threshold_observation_plan(
@@ -857,6 +921,7 @@ def _reprojected_health(
     payload: Mapping[str, Any],
     zone: tzinfo,
     fetched: datetime,
+    day_items: DayItemsLookup | None = None,
 ) -> IngestPlan:
     """Re-map one stored health element, which holds the exact mapper input.
 
@@ -872,9 +937,19 @@ def _reprojected_health(
         return IngestPlan(provider=provider, domain_batches=batches)
     if not sections:
         return IngestPlan(provider=provider, skipped_invalid=1)
-    health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
     item = unwrapped(section, key_of(section_name), payload)
     day = _element_day(item.observed_on if item else None, fetched, zone)
+    owner = section_name
+    choice = garmin_day_reading(section_name, payload, day_items)
+    if choice is not None:
+        # Every reading of a day projects the day's chosen reading, owned by it,
+        # so no order of the re-projection leaves the day without its value; only
+        # the chosen reading keeps its level (#2844).
+        if not choice or choice[0].key != key_of(section_name):
+            batches = ()
+        sections = wrapped(section, choice[0]) if choice else {}
+        owner = record_id(section, choice[0].key) if choice else section_name
+    health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
     return IngestPlan(
         provider=provider,
         observations=tuple(
@@ -882,7 +957,7 @@ def _reprojected_health(
                 observation,
                 GARMIN_HEALTH_VERSION,
                 fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
-                owner=section_name,
+                owner=owner,
                 ranks=GARMIN_SECTION_RANKS,
             )
             for observation in health.records

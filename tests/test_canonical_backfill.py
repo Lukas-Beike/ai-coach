@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
@@ -32,7 +33,7 @@ from support import temp_database
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
-from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import DatabaseManager, canonical_store, garmin_store, row_factory
 from backend.db import manager as manager_module
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -532,6 +533,72 @@ class ReprojectionTests(BackfillFixture):
             self.run_to_completion(self.make_backfill())
 
         self.assertEqual(self.canonical_snapshot(), live)
+
+    def test_a_day_of_readiness_snapshots_keeps_the_wake_up_reading(self) -> None:
+        # #2844: Garmin returns several readiness snapshots a day; the stored value
+        # is the wake-up reading in the live ingest and in the re-projection.
+        day = "2026-10-03"
+        afternoon = {
+            "calendarDate": day,
+            "timestamp": f"{day}T14:00:00",
+            "score": 40,
+            "level": "LOW",
+        }
+        wake_up = {
+            "calendarDate": day,
+            "timestamp": f"{day}T06:10:00",
+            "inputContext": "AFTER_WAKEUP_RESET",
+            "score": 64,
+            "level": "MODERATE",
+        }
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                readiness=[afternoon, wake_up],
+                training_readiness_history=[afternoon, wake_up],
+            ),
+        )
+        query = (
+            "SELECT value, owner_record_id FROM observations "
+            "WHERE metric = 'readiness' AND state = 'active'"
+        )
+        levels = (
+            "SELECT code, source_record_id FROM categorical_observations "
+            "WHERE domain = 'readiness_level' AND state = 'active' ORDER BY code"
+        )
+        self.assertEqual(
+            self.rows(query),
+            [{"value": 64.0, "owner_record_id": f"readiness/{day}#1"}],
+        )
+        live, live_levels = self.canonical_snapshot(), self.rows(levels)
+        self.assertEqual({row["code"] for row in live_levels}, {"MODERATE"})
+
+        # Whatever reading the re-projection takes first, it projects the day's
+        # wake-up reading owned by that reading, so the day never loses its value.
+        stored = self.rows(
+            "SELECT provider, record_kind, source_record_id, payload, fetched_at "
+            "FROM provider_records WHERE source_record_id = ?",
+            (f"readiness/{day}",),
+        )[0]
+        with self.manager.reader() as db:
+            plan = canonical_plans.reprojection_plan(
+                stored, zone=ZONE, day_items=partial(garmin_store.day_items, db)
+            )
+        assert plan is not None
+        self.assertEqual(
+            [(item.observation.value.value, item.owner) for item in plan.observations],
+            [(64.0, f"readiness/{day}#1")],
+        )
+        self.assertEqual(plan.domain_batches, ())
+
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(self.make_backfill())
+
+        self.assertEqual(self.canonical_snapshot(), live)
+        self.assertEqual(self.rows(levels), live_levels)
 
     def garmin_activity_rows(self) -> list[dict[str, Any]]:
         return self.rows(
@@ -1258,10 +1325,8 @@ class ReprojectionTests(BackfillFixture):
         """Patch the plan the backfill uses; the real mapper runs, then ``transform`` edits it."""
         real = backfill_module.reprojection_plan
 
-        def plan(
-            raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
-        ) -> Any:
-            result = real(raw_row, zone=zone, training_loads=training_loads)
+        def plan(raw_row: Mapping[str, Any], **kwargs: Any) -> Any:
+            result = real(raw_row, **kwargs)
             return None if result is None else transform(raw_row, result)
 
         return patch(
