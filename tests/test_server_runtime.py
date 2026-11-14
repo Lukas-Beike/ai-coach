@@ -111,7 +111,7 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertIn('type="checkbox" name="sports"', index)
         self.assertNotIn('name="sports" multiple', index)
         self.assertIn('name="timezone" autocomplete="off"', index)
-        self.assertIn('id="profileContextNotice"', index)
+        self.assertNotIn("profileContextNotice", index)
         self.assertIn('"Erwartete Dauer"', plan_views)
         self.assertIn(
             "competitionDistance(competition.distance)",
