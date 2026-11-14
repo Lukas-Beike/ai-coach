@@ -187,6 +187,101 @@ def _at_heart_rate(
     return lambda sport, bpm: output_at_heart_rate(read(), sport, bpm, today)
 
 
+# The threshold charts' twelve calendar weeks (#2693).
+LT1_HISTORY_WEEKS: Final = 12
+# Garmin's dated thresholds that decide a past week's LT1.
+_LT1_HISTORY_KEYS: Final = (
+    "run_threshold_hr_bpm",
+    "bike_threshold_hr_bpm",
+    "run_threshold_pace_seconds_per_km",
+    "cycling_ftp_watts",
+)
+# The LT1 value of each sport and the key of its origin.
+_LT1_MAIN: Final = {
+    "run": ("pace_seconds_per_km", "pace_origin"),
+    "ride": ("watts", "power_origin"),
+}
+
+
+def _dated_metrics(
+    history: Mapping[str, Mapping[date, float]], day: date
+) -> dict[str, dict[str, Any]]:
+    """Garmin's last dated value of each LT1 input on or before ``day``."""
+    metrics: dict[str, dict[str, Any]] = {}
+    for key in _LT1_HISTORY_KEYS:
+        dated = [item for item in (history.get(key) or {}).items() if item[0] <= day]
+        metrics[key] = {"value": max(dated)[1] if dated else None}
+    return metrics
+
+
+def first_threshold_history(
+    current: Mapping[str, Mapping[str, Any]],
+    profile: Mapping[str, Any],
+    today: date,
+    *,
+    garmin_history: Mapping[str, Mapping[date, float]],
+    zone_configurations: Iterable[ZoneConfiguration],
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """LT1 per sport at the end of each of the last twelve calendar weeks (#2693).
+
+    The running week's point is today's LT1 (``current``, fallbacks and origins
+    included). A past week uses the same rule with the thresholds and zones in
+    effect then (Garmin's dated values, the zones valid that day), the stored
+    LT1 share for every week, and the sessions up to that day; a week whose LT1
+    does not come from at least three own sessions is a gap (athlete decisions,
+    2026-11-14). Each point keeps its heart rate and both origins.
+    """
+    configurations = list(zone_configurations)
+    first = today - timedelta(days=7 * LT1_HISTORY_WEEKS + LT1_DAYS)
+    # Only sessions the chart's weeks can use; the rule narrows each week further.
+    records = [
+        row for row in records if str(row.get("date") or "") >= first.isoformat()
+    ]
+    pct = first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
+    origin = first_threshold_origin(profile)
+    monday = today - timedelta(days=today.weekday())
+    ends = [
+        monday + timedelta(days=6 - 7 * weeks)
+        for weeks in range(LT1_HISTORY_WEEKS - 1, 0, -1)
+    ]
+    result: dict[str, list[dict[str, Any]]] = {"run": [], "ride": []}
+    for day in ends:
+        metrics = _dated_metrics(garmin_history, day)
+        values = performance_current_metrics.first_thresholds(
+            metrics,
+            pct,
+            origin,
+            _zone_two_tops(configurations, metrics, day),
+            functools.partial(output_at_heart_rate, records, today=day),
+        )
+        for sport, (key, origin_key) in _LT1_MAIN.items():
+            own = values.get(sport, {})
+            measured = (
+                own.get(origin_key) == performance_current_metrics.LT1_OWN_SESSIONS
+            )
+            result[sport].append(
+                _lt1_point(day, own if measured else {}, key, origin_key)
+            )
+    for sport, (key, origin_key) in _LT1_MAIN.items():
+        result[sport].append(_lt1_point(today, current.get(sport, {}), key, origin_key))
+    return result
+
+
+def _lt1_point(
+    day: date, values: Mapping[str, Any], key: str, origin_key: str
+) -> dict[str, Any]:
+    """One chart point; without a value it is a gap with no heart rate."""
+    value = values.get(key)
+    return {
+        "date": day.isoformat(),
+        "value": value,
+        "origin": values.get(origin_key) if value is not None else None,
+        "hr_bpm": values.get("hr_bpm") if value is not None else None,
+        "hr_origin": values.get("hr_origin") if value is not None else None,
+    }
+
+
 def current_performance_context(
     garmin: GarminSyncStatus,
     profile: dict[str, Any],

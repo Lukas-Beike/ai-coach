@@ -522,11 +522,11 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 
 #### Scenario: Laufen
 - **WHEN** the athlete opens Analyse › Laufen
-- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace, VO2max, running tolerance), the all-time best efforts under the title "Bestwerte" (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date in its own column and its source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
+- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace with the LT1 pace line, VO2max, running tolerance), the all-time best efforts under the title "Bestwerte" (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date in its own column and its source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
 
 #### Scenario: Radfahren
 - **WHEN** the athlete opens Analyse › Radfahren
-- **THEN** it shows the cycling current values (LT2 FTP and heart rate as "Anaerobe Schwelle (LT2) · …", power per weight, LT1 power and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the all-time power profile (each best with its date in its own column) with its coverage note and the experimental critical-power line, and the development charts (FTP, VO2max); no running value appears.
+- **THEN** it shows the cycling current values (LT2 FTP and heart rate as "Anaerobe Schwelle (LT2) · …", power per weight, LT1 power and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the all-time power profile (each best with its date in its own column) with its coverage note and the experimental critical-power line, and the development charts (FTP with the LT1 power line, VO2max); an LT1 point's readout names its heart rate and origin, and a week without three own steady sessions is a gap; no running value appears.
 
 #### Scenario: Cross-sport values
 - **WHEN** the athlete opens Analyse › Belastung or Erholung

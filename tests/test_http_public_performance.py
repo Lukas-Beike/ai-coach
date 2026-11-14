@@ -170,6 +170,43 @@ class PublicPerformanceStateTests(unittest.TestCase):
         ):
             service.from_inputs(None)
 
+    def test_lt1_history_waits_for_the_background_session_read(self):
+        def failing():
+            raise RuntimeError("background session curves failed")
+
+        def history(read):
+            service = PublicPerformanceStateService(
+                Mock(sync_status=Mock(return_value=GarminSyncStatus())),
+                Mock(get=Mock(return_value={})),
+                Mock(),
+                lambda: date(2026, 11, 13),
+                lt1_history_records=read,
+            )
+            with patch(
+                "backend.http_api.public_performance.performance_context.current_performance_context",
+                return_value={},
+            ):
+                inputs = CanonicalPerformanceInputs()
+                state = service.from_inputs(inputs, first_thresholds=True)
+                # Callers that draw no chart (Coach, nutrition) skip the read.
+                self.assertNotIn(
+                    "first_thresholds",
+                    service.from_inputs(inputs)["performance"]["history"],
+                )
+                return state["performance"]["history"]
+
+        # The state request never reads session curves itself (#2693).
+        self.assertEqual(
+            {"status": "pending"}, history(lambda: None)["first_thresholds"]
+        )
+        self.assertEqual({"status": "failed"}, history(failing)["first_thresholds"])
+        stale = history(lambda: ((), False))["first_thresholds"]
+        self.assertEqual("stale", stale["status"])
+        self.assertEqual((12, 12), (len(stale["run"]), len(stale["ride"])))
+        self.assertEqual(
+            "ok", history(lambda: ((), True))["first_thresholds"]["status"]
+        )
+
     def test_golden_history_of_the_performance_endpoint(self):
         sessions, feedback, loads = golden_history()
         today = GOLDEN_FIRST + timedelta(days=129)

@@ -29,6 +29,7 @@ every named number the code fixes. A test fails when it is out of date.
 | `REASON_CANONICAL_PENDING` | `'canonical_pending'` | `backend/performance/context.py` | The reason an unavailable context gives while the canonical source serves nothing yet. |
 | `PENDING_STATUS` | `'Daten werden vorbereitet'` | `backend/performance/context.py` |  |
 | `STORED_PROVIDERS_SOURCE` | `'Gespeicherte Provider-Daten'` | `backend/performance/context.py` | The source of a context built from the stored provider values. |
+| `LT1_HISTORY_WEEKS` | `12` | `backend/performance/context.py` | The threshold charts' twelve calendar weeks (#2693). |
 | `METHOD_ID` | `'critical-power-speed'` | `backend/performance/critical_power.py` |  |
 | `METHOD_VERSION` | `2` | `backend/performance/critical_power.py` |  |
 | `WINDOW_DAYS` | `28` | `backend/performance/critical_power.py` |  |
