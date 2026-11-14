@@ -3,16 +3,23 @@
     python scripts/prod_diagnostics.py --url <app address> --password-file <secret file>
         [--expect-version 2.1.2] [--expect-schema 27] [--out result.json]
         [--compare previous.json] [--ca-file ca.pem]
+    python scripts/prod_diagnostics.py --url <app address> --password-file <secret file>
+        --section <name> [--section <name> ...]
 
 Prints one line per check (`ok` / `FAIL` / `info`); never a response body,
 cookie, password or error text. Exit 0 all ok, 1 a check failed (a count
 dropped against --compare, a version mismatch, a stale or stuck sync), 2 the
-app could not be reached or read.
+app could not be reached or read. `--section <name>` (repeatable) prints,
+instead of the checks, only the allow-listed counts, flags, state words and
+ages in hours (a `*_at` time as `*_hours`) of the sections in SECTION_FIELDS;
+the state words in FAIL_STATES and a missing section print as FAIL.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
@@ -29,9 +36,57 @@ COUNTS = (
     "external_calendar_events",
 )
 MEMORY = ("rss_bytes", "peak_rss_bytes")
+# Storage and runtime health compared between releases (#2848).
+STORAGE = ("file_bytes", "wal_bytes", "data_dir_free_bytes")
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
+# What `--section` prints of a section: dotted paths of numbers and flags, and
+# state words from STATES; nothing else of the section is printed (#2779, #2781).
+SECTION_FIELDS = {
+    "decoupling_eligibility": re.compile(
+        r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
+        r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
+        r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
+    ),
+    # Storage and runtime health for the post-release check (#2848).
+    "database": re.compile(
+        "|".join(("schema_version", *COUNTS, *STORAGE))
+        + r"|(workout_library_state|stored_payload_bytes)\.[a-z_]+"
+    ),
+    "runtime": re.compile(r"uptime_s|malloc_arena_max|process_memory\.[a-z_]+"),
+    "recovery_copies": re.compile(
+        r"status|available|count|newest_age_hours|total_bytes"
+    ),
+    "garmin_past_workout_removal": re.compile(
+        r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
+        r"|past_links_pending"
+    ),
+    "stream_backfill": re.compile(
+        r"status|(garmin|wahoo)\.(candidates|with_streams|stored|no_file|no_streams"
+        r"|skipped_by_error|blocked|cursor|finished)"
+    ),
+    # Per recording origin and sport (their vocabularies, in backend/canonical):
+    # files, and files per FIT message or field number.
+    "fit_inventory": re.compile(
+        r"status|(garmin|wahoo|strava|zwift|manual|upload|unknown)\."
+        r"(ride|run|swim|walk|hike|strength|row|nordic_ski|alpine_ski|yoga|other"
+        r"|unknown)\.(files|(messages|unmapped_fields|developer_fields)\.[0-9.]+)"
+    ),
+}
+STATES = {
+    "ready",
+    "pending",
+    "ok",
+    "skipped",
+    "finished",
+    "in_progress",
+    "not_started",
+    "failed",
+    "unavailable",
+    "blocked",
+}
+FAIL_STATES = {"failed", "unavailable", "blocked"}
 
 
 def hours_since(stamp: str | None, now: datetime) -> float | None:
@@ -83,7 +138,12 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
     plan = report.get("plan_sync") or {}
     jobs = plan.get("recent_jobs") or []
     calendar = report.get("external_calendar") or {}
-    memory = numbers((report.get("runtime") or {}).get("process_memory"))
+    runtime = report.get("runtime") or {}
+    memory = numbers(runtime.get("process_memory"))
+    copies = report.get("recovery_copies") or {}
+    storage = {name: database.get(name) for name in STORAGE}
+    storage |= {name: runtime.get(name) for name in ("uptime_s", "malloc_arena_max")}
+    storage |= {f"recovery_{name}": value for name, value in copies.items()}
     return {
         "kind": "diagnostics",
         "generated_at": now.isoformat(timespec="seconds"),
@@ -107,7 +167,51 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
         "plan_error_classes": plan_errors(jobs),
         "stuck_jobs": stuck_jobs(jobs, now),
         "memory": {key: memory[key] for key in MEMORY if key in memory},
+        "storage": numbers(storage),
     }
+
+
+def leaves(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    """The dotted path and value of every leaf, sorted by path."""
+    if not isinstance(value, dict):
+        return [(path, value)]
+    return [
+        leaf
+        for key in sorted(value, key=str)
+        for leaf in leaves(value[key], f"{path}.{key}" if path else str(key))
+    ]
+
+
+def printable(value: Any) -> bool:
+    if isinstance(value, str):
+        return value in STATES
+    return value is None or isinstance(value, int | float)
+
+
+def aged(leaf: tuple[str, Any], now: datetime) -> tuple[str, Any]:
+    """A `*_at` time as its age `*_hours`; every other leaf unchanged."""
+    path, value = leaf
+    if not (path.endswith("_at") and isinstance(value, str)):
+        return leaf
+    age = hours_since(value, now)
+    return path[:-3] + "_hours", None if age is None else round(age, 1)
+
+
+def section_lines(
+    report: dict[str, Any], name: str, now: datetime | None = None
+) -> list[tuple[str, str]]:
+    """The allow-listed fields of one section, sorted by path."""
+    section = report.get(name)
+    if not isinstance(section, dict):
+        return [("FAIL", f"section {name} missing")]
+    allowed = SECTION_FIELDS[name]
+    lines = []
+    for leaf in leaves(section):
+        path, value = aged(leaf, now or datetime.now(UTC))
+        if allowed.fullmatch(path) and printable(value):
+            state = "FAIL" if value in FAIL_STATES else "info"
+            lines.append((state, f"{name}.{path} {json.dumps(value)}"))
+    return lines or [("info", f"section {name} empty")]
 
 
 def mark(ok: bool, text: str) -> tuple[str, str]:
@@ -151,7 +255,10 @@ def plan_line(result: dict[str, Any]) -> tuple[str, str]:
 def comparison_lines(
     result: dict[str, Any], previous: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
-    """Record counts must not drop against the previous result; memory is shown.
+    """Record counts must not drop against the previous result.
+
+    Memory and storage (database, WAL, free space, uptime, arena limit,
+    recovery copies) are shown with the previous value.
 
     The calendar sync refills external_calendar_events from today on every
     refresh, so a drop there is no data loss.
@@ -166,12 +273,20 @@ def comparison_lines(
             lines.append(("info", line[1]) if calendar else line)
         else:
             lines.append(("info", f"count {name} {count}"))
-    old_memory = (previous or {}).get("memory") or {}
-    for name, value in result["memory"].items():
-        was = old_memory.get(name)
-        lines.append(
-            ("info", f"memory {name} {value}" + (f" (was {was})" if was else ""))
-        )
+    return lines + shown_lines(result, previous)
+
+
+def shown_lines(
+    result: dict[str, Any], previous: dict[str, Any] | None
+) -> list[tuple[str, str]]:
+    """Memory and storage values, each with the previous release's value."""
+    lines = []
+    for group in ("memory", "storage"):
+        old = (previous or {}).get(group) or {}
+        for name, value in (result.get(group) or {}).items():
+            was = old.get(name)
+            suffix = "" if was is None else f" (was {was})"
+            lines.append(("info", f"{group} {name} {value}{suffix}"))
     return lines
 
 
@@ -216,7 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out")
     parser.add_argument("--compare")
     parser.add_argument("--ca-file")
+    parser.add_argument("--section", action="append", choices=sorted(SECTION_FIELDS))
     args = parser.parse_args(argv)
+    checks_asked = (args.out, args.compare, args.expect_version, args.expect_schema)
+    if args.section and any(value is not None for value in checks_asked):
+        parser.error("--section prints sections; it runs no checks or results")
     try:
         previous = read_result(args.compare)
         session = Session(args.url, args.ca_file)
@@ -229,12 +348,17 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             logout = session.logout()
             print(f"{'ok' if logout == 200 else 'FAIL'} logout {logout}")
-        result = extract(report, datetime.now(UTC))
-        write_result(args.out, result)
+        if not args.section:
+            result = extract(report, datetime.now(UTC))
+            write_result(args.out, result)
     except ProdError as exc:
         print(f"FAIL {exc}")
         return 2
-    lines = checks(result, previous, args.expect_version, args.expect_schema)
+    lines = (
+        [line for name in args.section for line in section_lines(report, name)]
+        if args.section
+        else checks(result, previous, args.expect_version, args.expect_schema)
+    )
     for state, text in lines:
         print(f"{state} {text}")
     failed = not healthy or logout != 200 or any(s == "FAIL" for s, _ in lines)

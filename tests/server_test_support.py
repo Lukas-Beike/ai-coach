@@ -24,6 +24,11 @@ from backend.performance.freshness import GarminSyncStatus
 from backend.sync import garmin_payload_metrics
 
 # Give the application deterministic, fake configuration before importing it.
+# A server imported earlier already built its configuration without these
+# values, for the whole test process (#2789).
+_early = sys.modules.get("server")
+if _early and _early.ENV_CONFIG.intervals_api_key != "test-intervals-key":
+    raise RuntimeError("import server through server_test_support only")
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update(
     {

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import ClassVar
 from unittest import mock
 
+from backend.canonical.vocabulary import RecordingOrigin, Sport
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import prod_client
 import prod_diagnostics
@@ -41,7 +43,9 @@ def report(messages=40):
             "messages": messages,
             "competitions": 3,
             "workout_library_state": {"pending": 1, "note": "text never printed"},
+            "file_bytes": 4096,
         },
+        "recovery_copies": {"count": 1, "newest_age_hours": 2.0},
         "plan_sync": {
             "unsynced_total": 2,
             "unsynced_units": [{"has_error": True}, {"has_error": False}],
@@ -55,6 +59,22 @@ def report(messages=40):
             ],
         },
         "runtime": {"process_memory": {"rss_bytes": 1000}},
+        "decoupling_eligibility": {
+            "status": "ready",
+            "current": True,
+            "days": 365,
+            "note": "text never printed",
+            "groups": {
+                "ride/outdoor": {
+                    "sessions": 6,
+                    "without_streams": 1,
+                    "act_secret": 1,
+                    "counts": {"pass_cv_1s_15": 1, "label": "text never printed"},
+                    "max_half_distribution": {"cv_1s": {"n": 4, "p90": None}},
+                },
+                "act_secret/outdoor": {"sessions": 2},
+            },
+        },
     }
 
 
@@ -163,6 +183,9 @@ class ProdChecksTests(unittest.TestCase):
             "--compare", str(result),
         )  # fmt: skip
         self.assertIn("FAIL count messages 40 -> 39", text)
+        # Storage is shown with the previous release's value (#2848).
+        self.assertIn("info storage file_bytes 4096 (was 4096)", text)
+        self.assertIn("info storage recovery_count 1 (was 1)", text)
         self.assertIn("ok count competitions 3 -> 3", text)
         self.assertEqual(
             prod_diagnostics.comparison_lines(
@@ -183,6 +206,161 @@ class ProdChecksTests(unittest.TestCase):
             ),
             [("info", "count external_calendar_events 20")],
         )
+
+    def test_section_prints_only_allow_listed_fields_in_path_order(self):
+        code, text = self.run_main(
+            prod_diagnostics, "--url", self.url, "--password-file", str(self.secret),
+            "--section", "decoupling_eligibility",
+        )  # fmt: skip
+        self.assertEqual(code, 0)  # the checks (sync.last_error) are not run
+        prefix = "info decoupling_eligibility."
+        self.assertEqual(
+            text.splitlines(),
+            [
+                "ok health",
+                "ok logout 200",
+                f"{prefix}current true",
+                f"{prefix}days 365",
+                f"{prefix}groups.ride/outdoor.counts.pass_cv_1s_15 1",
+                f"{prefix}groups.ride/outdoor.max_half_distribution.cv_1s.n 4",
+                f"{prefix}groups.ride/outdoor.max_half_distribution.cv_1s.p90 null",
+                f"{prefix}groups.ride/outdoor.sessions 6",
+                f"{prefix}groups.ride/outdoor.without_streams 1",
+                f'{prefix}status "ready"',
+            ],
+        )
+        self.assertEqual(
+            prod_diagnostics.section_lines({}, "decoupling_eligibility"),
+            [("FAIL", "section decoupling_eligibility missing")],
+        )
+        failed = {"decoupling_eligibility": {"status": "failed"}}
+        self.assertEqual(
+            prod_diagnostics.section_lines(failed, "decoupling_eligibility"),
+            [("FAIL", 'decoupling_eligibility.status "failed"')],
+        )
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            prod_diagnostics.main(
+                ["--url", self.url, "--password-file", str(self.secret),
+                 "--section", "decoupling_eligibility", "--expect-version", "2.1.2"]
+            )  # fmt: skip
+
+    def test_post_release_sections_print_counts_and_state_words_only(self):
+        # Shapes as the report builds them, with planted text, ids and times.
+        report = {
+            "database": {
+                "schema_version": 29,
+                "messages": 40,
+                "file_bytes": 4096,
+                "wal_bytes": 512,
+                "data_dir_free_bytes": 10**9,
+                "stored_payload_bytes": {"garmin_state": 7},
+                "workout_library_state": {"synced": 3, "note": "text never printed"},
+            },
+            "runtime": {
+                "python": "3.14.0",
+                "platform": "Linux-text never printed",
+                "process_memory": {"rss_bytes": 1000},
+                "uptime_s": 3600,
+                "malloc_arena_max": 2,
+            },
+            "recovery_copies": {
+                "count": 1,
+                "newest_age_hours": 2.0,
+                "total_bytes": 2048,
+            },
+            "garmin_past_workout_removal": {
+                "one_time_done": True,
+                "checked": 4,
+                "removed": 2,
+                "last_run_at": RECENT,
+                "last_outcome": "ok",
+                "past_links_pending": 0,
+            },
+            "stream_backfill": {
+                "garmin": {"stored": 12, "cursor": "finished", "finished": True},
+                "wahoo": {"stored": 3, "cursor": "text never printed"},
+            },
+            "fit_inventory": {
+                "garmin": {
+                    "ride": {
+                        "files": 5,
+                        "messages": {"216": 5},
+                        "unmapped_fields": {"20.134": 4},
+                    },
+                },
+                "act_secret": {"ride": {"files": 1}},
+            },
+        }
+        expected = {
+            "garmin_past_workout_removal": [
+                "checked 4", 'last_outcome "ok"', "last_run_hours 2.0",
+                "one_time_done true", "past_links_pending 0", "removed 2",
+            ],
+            "stream_backfill": [
+                'garmin.cursor "finished"', "garmin.finished true",
+                "garmin.stored 12", "wahoo.stored 3",
+            ],
+            "fit_inventory": [
+                "garmin.ride.files 5", "garmin.ride.messages.216 5",
+                "garmin.ride.unmapped_fields.20.134 4",
+            ],
+            "database": [
+                "data_dir_free_bytes 1000000000", "file_bytes 4096",
+                "messages 40", "schema_version 29",
+                "stored_payload_bytes.garmin_state 7", "wal_bytes 512",
+                "workout_library_state.synced 3",
+            ],
+            "runtime": [
+                "malloc_arena_max 2", "process_memory.rss_bytes 1000",
+                "uptime_s 3600",
+            ],
+            "recovery_copies": [
+                "count 1", "newest_age_hours 2.0", "total_bytes 2048",
+            ],
+        }  # fmt: skip
+        now = datetime.fromisoformat(RECENT) + timedelta(hours=2)
+        for name, fields in expected.items():
+            with self.subTest(section=name):
+                self.assertEqual(
+                    prod_diagnostics.section_lines(report, name, now),
+                    [("info", f"{name}.{field}") for field in fields],
+                )
+        # One login reads several sections; a missing one fails the run.
+        code, text = self.run_main(
+            prod_diagnostics, "--url", self.url, "--password-file", str(self.secret),
+            "--section", "decoupling_eligibility",
+            "--section", "garmin_past_workout_removal",
+        )  # fmt: skip
+        self.assertEqual(code, 1)
+        self.assertIn("info decoupling_eligibility.days 365", text)
+        self.assertIn("FAIL section garmin_past_workout_removal missing", text)
+        # A stopped or failed state is a FAIL line; an empty section is no failure.
+        stopped = {
+            "stream_backfill": {"garmin": {"cursor": "blocked"}},
+            "garmin_past_workout_removal": {"last_outcome": "failed"},
+            "fit_inventory": {},
+        }
+        self.assertEqual(
+            [
+                line
+                for name in ("stream_backfill", "garmin_past_workout_removal")
+                for line in prod_diagnostics.section_lines(stopped, name)
+            ],
+            [
+                ("FAIL", 'stream_backfill.garmin.cursor "blocked"'),
+                ("FAIL", 'garmin_past_workout_removal.last_outcome "failed"'),
+            ],
+        )
+        self.assertEqual(
+            prod_diagnostics.section_lines(stopped, "fit_inventory"),
+            [("info", "section fit_inventory empty")],
+        )
+        # The FIT allow-list names every origin and sport of the vocabulary.
+        fit = prod_diagnostics.SECTION_FIELDS["fit_inventory"]
+        for origin in RecordingOrigin:
+            for sport in [*Sport, "unknown"]:
+                sport_name = getattr(sport, "value", sport)
+                self.assertTrue(fit.fullmatch(f"{origin.value}.{sport_name}.files"))
 
     def test_diagnostics_version_mismatch_and_wrong_password(self):
         code, text = self.run_main(

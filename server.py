@@ -170,7 +170,6 @@ from backend.sync.flow_wiring import (
     build_selected_workout_sync,
     build_workout_library_sync,
 )
-from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.garmin_login import (
     GarminLoginService,
     GarminSecretRegistry,
@@ -198,7 +197,7 @@ from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_wiring import SyncSchedulerServices, build_sync_schedulers
 from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
-from backend.sync.state import SyncStateRepository
+from backend.sync.state import SyncStateRepository, resync_reset_keys
 from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_wiring import (
     WahooConnectionServices,
@@ -233,7 +232,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.13"
+APP_VERSION = "2.1.14"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 COACH_CONVERSATION_GATE = CoachConversationGate()
@@ -445,14 +444,16 @@ PERFORMANCE = build_performance(
     season_preparation=season_preparation,
 )
 APP.performance = PERFORMANCE
+PLAN_GUARD = build_plan_guard(APP)
 ACTIVITY_READS = build_activity_reads(
     APP,
     session_activities=CanonicalTableReader().session_activities,
     refreshable_providers=lambda: configured_for_job(
         PROVIDER_CONFIGURED, "activity_details"
     ),
+    planned_units=lambda: APP.planning.planned_unit(),
+    unit_thresholds=PLAN_GUARD.planned_unit_estimator,
 )
-PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
 
 
@@ -486,7 +487,7 @@ def initialise_database() -> None:
             now=runtime_clock.utc_now(),
             current_time=datetime.now(UTC),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
-            provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            provider_resync_keys=resync_reset_keys(),
             retention_days=int(getattr(CONFIG_HOLDER.value, "data_retention_days", -1)),
         )
     PROVIDER_CREDENTIAL_SERVICE.refresh()
@@ -822,7 +823,10 @@ PUBLIC_STATE = build_public_state(
     key_value_service=key_value_service,
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
     provider_resync=lambda: PROVIDER_RESYNC,
-    running_probes={WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running()},
+    running_probes={
+        GARMIN_ID: shared_garmin_sync_lock().locked,
+        WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running(),
+    },
     sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
     all_sync_days=ALL_SYNC_DAYS,
     external_calendar_window_days=lambda: (
@@ -1053,6 +1057,18 @@ def main() -> None:
             ),
         )
         CANONICAL_BACKFILL.worker.start()
+        # Start the paced all-time curve build now, so the views opened right
+        # after a start find their session curves warm (#2783).
+        try:
+            PERFORMANCE.all_time_records()
+        except Exception as error:  # noqa: BLE001 - a view starts the build later
+            LOGGER.warning(
+                "All-time curve build not started",
+                extra={
+                    "event": "all_time_build_not_started",
+                    "context": {"error_class": type(error).__name__},
+                },
+            )
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
         daily_thread.start()

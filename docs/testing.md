@@ -213,6 +213,15 @@ counts, so rerunning only the failed jobs is valid.
 Summaries are uploaded separately from failure reports; authentication remains
 in private temporary storage.
 
+`--project changed` picks the projects CI would run for the local diff against
+`--base` (default `origin/develop`, including uncommitted and untracked files)
+with `.github/scripts/ci_changes.py`: no run for documentation only (exit 0, as
+CI), only `desktop` when no path is in `UI_PATHS`, otherwise all; the manifest
+records the choice and its reason (#2759). Measured on Windows with native browsers and `--jobs 1`,
+the desktop project took 28-32 min, the full Python suite 17.6-21 min and the
+pre-push hook about 40 s (secret scan 3 s, quality ratchet 34 s); the numbers
+per step are in #2759.
+
 Prepared browser execution uses Linux host networking. Windows keeps the native
 browser path above. On a Linux host, pull the pinned image, then pass it explicitly:
 
@@ -390,7 +399,9 @@ add their synthetic activities to the existing snapshot instead of replacing
 it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume, `-Port`/`-Name` to adjust the
-container, and `-Stop` to remove it again (never its volume). `-Name` must start with `demo` or `fixture` (optionally after an
+container, `-HeavyHistory <n>` (1 to 1000) for a large synthetic history with
+full streams for performance checks (seeded once, about 5 minutes for 900), and
+`-Stop` to remove it again (never its volume). `-Name` must start with `demo` or `fixture` (optionally after an
 `pacecraft-` or `ai-coach-` prefix); the production container `pacecraft` (formerly `ai-coach`) and every other name are
 refused before anything is built, stopped or removed. The fixture refuses to
 start unless `AI_COACH_DISPOSABLE_FIXTURE=1` is set; only the demo script and the

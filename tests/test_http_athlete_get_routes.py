@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from support import dispatch_route
 
+from backend.errors import AppError
 from backend.http_api.athlete_get import AthleteGetRoutes
 
 
@@ -48,6 +49,30 @@ class AthleteGetRoutesTests(unittest.TestCase):
         )
         self.assertTrue(dispatch_route(routes, self.handler, "/api/zones"))
         self.handler.send_json.assert_called_once_with(200, {"configurations": []})
+
+    def test_race_plan_reads_one_competition_and_rejects_unknown_ids(self) -> None:
+        path = "/api/competitions/race%201/race-plan"
+        self.assertFalse(dispatch_route(self.routes, self.handler, path))
+        plans = {"race 1": {"competition_id": "race 1"}}
+        routes = AthleteGetRoutes(
+            self.factories["performance"],
+            self.factories["profile"],
+            self.factories["competitions"],
+            self.factories["feedback"],
+            self.factories["preview"],
+            self.settings,
+            race_plan=plans.get,
+        )
+        self.assertTrue(dispatch_route(routes, self.handler, path))
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "race_plan": {"competition_id": "race 1"}}
+        )
+        with self.assertRaises(AppError) as raised:
+            dispatch_route(routes, self.handler, "/api/competitions/other/race-plan")
+        self.assertEqual(
+            (404, "competition_not_found"),
+            (raised.exception.status, raised.exception.reason),
+        )
 
     def test_each_route_preserves_its_response_payload(self) -> None:
         self.performance.performance_state.return_value = {"metrics": {"ftp": 250}}

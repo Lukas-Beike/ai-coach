@@ -890,7 +890,7 @@ h2 {
 .planned-week-number { margin-right: auto; color: var(--muted); font-size: .75rem; }
 .planned-week-step { font-size: 1.5rem; line-height: 1; cursor: pointer; }
 .planned-week-step:disabled { opacity: .4; cursor: default; }
-.planned-week-heading > :is(.planned-week-summary, .planned-week-metrics, .planned-week-sync) { flex-basis: 100%; }
+.planned-week-heading > :is(.planned-week-summary, .planned-week-metrics, .planned-week-sync, .planned-sport-filter) { flex-basis: 100%; }
 .planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
 /* Timeline: a date column with a connecting line beside each day's units (#2189). */
 .planned-week-days { display: grid; padding: 6px 0; }
@@ -1135,6 +1135,16 @@ h2 {
 .competition-card-facts span { color: var(--subtle); font-size: .72rem; }
 .competition-card-facts strong { color: var(--muted); font-size: .78rem; font-weight: 500; overflow-wrap: anywhere; }
 .competition-sync-state { display: block; margin-top: 12px; color: var(--subtle); line-height: 1.4; }
+.race-plan { display: grid; gap: 8px; min-width: 0; margin-top: 16px; color: var(--muted); font-size: .8rem; }
+.race-plan h4 { margin: 0; color: var(--ink); font-size: .85rem; }
+.race-plan h5 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--muted); font-size: .78rem; font-weight: 600; }
+.race-plan-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.race-plan-table th { padding: 4px 0; color: var(--subtle); font-weight: 500; text-align: left; }
+.race-plan-table td { padding: 6px 0; border-top: 1px solid var(--line); color: var(--ink); }
+.race-plan-table :is(th, td):not(:first-child) { text-align: right; }
+.race-plan-rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.race-plan-rows strong { color: var(--ink); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.race-plan-gap { margin: 0; }
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
 
 @media (max-width: 479px) {
@@ -1828,6 +1838,29 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-analysis-zone-bar { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--zone-color, var(--training-zone-7)) var(--zone-share), var(--surface-raised) var(--zone-share)); }
 .activity-analysis-zone-value { color: var(--muted); text-align: right; }
 .activity-analysis-zones > p { margin: 0; font-size: .72rem; }
+/* Planned steps against the session (#2830): good from 80 %, fair from 50 % time in target. */
+.activity-analysis-target { fill: var(--series); fill-opacity: .14; stroke: var(--ink); stroke-opacity: .55; stroke-dasharray: 3 2; stroke-width: .8; }
+.activity-adherence { --band: var(--subtle); display: grid; gap: 10px; }
+.activity-adherence [data-band="good"] { --band: var(--accent); }
+.activity-adherence [data-band="fair"] { --band: var(--orange); }
+.activity-adherence [data-band="poor"] { --band: var(--danger); }
+.activity-adherence-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.activity-adherence-score { padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--band) 16%, var(--transparent)); color: var(--band); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.activity-adherence-strip { display: flex; gap: 2px; height: 14px; }
+.activity-adherence-strip i { flex-basis: 0; min-width: 3px; border-radius: 3px; background: var(--band); }
+.activity-adherence-strip [data-band="none"] { background: var(--surface-raised); }
+.activity-adherence-steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.activity-adherence-steps li { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: .74rem; font-variant-numeric: tabular-nums; }
+.activity-adherence-steps li > :first-child { color: var(--muted); }
+.activity-adherence-share { color: var(--band); font-weight: 700; text-align: right; }
+.activity-adherence-pair { display: grid; gap: 2px; }
+.activity-adherence-pair > span { display: block; height: 6px; border-radius: 3px; }
+.activity-adherence-plan { box-sizing: border-box; border: 1px dashed var(--muted); }
+.activity-adherence-actual { background: var(--zone-color, var(--training-zone-7)); }
+.activity-adherence-legend { display: flex; gap: 12px; color: var(--muted); }
+.activity-adherence-legend span::before { content: ""; display: inline-block; width: 12px; height: 6px; margin-right: 4px; border-radius: 3px; vertical-align: 1px; }
+.activity-adherence-legend .is-plan::before { box-sizing: border-box; border: 1px dashed var(--muted); }
+.activity-adherence-legend .is-actual::before { background: var(--muted); }
 .activity-analysis-laps { display: grid; gap: 8px; }
 .activity-analysis-laps td, .activity-analysis-laps th { font-variant-numeric: tabular-nums; }
 

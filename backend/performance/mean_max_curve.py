@@ -21,6 +21,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -84,10 +85,16 @@ class SessionCurveReader:
         *,
         capacity: int = _DEFAULT_CAPACITY,
         spawn: Callable[[Callable[[], None]], None] | None = None,
+        # Names the background build in its log event and error (#2779).
+        background_name: str = "session_curves",
     ) -> None:
         self._session_records = session_records
+        self._background_name = background_name
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
+        # Fingerprints being computed; each is set when its computation ends,
+        # stored or failed, and waiters then look again.
+        self._computing: dict[str, threading.Event] = {}
         self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._building = False
@@ -108,20 +115,45 @@ class SessionCurveReader:
                 continue
             laps = _current(db, laps_by_session.get(activity_id, ()))
             fingerprint = _fingerprint(records, current, laps)
+            curves[activity_id] = self._memoized(
+                fingerprint,
+                partial(
+                    _session_curve, db, activity_id, records, current, laps, fingerprint
+                ),
+            )
+        return curves
+
+    def _memoized(
+        self, fingerprint: str, compute: Callable[[], SessionCurve]
+    ) -> SessionCurve:
+        """The memoized curve of ``fingerprint``, computed once across threads.
+
+        A miss while another thread computes the same curve waits for it instead
+        of computing it again, as parallel view loads did after a start (#2783);
+        after a failed computation one waiter takes it over.
+        """
+        while True:
             with self._lock:
                 cached = self._memo.get(fingerprint)
                 if cached is not None:
                     self._memo.move_to_end(fingerprint)
-            if cached is None:
-                cached = _session_curve(
-                    db, activity_id, records, current, laps, fingerprint
-                )
-                with self._lock:
-                    self._memo[fingerprint] = cached
-                    while len(self._memo) > self._capacity:
-                        self._memo.popitem(last=False)
-            curves[activity_id] = cached
-        return curves
+                    return cached
+                pending = self._computing.get(fingerprint)
+                if pending is None:
+                    owned = self._computing[fingerprint] = threading.Event()
+                    break
+            pending.wait()
+        try:
+            cached = compute()
+            with self._lock:
+                self._memo[fingerprint] = cached
+                while len(self._memo) > self._capacity:
+                    self._memo.popitem(last=False)
+            return cached
+        finally:
+            with self._lock:
+                del self._computing[fingerprint]
+            owned.set()
 
     def shared_records(
         self,
@@ -181,7 +213,7 @@ class SessionCurveReader:
                 and failed[0] == stamp
                 and time.monotonic() - failed[1] < _RETRY_AFTER_S
             ):
-                raise RuntimeError("background session curves failed")
+                raise RuntimeError(f"background {self._background_name} failed")
             start = not self._building
             self._building = True
         if start:
@@ -203,8 +235,8 @@ class SessionCurveReader:
             built = tuple(MappingProxyType(record) for record in build())
         except Exception:
             _LOGGER.exception(
-                "Background session curves failed",
-                extra={"event": "background_session_curves_failed"},
+                "Background build failed",
+                extra={"event": f"background_{self._background_name}_failed"},
             )
         with self._lock:
             if built is None:

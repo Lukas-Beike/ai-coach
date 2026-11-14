@@ -243,6 +243,23 @@ The system SHALL pair the executed work laps of a run or ride in order with the 
 
 Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`. Added evidence: `tests/test_planned_targets.py:test_absolute_paces_count_without_a_threshold_pace`, `tests/test_planned_targets.py:test_heart_rate_targets_use_the_second_half`, `tests/test_planned_targets.py:test_progressions_pair_every_rep_with_its_own_step`.
 
+### Requirement: Planned step adherence in the session details
+The system SHALL serve, with the detail document of a run or ride that the calendar pairs with a local planned unit on its day, every planned step's share of time inside its target, a session score and planned against actual time per zone, and the calendar's session details SHALL show them with each step's target band on its chart; nothing is shown for an unpaired session, and a failing comparison never fails the details.
+
+#### Scenario: Steps on their windows
+- **WHEN** the work laps are paired with the work steps as for the laps' comparison
+- **THEN** each work step reads its lap, the steps before, between and after the laps share the time between them by planned duration (a distance step at its target speed's middle, else the gap stays `window_unknown`), a session without work laps shares its whole span so, steps after an unrun work step are `not_executed`, a step between work steps is a recovery only below 80 % of the easiest work step's level, and a step without a resolvable target, a ramp or a heart-rate step under 120 s stays unscored.
+
+#### Scenario: Time in target and score
+- **WHEN** a step is scored
+- **THEN** `time_in_target_pct` is the share of its window's displayed samples inside the target (heart rate over the second half; speeds below 0.3 m/s left out), its band is good from 80 %, fair from 50 % and poor below, and the session score is the time in target over all scored time with the same bands.
+
+#### Scenario: Planned against actual time per zone
+- **WHEN** the plan's steps have targets
+- **THEN** zones count in the metric with the most planned time: planned as each step's duration in the zone of its target's middle, actual from the displayed stream with the same zone limits (speeds below 0.3 m/s left out); without that metric's threshold the zones are `not_covered`.
+
+Evidence: `backend/performance/planned_targets.py:planned_step_adherence`, `backend/performance/activity_read_service.py:ActivityAnalysisReadService.planned_adherence`, `backend/http_api/sync_get.py`, `public/activity-analysis.js`; `tests/test_planned_targets.py:PlannedStepAdherenceTests`, `tests/chart-golden.test.cjs`, `e2e/calendar-detail-pane.spec.js`.
+
 ### Requirement: Comparable earlier sessions
 The system SHALL set a run's or ride's execution against comparable earlier sessions of the last 84 days, read from each session's execution in the curve window, and report this session, the peers' median and the difference with peer count and temperatures; nothing is scored.
 
@@ -447,7 +464,7 @@ The analysis power and running best-effort curve (`mean-max-curve` version 2, wi
 
 #### Scenario: Windows
 - **WHEN** a session curve is computed
-- **THEN** cycling has the windows 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800 and 3600 s, running 60, 180, 300, 420, 720 and 1200 s and 1000 and 5000 m.
+- **THEN** cycling has the windows 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800 and 3600 s, running 60, 180, 300, 420, 720 and 1200 s and 1000, 5000, 10000, 21097.5 and 42195 m.
 
 #### Scenario: Valid samples
 - **WHEN** samples are read
@@ -455,7 +472,7 @@ The analysis power and running best-effort curve (`mean-max-curve` version 2, wi
 
 #### Scenario: Selection
 - **WHEN** the best values are selected
-- **THEN** windows of 28 and 90 days ending today are served from ride and run sessions without e-bike assistance, commutes, warm-ups and cool-downs; cycling bests are chosen per outdoor and indoor environment, running bests over all runs (fastest speed, shortest time); `best` lists the 5, 60, 300 and 1200 s cycling bests of the 90 days per environment; each window reports `cache_coverage` with `records`, `usable_records`, `unknown_records`, `power_records` and `power_unknown_records`. The analysis route alone adds `all_time`, the same selection over every stored session up to today with each best's date; it is read in the background through the session-curve cache, one session at a time with a pause as long as that session took, so no request waits for a cold read of the history or for the interpreter while it runs: `{"status": "pending"}` before the first read finished (the cards keep their loading state and ask again), the last finished values marked `stale` while a newer read runs (the cards show them and ask again), and `{"status": "failed"}` for a minute after a failed read (the cards show their error with retry). The Coach's copy and the CP/CS input keep the 90 days.
+- **THEN** windows of 28 and 90 days ending today are served from ride and run sessions without e-bike assistance, commutes, warm-ups and cool-downs; cycling bests are chosen per outdoor and indoor environment, running bests over all runs (fastest speed per duration, shortest time over 1, 5 and 10 km, half marathon and marathon); `best` lists the 5, 60, 300 and 1200 s cycling bests of the 90 days per environment; each window reports `cache_coverage` with `records`, `usable_records`, `unknown_records`, `power_records` and `power_unknown_records`. The analysis route alone adds `all_time`, the same selection over every stored session up to today with each best's date; it is read in the background through the session-curve cache, one session at a time with a pause as long as that session took, so no request waits for a cold read of the history or for the interpreter while it runs: `{"status": "pending"}` before the first read finished (the cards keep their loading state and ask again), the last finished values marked `stale` while a newer read runs (the cards show them and ask again), and `{"status": "failed"}` for a minute after a failed read (the cards show their error with retry). The Coach's copy and the CP/CS input keep the 90 days.
 
 Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_session_analysis.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`. Added evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/report_service.py:TrainingProfileSelectionService.curve_records`, `tests/test_mean_max_curve.py:test_window_reads_canonical_sessions_and_counts_missing_streams`, `tests/test_mean_max_curve.py:test_all_time_bests_keep_old_efforts_while_the_90_days_and_coach_do_not`.
 

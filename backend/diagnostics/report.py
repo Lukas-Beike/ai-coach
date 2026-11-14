@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 import platform
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from backend.athlete.profile import ProfileService
+from backend.backup.recovery_copies import RecoveryCopies
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
@@ -43,7 +46,7 @@ from backend.observability import (
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
-from backend.runtime.memory import process_memory
+from backend.runtime.memory import process_memory, process_settings
 from backend.runtime.ports import ProviderCoverageReader
 from backend.settings import SettingsService
 from backend.sync.activity_routes import summarize_activity_routes
@@ -57,10 +60,12 @@ from backend.sync.local_load import summarize_local_load
 from backend.sync.profile_weekly_plan_removal import (
     summarize_profile_weekly_plan_removal,
 )
+from backend.sync.provider_table import CALENDAR_ID
 from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
+from backend.sync.state import last_error_key, last_sync_key
 from backend.sync.stream_backfill import fit_inventory_counts
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -99,6 +104,10 @@ class DiagnosticReportDependencies:
     garmin_change_check: Callable[[], dict[str, Any]] | None = None
     # Rides with a steady power band per variation limit, counts only (#2535).
     lt1_ride_coverage: Callable[[], dict[str, Any]] | None = None
+    # The database file: its sizes, free space and recovery copies (#2848).
+    database_path: Callable[[], Path] | None = None
+    # Decoupling eligibility counts for the M8 rule decision, until #2780 (#2779).
+    decoupling_eligibility: Callable[[], dict[str, Any]] | None = None
 
 
 # Large kv values whose stored size the report shows: the Garmin state, the
@@ -130,7 +139,32 @@ class DiagnosticReportService:
             "change_history": count("change_history"),
         }
         counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
-        return counts
+        return counts | self._storage()
+
+    def _storage(self) -> dict[str, int | None]:
+        """Database and write-ahead log sizes and free space beside them (stat only).
+
+        Unknown (``None``) without a database path, so a reader sees the gap.
+        """
+        if self._deps.database_path is None:
+            return dict.fromkeys(("file_bytes", "wal_bytes", "data_dir_free_bytes"))
+        path = self._deps.database_path()
+
+        def size(file: Path) -> int | None:
+            try:
+                return int(file.stat().st_size)
+            except OSError:
+                return None
+
+        try:
+            free: int | None = shutil.disk_usage(path.parent).free
+        except OSError:
+            free = None
+        return {
+            "file_bytes": size(path),
+            "wal_bytes": size(path.with_name(path.name + "-wal")),
+            "data_dir_free_bytes": free,
+        }
 
     @staticmethod
     def _stored_payload_bytes(db: Any) -> dict[str, int]:
@@ -142,6 +176,12 @@ class DiagnosticReportService:
         ).fetchall()
         stored = {row["key"]: row["bytes"] for row in rows}
         return {key: stored.get(key, 0) for key in _PAYLOAD_KEYS}
+
+    def _recovery_copies(self) -> dict[str, Any]:
+        if self._deps.database_path is None:
+            return {"available": False}
+        path = self._deps.database_path()
+        return RecoveryCopies(path.parent, path.name).summary()
 
     def clear(self) -> dict[str, Any]:
         """Clear the captured technical diagnostic entries."""
@@ -236,11 +276,9 @@ class DiagnosticReportService:
             def external_calendar() -> dict[str, Any]:
                 return {
                     "configured": bool(deps.config.calendar_ical_url),
-                    "last_sync_at": self._get_value(
-                        db, "last_external_calendar_sync_at"
-                    ),
+                    "last_sync_at": self._get_value(db, last_sync_key(CALENDAR_ID)),
                     "last_error": deps.redactor.redact_text(
-                        self._get_value(db, "last_external_calendar_sync_error") or ""
+                        self._get_value(db, last_error_key(CALENDAR_ID)) or ""
                     )
                     or None,
                     "running": deps.external_calendar_sync.running(),
@@ -263,7 +301,9 @@ class DiagnosticReportService:
                     "python": platform.python_version(),
                     "platform": platform.platform(),
                     "process_memory": process_memory(),
+                    **process_settings(),
                 },
+                "recovery_copies": section("recovery_copies", self._recovery_copies),
                 "configuration": section("configuration", configuration),
                 "openai": section(
                     "openai", lambda: deps.provider_state.summary("openai")
@@ -317,6 +357,10 @@ class DiagnosticReportService:
                 "lt1_ride_coverage": section(
                     "lt1_ride_coverage",
                     deps.lt1_ride_coverage or (lambda: {"available": False}),
+                ),
+                "decoupling_eligibility": section(
+                    "decoupling_eligibility",
+                    deps.decoupling_eligibility or (lambda: {"available": False}),
                 ),
                 "stream_backfill": section(
                     "stream_backfill",

@@ -255,12 +255,17 @@ class GarminTokenStore:
             )
 
     def clear(self) -> None:
-        """Remove the stored tokens and block the legacy file until reconnect."""
+        """Remove the stored tokens and block the legacy file until reconnect.
+
+        The general sync error belongs to the Garmin operation, its only
+        writer, and ends with the connection (#2705).
+        """
         with self._database_manager().unit_of_work() as db:
             self._key_values.delete(db, GARMIN_TOKENS_KEY)
             self._key_values.set(
                 db, GARMIN_TOKENSTORE_STATE_KEY, GARMIN_TOKENSTORE_DISCONNECTED
             )
+            self._key_values.set(db, "last_sync_error", "")
         self._registry.replace_tokens(None)
 
 

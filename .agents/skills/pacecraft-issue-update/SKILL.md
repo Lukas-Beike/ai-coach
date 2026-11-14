@@ -22,10 +22,10 @@ python scripts/issue_update.py close <n> --body-file <summary-file>
 - `start` assigns `@me` and adds the `in progress` label; `finish` removes it.
 - `tick` checks exactly one open `- [ ]` or `* [ ]` box whose text starts with
   `--part` (case-insensitive) and rewrites the body through a temporary file.
-- `close` posts the summary, ticks the open boxes under an acceptance-criteria
-  heading (the summary carries their evidence), removes `in progress` and
+- `close` posts the summary, ticks the open boxes under an `Acceptance criteria`
+  or `Acceptance` heading (the summary carries their evidence), removes `in progress` and
   closes, also an issue a merged `Closes #n` PR already closed; it refuses while
-  another open checkbox (a part) or an open PR referencing `#n` remains.
+  another open checkbox (a part) or an open PR linking it (issue-status rule) remains.
 - Exit 0: done. Exit 1: refused (no or several matching boxes; open box, open
   PR); read the printed reasons and fix them first, do not
   work around them. Exit 2: bad input, credential-shaped or empty body, or a

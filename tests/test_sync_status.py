@@ -222,6 +222,49 @@ class SyncPublicStateServiceTests(unittest.TestCase):
         )
         self.jobs.list.assert_called_once_with()
 
+    def test_running_and_the_operation_fields_never_contradict(self) -> None:
+        # The fields describe the Garmin operation; a Wahoo-only run showed its
+        # finished Garmin message beside running=true (#2706).
+        self.set_values(
+            sync_operation_status="completed",
+            sync_operation_phase="complete",
+            sync_operation_progress="100",
+            sync_operation_id="garmin-op",
+            sync_operation_message="Garmin-Synchronisierung abgeschlossen.",
+        )
+        self.service._running_probes = {"wahoo": lambda: True}
+        wahoo_run = self.service.state(freshness=[], jobs=[])
+        # Other Garmin work holds the same lock; it is no sync run.
+        self.service._running_probes = {"garmin": lambda: True}
+        garmin_lock_only = self.service.state(freshness=[], jobs=[])
+        self.set_values(
+            sync_operation_status="running",
+            sync_operation_phase="fetching",
+            sync_operation_progress="10",
+            sync_operation_message="Garmin-Daten werden gelesen…",
+        )
+        self.service._running_probes = {"garmin": lambda: True}
+        garmin_run = self.service.state(freshness=[], jobs=[])
+
+        fields = ("status", "phase", "progress", "operation_id", "message")
+        self.assertEqual(
+            ("running", "running", 0, None, None),
+            tuple(wahoo_run[key] for key in fields),
+        )
+        self.assertEqual(
+            (
+                "running",
+                "fetching",
+                10,
+                "garmin-op",
+                "Garmin-Daten werden gelesen…",
+            ),
+            tuple(garmin_run[key] for key in fields),
+        )
+        self.assertTrue(wahoo_run["running"] and garmin_run["running"])
+        self.assertFalse(garmin_lock_only["running"])
+        self.assertEqual("completed", garmin_lock_only["status"])
+
     def test_browser_state_is_bounded_and_reports_the_message_as_status(self) -> None:
         self.set_values(sync_operation_message="Sync in progress")
         projected = self.service.browser_state(freshness=[], jobs=[])

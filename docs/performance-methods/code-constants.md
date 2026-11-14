@@ -52,6 +52,17 @@ every named number the code fixes. A test fails when it is out of date.
 | `LT1_FIXED_SHARE` | `'fixed_share'` | `backend/performance/current_metrics.py` |  |
 | `DAILY_HEALTH_FIELDS` | `('steps', 'floors', 'calories')` | `backend/performance/daily_health.py` | The 7-day averaged daily totals and the energy components of one day. |
 | `DAILY_EXPENDITURE_FIELDS` | `('active_kcal', 'resting_kcal', 'total_kcal')` | `backend/performance/daily_health.py` |  |
+| `DEFAULT_DAYS` | `365` | `backend/performance/decoupling_eligibility.py` |  |
+| `WARMUP_S` | `600.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `COOLDOWN_S` | `600.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_SESSION_S` | `1800.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_COVERAGE` | `0.85` | `backend/performance/decoupling_eligibility.py` |  |
+| `MAX_HALF_DIFFERENCE` | `0.1` | `backend/performance/decoupling_eligibility.py` |  |
+| `WINDOWS_S` | `(1, 30, 60)` | `backend/performance/decoupling_eligibility.py` |  |
+| `PERCENTILES` | `(25, 50, 75, 90)` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_DISTRIBUTION` | `3` | `backend/performance/decoupling_eligibility.py` | Fewer values would show single sessions' values as quartiles. |
+| `CURRENT` | `'cv_1s_15'` | `backend/performance/decoupling_eligibility.py` |  |
+| `RIDE_ONLY_RULES` | `frozenset({'vi_30s_105', 'vi_30s_110'})` | `backend/performance/decoupling_eligibility.py` |  |
 | `ESTIMATE_DAYS` | `60` | `backend/performance/first_threshold_estimate.py` |  |
 | `MIN_SESSIONS` | `3` | `backend/performance/first_threshold_estimate.py` |  |
 | `GOOD_MIN_SESSIONS` | `5` | `backend/performance/first_threshold_estimate.py` | The estimate is good with this many sessions that agree within this spread (percentage points of the threshold HR); otherwise it is low. |
@@ -142,15 +153,22 @@ every named number the code fixes. A test fails when it is out of date.
 | `WORK_SHARE` | `0.1` | `backend/performance/planned_targets.py` | Work steps are within this share of the hardest planned target. |
 | `COUNT_GAP_SHARE` | `0.1` | `backend/performance/planned_targets.py` | A step count fits the executed laps only when the next easier step is clearly easier than the easiest chosen one. |
 | `MAX_DISPLAY_GAP_S` | `15.0` | `backend/performance/planned_targets.py` | Display samples further apart than this are a pause, not part of the lap. |
+| `MAX_DESCRIPTION_CHARS` | `20000` | `backend/performance/planned_targets.py` | Longer workout texts are not parsed for the comparison. |
 | `HR_CAP_METHOD` | `'heart-rate-cap-execution-v1'` | `backend/performance/planned_targets.py` |  |
 | `CAP_ABOVE_SHARE_PCT` | `10` | `backend/performance/planned_targets.py` | More than this share of the time above the cap, or a mean above it, is above the cap. |
 | `CAP_EDGE_SHARE` | `0.05` | `backend/performance/planned_targets.py` | A mean this close below the cap (share of the cap) sits at the upper edge. |
+| `ADHERENCE_METHOD` | `'planned-step-adherence-v1'` | `backend/performance/planned_targets.py` |  |
+| `ADHERENCE_SCOPE` | `"Every planned step against its window of the session: work steps on their paired laps, the steps... (sha256 edc71536)` | `backend/performance/planned_targets.py` |  |
+| `GOOD_SHARE_PCT` | `80` | `backend/performance/planned_targets.py` | Time in target from which a step is good, else fair; below fair it is poor (athlete 2026-11-14, #2830, after TrainingPeaks' compliance colours). |
+| `FAIR_SHARE_PCT` | `50` | `backend/performance/planned_targets.py` |  |
+| `MIN_MOVING_SPEED_MPS` | `0.3` | `backend/performance/planned_targets.py` | Speeds below this are stops, as in the calendar's pace chart. |
+| `RECOVERY_LEVEL_SHARE` | `0.8` | `backend/performance/planned_targets.py` | A step between work steps below this share of the easiest work step's level is a recovery; a harder one is a step of its own. |
 | `GARMIN_SOURCE` | `'Garmin Connect'` | `backend/performance/planning_recovery.py` |  |
 | `UTC_OFFSET_SUFFIX` | `'+00:00'` | `backend/performance/planning_recovery.py` |  |
 | `POWER_DURATIONS` | `(5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)` | `backend/performance/power_profile.py` | 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols; cycling CP also fits the 1200 s effort (M4 card 4). |
 | `LEGACY_POWER_DURATIONS` | `(5, 60, 300, 1200)` | `backend/performance/power_profile.py` |  |
 | `RUNNING_DURATIONS` | `(60, 180, 300, 420, 720, 1200)` | `backend/performance/power_profile.py` |  |
-| `RUNNING_DISTANCES` | `(1000, 5000)` | `backend/performance/power_profile.py` |  |
+| `RUNNING_DISTANCES` | `(1000, 5000, 10000, 21097.5, 42195)` | `backend/performance/power_profile.py` | 1 km, 5 km, 10 km, half marathon and marathon (#2786). |
 | `METHOD_ID` | `'mean-max-curve'` | `backend/performance/power_profile.py` |  |
 | `METHOD_VERSION` | `2` | `backend/performance/power_profile.py` | Version 1: time-weighted windows that must be fully covered by valid samples. Version 2 (card M4 v4, #1773): an outdoor running window counts only when its net altitude change is at most 1 % of its distance; without altitude it does not count. |
 | `MAX_RUNNING_NET_GRADE` | `0.01` | `backend/performance/power_profile.py` |  |

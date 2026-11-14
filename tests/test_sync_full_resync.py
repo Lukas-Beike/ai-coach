@@ -17,7 +17,6 @@ from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.sync.full_resync import (
-    PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncOperationJournal,
     FullResyncStateStore,
@@ -133,30 +132,24 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         )
         return FullProviderResyncService(
             handlers,
-            FullResyncStateStore(
-                self.database,
-                key_values or self.key_values,
-                PROVIDER_RESYNC_KEYS,
-            ),
+            FullResyncStateStore(self.database, key_values or self.key_values),
             operation_journal,
             gates=gates,
             **({"after_resync": after_resync} if after_resync else {}),
         )
 
     def _get_value(self, provider, field):
-        keys = PROVIDER_RESYNC_KEYS[provider]
         with self.database.reader() as db:
-            return self.key_values.get(db, keys[field])
+            return self.key_values.get(db, f"{provider}_full_resync_{field}")
 
     def _set_value(self, provider, field, value):
-        keys = PROVIDER_RESYNC_KEYS[provider]
         with self.database.unit_of_work() as db:
-            self.key_values.set(db, keys[field], value)
+            self.key_values.set(db, f"{provider}_full_resync_{field}", value)
 
     def test_state_projects_running_status_and_last_error_in_contract_order(self):
         self._set_value("garmin", "running", "0")
         self._set_value("garmin", "status", "stale progress")
-        self._set_value("garmin", "last_at", NOW)
+        self._set_value("garmin", "at", NOW)
         self._set_value("garmin", "error", "prior failure")
 
         state = self.service.state("garmin")
@@ -223,7 +216,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(result["records"], 20)
         self.assertEqual(self._get_value("garmin", "running"), "0")
         self.assertEqual(self._get_value("garmin", "status"), "")
-        self.assertEqual(self._get_value("garmin", "last_at"), NOW)
+        self.assertEqual(self._get_value("garmin", "at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
 
     def _wait_for_outcome(self, service, provider="garmin"):
@@ -308,7 +301,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["records"], 7)
         self.assertNotIn("resynced_at", result)
-        self.assertIsNone(self._get_value("garmin", "last_at"))
+        self.assertIsNone(self._get_value("garmin", "at"))
         self.assertEqual(
             self._get_value("garmin", "error"),
             "Teilweise geladen. Bitte erneut starten.",
@@ -323,7 +316,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         outcome = self._wait_for_outcome(self.service)
 
         self.assertEqual(outcome, {"operation_id": "op-2", "status": "partial"})
-        self.assertEqual(self._get_value("garmin", "last_at"), NOW)
+        self.assertEqual(self._get_value("garmin", "at"), NOW)
 
     def test_a_contended_garmin_read_is_a_failed_resync_without_a_completion_time(self):
         self.garmin_result = {"status": "already_running"}
@@ -335,7 +328,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             outcome,
             {"operation_id": "op-1", "status": "failed", "reason": "already_running"},
         )
-        self.assertIsNone(self._get_value("garmin", "last_at"))
+        self.assertIsNone(self._get_value("garmin", "at"))
         self.assertIn("läuft bereits", self._get_value("garmin", "error"))
         self.assertFalse(self.garmin_gate.is_resetting())
 
@@ -414,7 +407,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
                 return self_base.get(db, key)
 
             def set(self, db, key, value):
-                if key == PROVIDER_RESYNC_KEYS["garmin"]["status"] and value == "":
+                if key == "garmin_full_resync_status" and value == "":
                     raise RuntimeError("status cleanup failed")
                 self_base.set(db, key, value)
 
@@ -487,7 +480,6 @@ class WahooFullResyncServiceTests(unittest.TestCase):
             FullResyncStateStore(
                 self.database,
                 self.key_values,
-                PROVIDER_RESYNC_KEYS,
             ),
             FullResyncOperationJournal(
                 self.observer,

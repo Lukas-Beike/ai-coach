@@ -158,10 +158,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     now="2026-11-09T08:00:00+00:00",
                     default_profile_json='{"name": "Synthetic"}',
                     provider_resync_keys=(
-                        {
-                            "running": "garmin_full_resync_running",
-                            "status": "garmin_full_resync_status",
-                        },
+                        ("garmin_full_resync_running", "garmin_full_resync_status"),
                     ),
                 ),
                 row_factory=row_factory,

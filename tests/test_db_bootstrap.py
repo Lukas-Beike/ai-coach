@@ -35,11 +35,8 @@ class DatabaseBootstrapTests(unittest.TestCase):
             current_time=self.current_time,
             default_profile_json=json.dumps({"name": "Synthetic athlete"}),
             provider_resync_keys=(
-                {
-                    "running": "intervals_resync_running",
-                    "status": "intervals_resync_status",
-                },
-                {"running": "garmin_resync_running", "status": "garmin_resync_status"},
+                ("intervals_resync_running", "intervals_resync_status"),
+                ("garmin_resync_running", "garmin_resync_status"),
             ),
             retention_days=retention_days,
         )

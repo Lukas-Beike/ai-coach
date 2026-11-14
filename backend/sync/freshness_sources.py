@@ -18,6 +18,7 @@ from typing import Any
 from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
+from backend.sync.state import last_error_key, last_sync_key
 from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
 
@@ -52,14 +53,13 @@ GARMIN_TOKENSTORE_SIGNAL = "garmin_tokenstore_exists"
 
 
 def _stored_source(
-    at_key: str,
-    error_key: str,
+    provider: str,
     configured: Callable[[FreshnessInputs], bool],
 ) -> FreshnessSource:
     """Fall back to stored last-sync timestamp and error key-value settings."""
     return FreshnessSource(
-        fallback_at=lambda inputs: inputs.get_value(at_key),
-        fallback_error=lambda inputs: inputs.get_value(error_key),
+        fallback_at=lambda inputs: inputs.get_value(last_sync_key(provider)),
+        fallback_error=lambda inputs: inputs.get_value(last_error_key(provider)),
         configured=configured,
     )
 
@@ -105,17 +105,13 @@ def _weather_cached_at(inputs: FreshnessInputs) -> Any:
 
 _INTERVALS_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
-        "competitions": _stored_source(
-            "last_competition_sync_at",
-            "last_competition_sync_error",
-            _intervals_configured,
-        ),
+        "competitions": _stored_source(INTERVALS_ID, _intervals_configured),
     }
 )
 _GARMIN_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
         "data": FreshnessSource(
-            fallback_at=lambda inputs: inputs.get_value("last_garmin_sync_at"),
+            fallback_at=lambda inputs: inputs.get_value(last_sync_key(GARMIN_ID)),
             fallback_error=lambda inputs: inputs.signals.get(
                 GARMIN_CORE_ERROR_SIGNAL, False
             ),
@@ -125,9 +121,7 @@ _GARMIN_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
 )
 _WAHOO_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
-        "activities": _stored_source(
-            "last_wahoo_sync_at", "last_wahoo_sync_error", _wahoo_configured
-        ),
+        "activities": _stored_source(WAHOO_ID, _wahoo_configured),
     }
 )
 _WEATHER_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
@@ -141,11 +135,7 @@ _WEATHER_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
 )
 _CALENDAR_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
-        "events": _stored_source(
-            "last_external_calendar_sync_at",
-            "last_external_calendar_sync_error",
-            _calendar_configured,
-        ),
+        "events": _stored_source(CALENDAR_ID, _calendar_configured),
     }
 )
 

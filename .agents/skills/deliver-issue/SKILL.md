@@ -114,6 +114,8 @@ requirements, update the brief and spec delta first. Run
 checks [validation](../pacecraft-validation/SKILL.md) names for the change on the
 final tree, and check each
 acceptance criterion against real evidence; ticked tasks alone are not evidence.
+The full local suite runs only on a selector fallback, to reproduce CI, or on
+request; browser checks start with `--project changed` (#2759).
 Wait for a running suite or review inside the turn (poll its output until the
 verdict); never end a turn with that work in flight (#2735).
 
@@ -155,6 +157,8 @@ open acceptance criteria need their evidence in the closing summary. Then do the
 issue maintenance from the authorization above. Report delivered behavior, acceptance
 evidence and limits, spec changes, and the PR URL with merge state. If blocked,
 give the exact phase, state, and smallest next action. Then run the
-[retro](../pacecraft-retro/SKILL.md) briefly. A run that delivers a queue of
-issues (a lane) ends with one retro over the whole run, its findings put to the
-athlete as that skill describes, before any closing sentence.
+[retro](../pacecraft-retro/SKILL.md) over this issue, also inside a lane, and
+report every actionable finding (no limit); that skill decides which become
+issues. A lane
+additionally ends with one retro over the whole run, before any closing
+sentence.

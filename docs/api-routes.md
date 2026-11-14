@@ -52,6 +52,7 @@ handler's docstring. Regenerate it with
 | POST | `/api/coach/actions/cancel` | Session + CSRF | after access | Cancel a Coach proposal. |
 | POST | `/api/coach/actions/confirm` | Session + CSRF | after access | Confirm a Coach proposal. |
 | POST | `/api/coach/actions/execute` | Session + CSRF | after access | Execute a confirmed Coach proposal. |
+| GET | `/api/competitions/{id}/race-plan` | Session | no | Race plan of one stored competition, computed from local data. |
 | GET | `/api/context-preview` | Session | no | Preview of the context the Coach receives. |
 | GET | `/api/diagnostics` | Session | no | Diagnostic report. |
 | POST | `/api/diagnostics/delete` | Session + CSRF | after access | Clear the stored diagnostics. |
@@ -158,6 +159,8 @@ names one session; no body.
 Response: 200 with `ok`, the document (`contract`, `session`, `metrics`,
 `streams`, `laps`, `zones`, `strength_sets`, `analysis`, `detail_data`
 and more, plus `weather` and `route` when stored, and `data_scope`),
+`planned_adherence` for a run or ride the calendar pairs with a local
+planned unit (each step's time in target, the score and zone times),
 and `session_bundle` (the session's provider copies and merge
 candidates; null when the session is not live).
 
@@ -486,6 +489,22 @@ gehört nicht mehr zu dieser Sitzung." or "Der ursprüngliche Nutzerauftrag
 ist nicht mehr verfügbar."; 503 "Die Coach-Aktionsausführung ist nicht
 verfügbar.". Validation errors of the underlying write are passed through.
 
+### `GET /api/competitions/{id}/race-plan`
+
+Request: path `id`, the competition id; no body.
+
+Response: 200 with `ok` and `race_plan`: `competition_id`,
+`method_version`, `duration` (`seconds`, `source` `target` or
+`planned_duration`; null when unknown), `pacing` (`status` `ready` with
+`method` `equal_effort` or `power_variation`, `sections_from`,
+`profile_rejected`, `sections` and for cycling `target_w`, or
+`unavailable` with `reason` `sport`, `distance` or `duration`) and
+`carbohydrates` (`source`, `during`, `before`, `weight`). It changes no
+state and calls no provider.
+
+Errors: 404 `competition_not_found` "Dieser Wettkampf ist lokal nicht
+vorhanden." when the id is unknown.
+
 ### `GET /api/context-preview`
 
 Request: no query, no body.
@@ -506,7 +525,7 @@ Response: 200 with the redacted report of `DiagnosticReportService.report`,
 read from one database snapshot. Top-level keys include `generated_at`,
 `app`, `runtime`, `configuration`, `openai`, `coach_commands`, `sync`,
 `garmin`, `wahoo`, `provider_freshness`, `external_calendar`, `database`,
-`plan_sync`, the `canonical_*` sections, `logs` (recent warnings, errors
+`recovery_copies`, `plan_sync`, the `canonical_*` sections, `logs` (recent warnings, errors
 and INFO entries), `debug_capture` (status and captured request and
 response shapes) and `note`. A section that cannot be built is
 `{"status": "unavailable"}`.

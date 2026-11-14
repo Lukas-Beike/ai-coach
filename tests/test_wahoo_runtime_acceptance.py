@@ -20,7 +20,6 @@ from unittest.mock import Mock
 
 from backend.canonical.vocabulary import WAHOO_ID
 from backend.providers.wahoo_client import WahooClient
-from backend.sync.daily import daily_marker_key
 from backend.sync.executor import SyncJobExecutor, WahooJobAdapter
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.gates import ProviderResyncGate
@@ -35,6 +34,7 @@ from backend.sync.scheduler import (
     StartupSyncScheduler,
     StartupSyncSchedulerConfig,
 )
+from backend.sync.state import daily_marker_key
 from backend.sync.status import SyncPublicStateService
 from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, WahooConnectionService
 from backend.sync.wahoo_sync import (

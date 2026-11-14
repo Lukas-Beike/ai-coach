@@ -128,6 +128,10 @@ class CompetitionService:
         with self._database_manager.reader() as connection:
             return self._repository.list(connection, bounded)
 
+    def get(self, competition_id: str) -> dict[str, Any] | None:
+        with self._database_manager.reader() as connection:
+            return self._repository.get(connection, competition_id)
+
     def restore_in_transaction(
         self,
         db: Any,

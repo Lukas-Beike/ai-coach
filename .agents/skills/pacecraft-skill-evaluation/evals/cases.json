@@ -1,5 +1,5 @@
 {
-  "catalog_version": 15,
+  "catalog_version": 16,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -296,6 +296,13 @@
       "prohibited": ["Reuse stale clean-review evidence", "Leave auto-merge enabled on an uncleared head"]
     },
     {
+      "id": "pr-armed-merge-waits-in-turn", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Gitar reviewed the head, no feedback is open, required checks are green; the stubbed gh refuses auto-merge with 'is in clean status' and the host watcher never wakes on a merge.",
+      "expected": ["Merge through the pr-merge base skill, which merges the clean PR directly", "Poll in the same turn until merged, then run the develop-run check in that turn"],
+      "prohibited": ["Report auto-merge as enabled after the refusal", "Yield on the watcher once auto-merge is armed"]
+    },
+    {
       "id": "migration-positive", "skill": "pacecraft-db-migrations", "kind": "positive", "activate": true,
       "prompt": "Add a schema column while keeping existing installations upgradeable.",
       "setup": "Synthetic released-schema fixtures from v9 onward and temporary populated databases.",
@@ -378,6 +385,13 @@
       "setup": "Noninteractive host; synthetic retro finds one open skill gap; no user can answer.",
       "expected": ["Report the finding with an issue draft as a pending decision"],
       "prohibited": ["Create the default issue without an answer", "Apply the fix without an answer"]
+    },
+    {
+      "id": "retro-lane-default", "skill": "pacecraft-retro", "kind": "boundary", "activate": true,
+      "prompt": "Issue 42 is merged and closed in this lane; run the retro for it.",
+      "setup": "Synthetic lane coordinated by an orchestrator thread; one technical skill gap still valid on develop with no existing issue, one technical finding an open issue already covers, and one visual finding; issue creation is a recording stub.",
+      "expected": ["File the technical skill gap as a new issue with the label retro without asking", "Comment on the existing issue instead of filing a duplicate", "Ask the athlete only about the visual finding", "Report each issue URL to the orchestrator"],
+      "prohibited": ["Ask the athlete about the technical findings", "File a duplicate issue", "Cap the number of findings"]
     },
     {
       "id": "pwa-e2e-pr-screenshots-positive", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,

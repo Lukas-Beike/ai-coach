@@ -85,7 +85,7 @@ def _members(records: Sequence[ActivityRecord]) -> list[list[object]]:
     ]
 
 
-def _analysis_activity(
+def analysis_activity(
     db: Any, session_id: str, records: Sequence[ActivityRecord]
 ) -> dict[str, Any]:
     """The merged analysis input of the session's full-resolution streams."""
@@ -160,7 +160,7 @@ class _Scan:
         """Decode the session's streams and compute its metrics."""
         session_id = str(item["id"])
         activity = (
-            _analysis_activity(db, session_id, self.sessions[session_id])
+            analysis_activity(db, session_id, self.sessions[session_id])
             if session_id in self.stream_keys
             else None
         )

@@ -1775,6 +1775,39 @@ function plannedViewSwitch() {
   return group;
 }
 
+// Sport filter (#2810): it hides the units of other sports and their figures, never calendar
+// appointments; the choice is a per-device convenience and never reaches the server.
+const CALENDAR_SPORT_KEY = "pacecraft-calendar-sport";
+// Chip label, then the sport labels (activitySportLabel) the chip shows.
+const CALENDAR_SPORTS = { all: ["Alle", []], run: ["Lauf", ["Laufen"]], ride: ["Rad", ["Radfahren", "Rad indoor"]], strength: ["Kraft", ["Kraft"]] };
+
+function readCalendarSport() {
+  try {
+    const value = localStorage.getItem(CALENDAR_SPORT_KEY);
+    return Object.hasOwn(CALENDAR_SPORTS, value) ? value : "all";
+  } catch { return "all"; }
+}
+
+function calendarSportShown(entry, sport = calendarSport) {
+  return sport === "all" || CALENDAR_SPORTS[sport][1].includes(activitySportLabel(calendarSportType(calendarActualActivity(entry) || entry)));
+}
+
+function plannedSportFilter() {
+  const group = h("div", { className: "chip-group planned-sport-filter", "aria-label": "Sportart" });
+  group.setAttribute("role", "radiogroup");
+  for (const [value, [label]] of Object.entries(CALENDAR_SPORTS)) {
+    const input = h("input", { type: "radio", name: "plannedSport", value, checked: calendarSport === value });
+    input.addEventListener("change", () => {
+      calendarSport = value;
+      try { localStorage.setItem(CALENDAR_SPORT_KEY, value); } catch { }
+      renderPlanned(renderedCalendar);
+      $("#plannedCalendar")?.querySelector(`.planned-sport-filter input[value="${value}"]`)?.focus();
+    });
+    group.append(h("label", "chip", input, h("span", null, label)));
+  }
+  return group;
+}
+
 function monthStartKey(dateKey, offset = 0) {
   const date = dateFromKey(`${dateKey.slice(0, 8)}01`);
   date.setMonth(date.getMonth() + offset);
@@ -1843,7 +1876,7 @@ function renderPlannedMonth(view) {
   const heading = h("header", "planned-week-heading", title,
     plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(monthStartKey(monthKey, -1))) : null, "month"),
     plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
-    plannedViewSwitch());
+    plannedViewSwitch(), plannedSportFilter());
   const names = h("div", { className: "planned-month-row planned-month-names", "aria-hidden": "true" }, ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So", "KW"].map((name) => h("span", null, name)));
   const grid = h("div", "planned-month-grid", names);
   for (let weekKey = planWeekStart(monthKey); weekKey < nextMonthKey; weekKey = addDateKey(weekKey, 7)) grid.append(plannedMonthRow(view, weekKey, monthKey));
@@ -1886,9 +1919,12 @@ function plannedWeekStep(step, target) {
 
 
 function renderPlannedWeek(view) {
-  const { eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
+  const { allEventsByDate, eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
   const weekEndKey = addDateKey(weekKey, 6);
-  const weekEntries = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat();
+  const weekOf = (byDate) => Array.from({ length: 7 }, (_, offset) => byDate.get(addDateKey(weekKey, offset)) || []).flat();
+  const weekEntries = weekOf(eventsByDate);
+  // The week sync builds its jobs, remote removals included, from every unit of the week, whatever the sport filter.
+  const allWeekEntries = weekOf(allEventsByDate);
   const week = h("section", { className: "planned-week", dataset: { weekKey }, "aria-labelledby": "plannedWeekTitle" });
   const heading = h("header", "planned-week-heading",
     h("h4", { id: "plannedWeekTitle" }, planWeekLabel(weekKey)),
@@ -1896,20 +1932,24 @@ function renderPlannedWeek(view) {
     plannedWeekStep(-1, weekKey > firstWeekKey ? addDateKey(weekKey, -7) : ""),
     plannedWeekStep(1, weekKey < lastWeekKey ? addDateKey(weekKey, 7) : ""),
     calendarView === "week" ? plannedViewSwitch() : null,
+    calendarView === "week" ? plannedSportFilter() : null,
     h("span", "planned-week-summary", calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten"));
   const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
   const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
   const totals = plannedWeekMetrics(planned, actual);
   if (totals) heading.append(totals);
-  const syncButton = plannedWeekSyncButton(weekKey, weekEntries, view.leftoversByWeek?.get(weekKey), todayKey);
+  const syncButton = plannedWeekSyncButton(weekKey, allWeekEntries, view.leftoversByWeek?.get(weekKey), todayKey);
   if (syncButton) heading.append(h("div", "planned-week-sync", syncButton));
   week.append(heading);
   const days = h("div", "planned-week-days");
-  for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset), planned.length > 0));
+  // "Zusätzlich" depends on the whole week's plan, not on the shown sport.
+  const weekHasPlan = allWeekEntries.some((entry) => !entry.is_completed_activity);
+  for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset), weekHasPlan));
   week.append(days);
   const legend = plannedZoneLegend(days);
   if (legend) week.append(legend);
-  if (weekEntries.length) {
+  // The plan compliance counts the whole week, so a sport filter leaves it out.
+  if (weekEntries.length && calendarSport === "all") {
     const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
     const summary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weeklyCompliance.get(weekKey), todayKey);
     week.append(h("p", "planned-week-totals", additionalCompleted && planned.length ? `${summary} · +${additionalCompleted} zusätzlich` : summary));
@@ -1960,6 +2000,7 @@ function openDefaultPlannedEntry(week) {
 let plannedRenderSnapshot = null;
 let selectedWeekKey = "";
 let calendarView = "week";
+let calendarSport = readCalendarSport();
 let selectedDayKey = "";
 let renderedCalendar = [];
 // The last day the calendar shows; a move stays inside it, so the moved card and its receipt stay visible.
@@ -2032,7 +2073,7 @@ function renderPlanned(trainingCalendar) {
   const lastDateKey = addDateKey(lastWeekKey, 6);
   plannedLastDateKey = lastDateKey;
   keepPlannedSelection(todayKey, lastDateKey);
-  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name]), state.data?.external_calendar?.undecided_upcoming]);
+  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, calendarSport, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name]), state.data?.external_calendar?.undecided_upcoming]);
   if (snapshot === plannedRenderSnapshot && root.childElementCount) {
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
     return;
@@ -2061,11 +2102,14 @@ function renderPlanned(trainingCalendar) {
       .filter((item) => item?.date)
       .map((item) => [String(item.date).slice(0, 10), item]),
   );
+  const allEventsByDate = new Map();
   const eventsByDate = new Map();
   entries.forEach((entry) => {
     const key = plannedEventDate(entry);
-    if (!eventsByDate.has(key)) eventsByDate.set(key, []);
-    eventsByDate.get(key).push(entry);
+    for (const byDate of calendarSportShown(entry) ? [allEventsByDate, eventsByDate] : [allEventsByDate]) {
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(entry);
+    }
   });
 
   const upcomingDays = Array.from({ length: (pastWeeks + futureWeeks + 1) * 7 }, (_, offset) => addDateKey(firstWeekKey, offset))
@@ -2074,6 +2118,7 @@ function renderPlanned(trainingCalendar) {
   const view = {
     calendarEventsByDate: plannedEventsByDate(todayKey),
     leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
+    allEventsByDate,
     eventsByDate,
     dayKey: selectedDayKey,
     // No earliest week: paging back is unlimited.
@@ -2163,6 +2208,106 @@ function renderLibrary(workouts) {
 
 
 
+// Race plan of an expanded upcoming competition (#2803).
+const RACE_PLAN_WEEKDAY = new Intl.DateTimeFormat("de-DE", { weekday: "short", timeZone: "UTC" });
+const RACE_PLAN_KM = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+const RACE_PLAN_UNAVAILABLE = { distance: "Distanz fehlt", duration: "Zielzeit oder erwartete Dauer fehlt" };
+
+function racePlanRange(values, unit) {
+  return Array.isArray(values) ? `${values[0]}–${values[1]} ${unit}` : null;
+}
+
+function racePlanDay(eventDate, daysBack) {
+  const start = Date.parse(`${String(eventDate).slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(start) ? null : RACE_PLAN_WEEKDAY.format(new Date(start - daysBack * 86_400_000));
+}
+
+function racePlanDays(eventDate, count) {
+  const days = Array.from({ length: count }, (_, index) => racePlanDay(eventDate, count - index));
+  if (days.every(Boolean)) return days.join(" + ");
+  return count === 1 ? "1 Tag davor" : `${count} Tage davor`;
+}
+
+// "+4 %", "−2 %" or the zero form; the minus is typographic.
+function racePlanSigned(value, zero = "") {
+  if (value > 0) return `+${RACE_PLAN_KM.format(value)} %`;
+  if (value < 0) return `−${RACE_PLAN_KM.format(-value)} %`;
+  return `${zero}0 %`;
+}
+
+// The meal window before the start; a window before midnight names the day before.
+function racePlanMeal(eventDate, startsAtLocal, hours) {
+  const time = /T(\d{2}):(\d{2})/.exec(String(startsAtLocal || ""));
+  const raceDay = racePlanDay(eventDate, 0);
+  if (!time || (time[1] === "00" && time[2] === "00")) return [raceDay, `${hours[0]}–${hours[1]} h vor dem Start`].filter(Boolean).join(" ");
+  const start = Number(time[1]) * 60 + Number(time[2]);
+  const [from, to] = hours.map((offset) => {
+    const minutes = start - offset * 60;
+    const value = (minutes + 1440) % 1440;
+    return { day: racePlanDay(eventDate, minutes < 0 ? 1 : 0), clock: `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}` };
+  });
+  if (from.day === to.day) return [from.day, `${from.clock}–${to.clock}`].filter(Boolean).join(" ");
+  return `${from.day} ${from.clock} – ${to.day} ${to.clock}`;
+}
+
+function racePlanDuring(during) {
+  if (!during) return null;
+  if (during.step === "none") return "keine nötig";
+  if (during.step === "mouth_rinse") return "kleine Mengen oder Mund spülen";
+  const range = `${during.low_g}–${during.high_g} g/h`;
+  return during.established_max_g ? `${range} · Glukose + Fruktose · über ${during.established_max_g} g/h unbelegt` : range;
+}
+
+function racePlanHeading(text, badge) {
+  return h("h5", null, text, badge ? h("span", "planned-badge", badge) : null);
+}
+
+function racePlanPacing(pacing) {
+  if (pacing.status !== "ready") return RACE_PLAN_UNAVAILABLE[pacing.reason] ? [racePlanHeading("Tempo"), h("p", "race-plan-gap", RACE_PLAN_UNAVAILABLE[pacing.reason])] : [];
+  const ride = pacing.method === "power_variation";
+  const badge = [ride ? "± 5 % Leistung" : "gleiche Anstrengung", pacing.profile_rejected ? "Streckenprofil nicht erkannt" : null].filter(Boolean).join(" · ");
+  const rows = pacing.sections.map((section) => {
+    const grade = racePlanSigned(section.grade_pct);
+    const span = `km ${RACE_PLAN_KM.format(section.from_km)}–${RACE_PLAN_KM.format(section.to_km)}`;
+    if (ride) return [span, grade, section.power_w == null ? racePlanSigned(section.power_pct, "±") : `${section.power_w} W`];
+    return [span, grade, `${AppFormat.clock(section.pace_s_per_km)}/km`, AppFormat.clock(section.time_s)];
+  });
+  const columns = ride ? ["Abschnitt", "Steigung", "Leistung"] : ["Abschnitt", "Steigung", "Tempo", "Zeit"];
+  return [racePlanHeading("Tempo", badge), table(columns, rows, { className: "race-plan-table" })];
+}
+
+function racePlanCarbohydrates(carbohydrates, competition) {
+  const weight = carbohydrates.weight?.source ? `Gewicht ${carbohydrates.weight.source}` : null;
+  const rows = carbohydrates.before.map((entry) => entry.kind === "meal"
+    ? [racePlanMeal(competition.event_date, competition.starts_at_local, entry.hours_before), racePlanRange(entry.grams, "g") || racePlanRange(entry.g_per_kg, "g/kg")]
+    : [racePlanDays(competition.event_date, entry.days_before), racePlanRange(entry.grams, "g/Tag") || racePlanRange(entry.g_per_kg, "g/kg/Tag")]);
+  const during = racePlanDuring(carbohydrates.during);
+  rows.push(["Im Rennen", during || RACE_PLAN_UNAVAILABLE.duration]);
+  return [
+    racePlanHeading("Kohlenhydrate", [carbohydrates.source, weight].filter(Boolean).join(" · ")),
+    h("div", "race-plan-rows", rows.map(([label, value]) => h("div", null, h("span", null, label), h("strong", null, value)))),
+  ];
+}
+
+// Read on every opening, so the plan follows weight and competition changes; nothing is kept in memory.
+function loadRacePlan(section, competition) {
+  if (section.dataset.state === "loading") return;
+  section.dataset.state = "loading";
+  const status = h("output", null, "Rennplan wird berechnet …");
+  section.replaceChildren(h("h4", null, "Rennplan"), status);
+  api(`/api/competitions/${encodeURIComponent(competition.id)}/race-plan`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((payload) => {
+    const plan = payload.race_plan;
+    section.dataset.state = "ready";
+    section.replaceChildren(h("h4", null, "Rennplan"), ...racePlanPacing(plan.pacing), ...racePlanCarbohydrates(plan.carbohydrates, competition));
+  }).catch(() => {
+    section.dataset.state = "failed";
+    const retry = h("button", { type: "button", className: "secondary-button" }, "Erneut laden");
+    retry.addEventListener("click", () => loadRacePlan(section, competition));
+    status.textContent = "Rennplan konnte nicht geladen werden.";
+    section.append(retry);
+  });
+}
+
 function competitionCard(competition, todayKey, openIds) {
   const sport = competition.sport_detail || competitionSportLabel(competition.sport, competition.environment);
   const when = AppFormat.relativeDay(competition.event_date, todayKey);
@@ -2181,8 +2326,15 @@ function competitionCard(competition, todayKey, openIds) {
     ["Notizen", competition.notes],
   ];
   const facts = optional.filter(([, value]) => value != null && String(value).trim() !== "").map(([label, value]) => competitionFact(label, value));
-  return h("details", { className: "competition-card", dataset: { competitionId: String(competition.id) }, open: openIds.has(String(competition.id)) },
-    summary, source, facts.length ? h("div", "competition-card-facts", facts) : null);
+  const upcoming = competitionDate(competition, todayKey) && competition.event_date >= todayKey;
+  const plan = upcoming ? h("section", "race-plan") : null;
+  const card = h("details", { className: "competition-card", dataset: { competitionId: String(competition.id) }, open: openIds.has(String(competition.id)) },
+    summary, source, facts.length ? h("div", "competition-card-facts", facts) : null, plan);
+  if (plan) {
+    card.addEventListener("toggle", () => { if (card.open) loadRacePlan(plan, competition); });
+    if (card.open) loadRacePlan(plan, competition);
+  }
+  return card;
 }
 
 function renderCompetitions(competitions) {

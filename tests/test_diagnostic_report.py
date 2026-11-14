@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import tempfile
+import time
 import unittest
 from contextlib import closing, contextmanager
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -193,6 +197,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "local_load",
                 "garmin_change_check",
                 "lt1_ride_coverage",
+                "decoupling_eligibility",
+                "recovery_copies",
                 "stream_backfill",
                 "fit_inventory",
                 "session_metrics",
@@ -256,6 +262,10 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     "garmin_snapshot_legacy": 0,
                     "diagnostic_capture_entries": 12,
                 },
+                # No database path in this fake: storage is unknown (#2848).
+                "file_bytes": None,
+                "wal_bytes": None,
+                "data_dir_free_bytes": None,
                 "workout_library_state": {"local": 2},
                 "external_calendar_events": 400,
             },
@@ -331,6 +341,36 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # The Wahoo block reads the token record and the last sync time and error.
         # The session rebundle state is one more read, the FIT inventory one more (#2220).
         self.assertEqual(self.key_values.get.call_count, 18)
+
+    def test_storage_and_recovery_copies_are_sizes_and_ages_only(self):
+        # Stat only: sizes, free space and the newest copy's age; no name or path.
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "intervals-coach.db"
+            database.write_bytes(b"x" * 4096)
+            database.with_name("intervals-coach.db-wal").write_bytes(b"x" * 512)
+            # The age is the name's UTC time (2 h), not the kept mtime (30 days).
+            made = (datetime.now(UTC) - timedelta(hours=2)).strftime("%Y%m%d%H%M%S")
+            copy = database.with_name(
+                f"intervals-coach.db.pre-restore-{made}-" + "a" * 32
+            )
+            copy.write_bytes(b"x" * 2048)
+            old = time.time() - 30 * 86400
+            os.utime(copy, (old, old))
+            database.with_name("intervals-purge-v1.done").write_text("")
+            service = DiagnosticReportService(
+                replace(self.service._deps, database_path=lambda: database)
+            )
+            storage = service._storage()
+            copies = service._recovery_copies()
+        self.assertEqual((storage["file_bytes"], storage["wal_bytes"]), (4096, 512))
+        self.assertGreater(storage["data_dir_free_bytes"], 0)
+        self.assertEqual((copies["count"], copies["total_bytes"]), (1, 2048))
+        self.assertAlmostEqual(copies["newest_age_hours"], 2.0, places=1)
+        self.assertEqual(  # no path: the fields say unknown
+            self.service._storage(),
+            {"file_bytes": None, "wal_bytes": None, "data_dir_free_bytes": None},
+        )
+        self.assertEqual(self.service._recovery_copies(), {"available": False})
 
     def test_payload_sizes_count_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
@@ -12,6 +13,8 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
+
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 class SyncGetRoutes:
@@ -79,6 +82,8 @@ class SyncGetRoutes:
         Response: 200 with `ok`, the document (`contract`, `session`, `metrics`,
         `streams`, `laps`, `zones`, `strength_sets`, `analysis`, `detail_data`
         and more, plus `weather` and `route` when stored, and `data_scope`),
+        `planned_adherence` for a run or ride the calendar pairs with a local
+        planned unit (each step's time in target, the score and zone times),
         and `session_bundle` (the session's provider copies and merge
         candidates; null when the session is not live).
 
@@ -87,12 +92,22 @@ class SyncGetRoutes:
         characters; 404 `activity_details_not_found` "Diese Aktivität ist lokal
         nicht vorhanden." when the id is unknown, ambiguous or has no records.
         """
-        payload = self._activity_read_service().detail(
+        service = self._activity_read_service()
+        payload = service.detail(
             unquote(request.params["id"]),
             garmin_status=NO_GARMIN_SYNC_STATUS,
             profile={},
             today=self._local_today(),
         )
+        try:
+            adherence = service.planned_adherence(payload)
+        except Exception as exc:  # noqa: BLE001 - the comparison is optional; never fail the details
+            _LOGGER.warning(
+                "planned step adherence unavailable: %s", type(exc).__name__
+            )
+            adherence = None
+        if adherence is not None:
+            payload["planned_adherence"] = adherence
         # Performance validation belongs to the Coach's complete context.
         payload.pop("activity_validation", None)
         session_id = (payload.get("session") or {}).get("activity_id")

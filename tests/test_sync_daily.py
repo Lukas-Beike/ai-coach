@@ -11,12 +11,9 @@ from support import temp_database
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.sync.daily import (
-    DailySyncMarkerService,
-    daily_attempt_marker_key,
-    daily_marker_key,
-)
+from backend.sync.daily import DailySyncMarkerService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.state import daily_attempt_key, daily_marker_key
 
 
 class CountingDatabaseManager(DatabaseManager):
@@ -209,7 +206,7 @@ class RegistryDailyMarkerTests(unittest.TestCase):
                         f"sync_{provider}_last_success_at",
                     )
                     self.assertEqual(
-                        daily_attempt_marker_key(provider),
+                        daily_attempt_key(provider),
                         f"sync_{provider}_last_attempt_at",
                     )
                 else:
@@ -220,7 +217,7 @@ class RegistryDailyMarkerTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         ValueError, "unknown daily sync source"
                     ):
-                        daily_attempt_marker_key(provider)
+                        daily_attempt_key(provider)
 
 
 if __name__ == "__main__":

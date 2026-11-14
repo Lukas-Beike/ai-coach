@@ -8,26 +8,9 @@ from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.state import daily_attempt_key, daily_marker_key
 
 SYNC_INTERVAL_SECONDS = 60 * 60
-
-
-def _require_daily_source(source: str) -> None:
-    if source not in DEFAULT_PROVIDER_REGISTRY.daily_marker_ids():
-        raise ValueError(f"unknown daily sync source: {source}")
-
-
-def daily_marker_key(source: str) -> str:
-    """Return the durable last-success key for a known provider."""
-    _require_daily_source(source)
-    return f"sync_{source}_last_success_at"
-
-
-def daily_attempt_marker_key(source: str) -> str:
-    """Return the durable last-attempt key for a known provider."""
-    _require_daily_source(source)
-    return f"sync_{source}_last_attempt_at"
 
 
 def daily_sync_is_due(
@@ -39,7 +22,7 @@ def daily_sync_is_due(
     """Check whether a provider's last success or attempt was an hour ago."""
     timestamps = []
     for marker in (
-        get_value(daily_attempt_marker_key(source)),
+        get_value(daily_attempt_key(source)),
         get_value(daily_marker_key(source)),
     ):
         if not marker:
@@ -73,7 +56,7 @@ def mark_daily_sync_attempt(
     set_value: Callable[[str, str], None],
 ) -> None:
     """Store when a scheduled provider refresh was queued."""
-    set_value(daily_attempt_marker_key(source), now.isoformat())
+    set_value(daily_attempt_key(source), now.isoformat())
 
 
 class DailySyncMarkerService:

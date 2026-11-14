@@ -764,37 +764,25 @@ function renderPowerProfile(result) {
   root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
 }
 
-// The fastest observed pace per duration and time per distance of all stored sessions (#2265, #2694),
-// in the targets and order the report returns.
-function runningBestEffortRow(kind, point) {
-  const minutes = point.duration_seconds / 60;
-  const unit = minutes === 1 ? "Minute" : "Minuten";
-  const label = kind === "speed" ? `${AppFormat.number(minutes)} ${unit}` : `${AppFormat.number(point.distance_meters / 1000)} km`;
-  let text = null;
-  if (kind === "speed" && point.speed_mps > 0) text = formatPace(1000 / Number(point.speed_mps));
-  else if (kind === "distance" && point.seconds > 0) text = AppFormat.clock(point.seconds);
-  return { label, text, date: text && dateLabel(point.date), key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
-}
+// The fastest observed time per race distance of all stored sessions (#2694); running bests
+// are distances only, every row stays with a dash where no best exists (#2786).
+const RUNNING_BEST_DISTANCES = [[1000, "1 km"], [5000, "5 km"], [10000, "10 km"], [21097.5, "Halbmarathon"], [42195, "Marathon"]];
 
 function renderRunningBestEfforts(result) {
   const root = document.getElementById("runningBestEfforts");
-  const running = result?.all_time?.running || {};
+  const points = result?.all_time?.running?.distance || [];
   root.replaceChildren(h("h4", null, "Bestwerte"));
   const body = h("tbody");
   let values = 0;
-  for (const kind of ["speed", "distance"]) {
-    for (const point of running[kind] || []) {
-      const { label, text, date, key } = runningBestEffortRow(kind, point);
-      const cell = h("td", { title: text ? point.source : null }, text);
-      if (text) values += 1; else markValueMissing(cell);
-      body.append(h("tr", { dataset: { runningBest: key } }, h("th", { scope: "row" }, label), cell, h("td", null, date)));
-    }
+  for (const [meters, label] of RUNNING_BEST_DISTANCES) {
+    const point = points.find((item) => item.distance_meters === meters && item.seconds > 0);
+    const cell = h("td", { title: point?.source }, point && AppFormat.clock(point.seconds));
+    if (point) values += 1; else markValueMissing(cell, "–");
+    body.append(h("tr", { dataset: { runningBest: `distance:${meters}` } }, h("th", { scope: "row" }, label), cell, h("td", null, point ? dateLabel(point.date) : null)));
   }
-  if (values) {
-    const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Lauf-Bestwerte");
-    const head = h("thead", null, h("tr", null, ["Dauer / Strecke", "Bestwert", "Datum"].map((label) => h("th", { scope: "col" }, label))));
-    scroll.append(h("table", "race-predictions-table", head, body)); root.append(scroll);
-  } else root.append(h("p", "muted", "Noch keine Lauf-Bestwerte."));
+  const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Lauf-Bestwerte");
+  const head = h("thead", null, h("tr", null, ["Strecke", "Zeit", "Datum"].map((label) => h("th", { scope: "col" }, label))));
+  scroll.append(h("table", "race-predictions-table", head, body)); root.append(scroll);
   const criticalSpeed = criticalPowerLine(result, "run", values > 0);
   if (criticalSpeed) root.append(criticalSpeed);
   root.dataset.analysisEmpty = String(!values && !criticalSpeed);
@@ -945,7 +933,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     const group = analysisChartGroup("Entwicklung", charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: alle datierten Garmin-FTP-Werte, letzter gültiger Wochenwert für Schwellenpace, Wochenmedian für VO₂max. Fehlende Messungen bleiben Lücken. Garmin. VO₂max ist eine Schätzung. Quellen und Messdatum bleiben sichtbar.");
     makeAnalysisSectionCollapsible(group, `development-${sport}`);
     group.dataset.analysisSport = analysisSport;
-    if (sport === "Lauf") group.querySelector(".analysis-section-content").append(runningBest, predictions);
+    if (sport === "Lauf") group.querySelector(".analysis-section-content").append(predictions, runningBest);
     else group.querySelector(".analysis-section-content").prepend(powerProfile);
     root.append(group);
   }
@@ -1810,8 +1798,8 @@ function trainingFocusZoneInfo(report, model, items) {
 
 function appendTrainingFocusZones(report, details) {
   const zones = report.zones || [];
-  for (const sensor of ["heart_rate", "power"]) {
-    const name = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
+  // Pace zones are counted for runs only and follow power (#2808).
+  for (const [sensor, name] of [["heart_rate", "HF-Zonen"], ["power", "Power-Zonen"], ["pace", "Pace-Zonen"]]) {
     const matching = zones.filter((item) => item.sensor === sensor);
     if (!matching.some((item) => item.measured_seconds > 0)) continue;
     for (const model of ["local", "provider"]) {

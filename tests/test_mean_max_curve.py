@@ -2,6 +2,7 @@
 
 import itertools
 import sqlite3
+import threading
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -36,9 +37,11 @@ from backend.db.schema import initialize_schema
 from backend.performance import mean_max_curve
 from backend.performance.canonical_detail import CanonicalDetailReader
 from backend.performance.mean_max_curve import SessionCurveReader
+from backend.performance.power_profile import running_profile
 from backend.performance.report_service import TrainingProfileSelectionService
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from tests.test_power_profile import steady_run
 
 STAMP = "2026-10-18T08:00:00+00:00"
 RETRIEVED = datetime(2026, 10, 18, 8, 0, tzinfo=UTC)
@@ -355,6 +358,44 @@ class SessionExecutionCurveTests(unittest.TestCase):
         add_session(self.db, "act_1")
         add_record(self.db, GARMIN, "g-1", "act_1")
         store_streams(self.db, GARMIN, "g-1", interval_power(), StreamResolution.FULL)
+
+    def test_a_curve_missed_by_two_threads_is_computed_once(self):
+        # Parallel view loads after a start computed the same cold curve in
+        # every request (#2783); a second miss now waits for the first.
+        shared = sqlite3.connect(":memory:", check_same_thread=False)
+        shared.row_factory = row_factory
+        self.addCleanup(shared.close)
+        self.db.commit()
+        self.db.backup(shared)
+        entered, release = threading.Event(), threading.Event()
+        compute = mean_max_curve._session_curve
+
+        def gated(*args):
+            entered.set()
+            release.wait(5)
+            return compute(*args)
+
+        results = {}
+        with patch.object(mean_max_curve, "_session_curve", side_effect=gated) as spy:
+            first = threading.Thread(
+                target=lambda: results.update(a=self.reader.curves(shared, ["act_1"]))
+            )
+            first.start()
+            self.assertTrue(entered.wait(5))
+            # The first computation's marker: note when the second miss waits on it.
+            (marker,) = self.reader._computing.values()
+            waiting, wait = threading.Event(), marker.wait
+            marker.wait = lambda *args: (waiting.set(), wait(*args))[1]
+            second = threading.Thread(
+                target=lambda: results.update(b=self.reader.curves(shared, ["act_1"]))
+            )
+            second.start()
+            self.assertTrue(waiting.wait(5), "the second miss waits")
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(1, spy.call_count)
+        self.assertIs(results["a"]["act_1"], results["b"]["act_1"])
 
     def test_lap_sets_are_read_by_key_and_alone(self):
         store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS)
@@ -881,6 +922,37 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertNotEqual(groups[180][1], groups[720][1])
         reordered = service.power_profiles(records[::-1])["windows"]["90"]
         self.assertEqual(window["input_fingerprint"], reordered["input_fingerprint"])
+
+    def test_running_distance_bests_run_up_to_the_marathon(self):
+        records = [
+            {
+                **activity,
+                "activity_id": activity_id,
+                "fingerprint": activity_id,
+                "running_profile": running_profile(activity),
+            }
+            for activity_id, activity in (
+                ("long", steady_run(43, speed=3.0, day="2026-09-01")),
+                ("fast", steady_run(12, speed=4.0, day="2026-10-10")),
+            )
+        ]
+        service = TrainingProfileSelectionService(lambda: date(2026, 10, 18))
+
+        window = service.power_profiles(records)["windows"]["90"]
+
+        self.assertEqual(
+            [
+                (1000, "fast"),
+                (5000, "fast"),
+                (10000, "fast"),
+                (21097.5, "long"),
+                (42195, "long"),
+            ],
+            [
+                (point["distance_meters"], point["activity_id"])
+                for point in window["running"]["distance"]
+            ],
+        )
 
 
 if __name__ == "__main__":

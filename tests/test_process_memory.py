@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.runtime.memory import process_memory
+from backend.runtime.memory import process_memory, process_settings
 
 
 class ProcessMemoryTests(unittest.TestCase):
@@ -38,6 +38,16 @@ class ProcessMemoryTests(unittest.TestCase):
             },
         )
         self.assertNotIn("private", str(result))
+
+    def test_settings_are_uptime_and_the_arena_limit_only(self):
+        # The one environment value shown is the allocator arena limit (#2848).
+        with patch.dict("os.environ", {"MALLOC_ARENA_MAX": "2", "SECRET": "x"}):
+            settings = process_settings()
+        self.assertEqual(set(settings), {"uptime_s", "malloc_arena_max"})
+        self.assertEqual(settings["malloc_arena_max"], 2)
+        self.assertGreaterEqual(settings["uptime_s"], 0)
+        with patch.dict("os.environ", {"MALLOC_ARENA_MAX": "many"}):
+            self.assertIsNone(process_settings()["malloc_arena_max"])
 
     def test_unavailable_proc_files_are_nonfatal(self):
         with tempfile.TemporaryDirectory() as root:

@@ -19,8 +19,6 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.schedule_policies import WahooSchedulePolicy
 from backend.sync.wahoo_sync import (
-    LAST_ERROR_KEY,
-    LAST_SYNC_KEY,
     SYNC_FAILED_MESSAGE,
     WahooSyncClock,
     WahooSyncService,
@@ -35,6 +33,8 @@ from tests.wahoo_sync_fixture import (
     workout,
 )
 
+LAST_SYNC_KEY = "last_wahoo_sync_at"
+LAST_ERROR_KEY = "last_wahoo_sync_error"
 ALL_SCOPES = "workouts_read power_zones_read user_read"
 CYCLING_ZONE_SET = {
     "id": 1,
@@ -104,14 +104,17 @@ class ThresholdSyncTests(WahooSyncCase):
         self.assertEqual([], self.stored_kinds())
         self.assertEqual(1, len(self._activity_rows()))
 
-    def test_a_successful_read_clears_the_general_sync_error(self) -> None:
+    def test_a_successful_read_keeps_the_garmin_operation_error(self) -> None:
+        # The general error belongs to the Garmin operation, its only writer;
+        # a Wahoo success hid a failed Garmin sync from status and diagnostics
+        # (#2705). A Garmin success still clears it (test_sync_status).
         self.grant()
         with self.database.unit_of_work() as db:
-            self.key_values.set(db, "last_sync_error", "stale failure")
+            self.key_values.set(db, "last_sync_error", "Garmin failed")
 
         self.service.sync()
 
-        self.assertFalse(self._value("last_sync_error"))
+        self.assertEqual("Garmin failed", self._value("last_sync_error"))
 
     def test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts(
         self,

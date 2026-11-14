@@ -43,6 +43,33 @@ class IssueStatusTests(unittest.TestCase):
             [m[1] for m in criteria],
             ["closing summary covers this", "still a criterion"],
         )
+        # #2799: a plain "Acceptance" heading starts the criteria too, but a
+        # heading of work items such as "Acceptance tests" holds parts
+        body = "## Acceptance\n- [ ] a\n## Acceptance tests\n- [ ] b\n## Acceptance:\n- [ ] c"
+        parts, criteria = issue_status.open_boxes(body)
+        self.assertEqual(
+            ([m[1] for m in parts], [m[1] for m in criteria]), (["b"], ["a", "c"])
+        )
+
+    def test_only_closing_or_part_of_references_link_a_pr(self):
+        bodies = {  # #2798: a mention in prose or a longer number does not link
+            1: "Closes #12",
+            2: "Part of #12",
+            3: "fixed: #12.",
+            4: "RESOLVES #12 and more",
+            5: "Builds on #12 (merge hold).",
+            6: "Closes #123",
+            7: "Part of #1",
+            8: None,
+            9: "_Part of #12_",
+            10: "Suffixes #12",
+        }
+        pulls = [{"number": n, "body": body} for n, body in bodies.items()]
+        calls = []
+        linked = issue_status.linked_pulls(12, lambda *a: calls.append(a) or pulls)
+        self.assertEqual([pull["number"] for pull in linked], [1, 2, 3, 4, 9])
+        # the default 30 results could hide an older linked PR
+        self.assertIn("1000", calls[0])
 
     def test_empty_body_has_no_checkboxes(self):
         self.assertEqual(issue_status.open_checkboxes(None), [])

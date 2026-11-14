@@ -168,11 +168,15 @@ The system SHALL present the planning segment as `Wettkämpfe`, with individuall
 Evidence: `public/plan-views.js:renderCompetitions`, `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionDistance`, `public/plan-views.js:competitionDate`; `tests/competition-overview.test.cjs` (distance and invalid-date tests); `e2e/competitions.spec.js` (summaries, ordering, past-only lists).
 
 ### Requirement: CS10 Saved event details and historical archive
-The system SHALL reveal saved optional event details only on expansion, omit empty optional fields, and group past events in an initially collapsed archive ordered newest first. Expansion SHALL remain keyboard accessible and render untrusted event text safely.
+The system SHALL reveal saved optional event details only on expansion, omit empty optional fields, and group past events in an initially collapsed archive ordered newest first. Expansion SHALL remain keyboard accessible and render untrusted event text safely. Expanding an upcoming event SHALL also read and show its race plan, with loading and retry states; past and undated events show none.
 
 #### Scenario: Expand an event
 - **WHEN** the athlete expands a competition
 - **THEN** its saved start time, target, expected duration, course profile, description and notes are shown where present, and other entries retain their expansion state.
+
+#### Scenario: Race plan of an upcoming event
+- **WHEN** the athlete expands an upcoming competition
+- **THEN** a "Rennplan" block shows the pacing table and the carbohydrates with their rule and source badges, read again on every opening and kept nowhere on the device; a meal window before midnight names the day before; a failed read offers "Erneut laden" without hiding the saved facts.
 
 #### Scenario: Historical and empty lists
 - **WHEN** only past competitions exist or no competitions exist
@@ -182,14 +186,14 @@ The system SHALL reveal saved optional event details only on expansion, omit emp
 - **WHEN** event text contains markup or provider-supplied instructions
 - **THEN** it is displayed as safe content and never executed or treated as authorization.
 
-Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`; `e2e/competitions.spec.js` (saved details, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
+Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`, `public/plan-views.js:loadRacePlan`; `tests/competition-overview.test.cjs` (race plan pacing and carbohydrates); `e2e/competitions.spec.js` (saved details, race plan, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
 
 ### Requirement: CS11 Overview excludes training analysis
 The competition overview SHALL exclude date-derived training phases, weekly training volume/history, preparation evidence and long-session analysis. Reading the overview SHALL remain usable without activity analyses.
 
 #### Scenario: Athlete checks competition dates
 - **WHEN** the competition overview is loaded or an event is expanded
-- **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, or phase labels.
+- **THEN** only competition facts, the race plan of an expanded upcoming event and existing event-workflow access are presented, without weekly charts, evidence tables, or phase labels.
 
 Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile and desktop); `e2e/training-feature-panels.spec.js`.
 
@@ -231,6 +235,6 @@ The system SHALL link each stored competition to the completed sessions of its l
 - **WHEN** the athlete opens the competition overview and a past competition has a linked session
 - **THEN** its expanded details show "Ergebnis" with the session's elapsed time (else moving time), distance, average pace (rides: average power, else speed) and the link's source label, read on `GET /api/profile` in one read snapshot without any write; a competition without a linked session shows no result, today's competition shows only a provider race (never the date hint), and a failed result read keeps the profile response.
 
-Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. Unlinking by athlete marking is not yet implemented (#1759).
+Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. The athlete unlinks a session by marking another purpose, training included, in its "Feedback" dialog (local, with receipt and undo, #1759); a marked training also takes the hint away from the other sessions of that day and sport.
 
-Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`, `backend/planning/race_results.py:with_race_results`, `backend/performance/activity_read_service.py:summaries_on_days`, `backend/http_api/athlete_get.py`, `public/plan-views.js:competitionResult`; `tests/test_session_purpose.py`, `tests/test_race_results.py`, `tests/competition-overview.test.cjs`.
+Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`, `backend/planning/race_results.py:with_race_results`, `backend/performance/activity_read_service.py:summaries_on_days`, `backend/http_api/athlete_get.py`, `public/plan-views.js:competitionResult`; `tests/test_session_purpose.py` (including `test_training_removes_the_race_hint`, `test_training_on_a_provider_race_drops_its_link`), `tests/test_race_results.py`, `tests/competition-overview.test.cjs`, `e2e/activity-details.spec.js::@responsive marking the session purpose sends it with a receipt whose undo restores the previous one`.

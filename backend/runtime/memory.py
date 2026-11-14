@@ -1,6 +1,12 @@
 """Content-free Linux process memory counters for operational diagnostics."""
 
+import os
+import time
 from pathlib import Path
+
+# Uptime counts from this module's import, early in startup (the diagnostics
+# report imports it); interpreter start before it is not included.
+_STARTED = time.monotonic()
 
 _STATUS_BYTES = {
     "VmRSS": "rss_bytes",
@@ -42,3 +48,12 @@ def process_memory(proc_root: Path = Path("/proc")) -> dict[str, int]:
     except OSError, ValueError, MemoryError:
         pass
     return counters
+
+
+def process_settings() -> dict[str, int | None]:
+    """Uptime in seconds and the allocator arena limit (the one env value shown)."""
+    try:
+        arenas: int | None = int(os.environ.get("MALLOC_ARENA_MAX", ""))
+    except ValueError:
+        arenas = None
+    return {"uptime_s": int(time.monotonic() - _STARTED), "malloc_arena_max": arenas}

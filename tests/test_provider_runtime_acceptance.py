@@ -51,7 +51,6 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.executor import SyncJobExecutor
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.full_resync import (
-    PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncStateStore,
 )
@@ -688,7 +687,7 @@ class SyncStateReaderTests(OrchestrationCase):
         )
         self.resync = FullProviderResyncService(
             {GARMIN_ID: Mock(), WAHOO_ID: Mock()},
-            FullResyncStateStore(self.database, self.key_values, PROVIDER_RESYNC_KEYS),
+            FullResyncStateStore(self.database, self.key_values),
             Mock(),
         )
 
@@ -730,7 +729,20 @@ class SyncStateReaderTests(OrchestrationCase):
         running[0] = False
         idle_state = service.state(freshness=[], jobs=[])
 
-        self.assertEqual({key: state[key] for key in expected}, expected)
+        # While Wahoo runs, the finished Garmin operation is not shown as the
+        # running one (#2706); the general error stays.
+        self.assertEqual(
+            {
+                **dict.fromkeys(expected),
+                "status": "running",
+                "phase": "running",
+                "progress": 0,
+                "started_at": "2026-09-20T11:00:00+00:00",
+                "finished_at": "2026-09-20T11:05:00+00:00",
+                "last_error": "fake-last-sync-error",
+            },
+            {key: state[key] for key in expected},
+        )
         self.assertNotIn(UNREAD_VALUE, json.dumps(state, default=str))
         self.assertTrue(state["running"], "only a probe sets running")
         self.assertEqual({key: idle_state[key] for key in expected}, expected)

@@ -4,14 +4,20 @@ Never part of the test suite, CI or pre-push (the name does not start with
 ``test_``). It runs by hand with a dedicated evaluation key in
 ``COACH_EVAL_API_KEY`` (or against a loopback endpoint), the whole catalogue
 once, one phrasing per case, at most 300 model calls (the write gate's
-classifier included) and an estimated 5 USD per run. Each case gets a fresh temporary
+classifier included) and an estimated 5 USD per run. ``--provider`` names the
+model API explicitly, OpenAI Responses or the Anthropic Messages API; there is
+no fallback from one to the other. Each case gets a fresh temporary
 database holding the catalogue's synthetic state; the real Coach turn loop
 executes the model's tool calls against it. Providers are unconfigured and no
 remote proposal is ever approved, so nothing leaves the temporary storage.
 Scoring is mechanical; there is no judge model. Output goes to stdout only.
 
-    python tests/coach_live_eval.py --base-url https://api.openai.com/v1 \
-        --model <id> --price-input <usd> --price-output <usd> [--thinking low]
+    python tests/coach_live_eval.py --provider openai \
+        --base-url https://api.openai.com/v1 --model <id> \
+        --price-input <usd> --price-output <usd> [--thinking low]
+    python tests/coach_live_eval.py --provider anthropic \
+        --base-url https://api.anthropic.com --model claude-sonnet \
+        --price-input <usd> --price-output <usd> [--thinking low]
 
 The case definition is ``tests/coach_eval_cases.json``; the table in
 ``docs/coach-dialogue-evaluation.md`` is generated from it
@@ -43,6 +49,15 @@ MAX_CALLS = 300
 # and 5 USD a run.
 MAX_COST_USD = 5.0
 OPENAI_HOST = "api.openai.com"
+ANTHROPIC_HOST = "api.anthropic.com"
+# Each provider's API host, name, and the factors on the base input price for
+# uncached and cached input tokens. Claude's usage counts cache writes and reads
+# as input: a write costs 1.25 and a read 0.1 times the base price, so reads are
+# priced as reads and every other input token as a write, and the ceiling holds.
+PROVIDERS = {
+    "openai": (OPENAI_HOST, "OpenAI", 1.0, 1.0),
+    "anthropic": (ANTHROPIC_HOST, "Anthropic", 1.25, 0.1),
+}
 SAMPLE_CASES = 5
 FTP_WATTS = 250
 EASY_CAP_PERCENT = 87.0  # backend.activities.hr_cap.HR_CAP_PERCENT["easy"]
@@ -543,18 +558,21 @@ def score_case(
 
 
 class CallCounter:
-    """Counts every Responses request and refuses the one past the cap."""
+    """Counts every model request and refuses the one past the cap."""
 
     def __init__(
         self,
         cap: int,
         cost_cap: float = MAX_COST_USD,
         prices: tuple[float, float] = (0.0, 0.0),
+        cached_price: float | None = None,
     ) -> None:
         self.cap = cap
         self.cost_cap = cost_cap
-        # USD per million input and output tokens.
+        # USD per million input and output tokens, and per million cached input
+        # tokens (the input price unless the provider bills them apart).
         self.prices = prices
+        self.cached_price = prices[0] if cached_price is None else cached_price
         self.cost = 0.0
         # The dearest call so far; the next call is assumed to cost as much.
         self.max_call_cost = 0.0
@@ -572,8 +590,12 @@ class CallCounter:
         usage = getattr(turn, "usage", None) or {}
         tokens_in = usage.get("input_tokens") or 0
         tokens_out = usage.get("output_tokens") or 0
+        details = usage.get("input_tokens_details") or {}
+        cached = min(tokens_in, details.get("cached_tokens") or 0)
         call_cost = (
-            tokens_in * self.prices[0] + tokens_out * self.prices[1]
+            (tokens_in - cached) * self.prices[0]
+            + cached * self.cached_price
+            + tokens_out * self.prices[1]
         ) / 1_000_000
         self.cost += call_cost
         self.max_call_cost = max(self.max_call_cost, call_cost)
@@ -602,15 +624,22 @@ class CountingTransport:
             raise CapReached
         self._counter.calls += 1
 
-    def request(self, request: Any) -> Any:
+    def _send(self, call: Any) -> Any:
         self._count()
-        return self._after(self._counter.record(self._inner.request(request)))
+        try:
+            turn = call()
+        except Exception:
+            # A failed call may still be billed (a refusal is): its usage is
+            # unknown, so it is priced like the dearest call so far.
+            self._counter.cost += self._counter.max_call_cost
+            raise
+        return self._after(self._counter.record(turn))
+
+    def request(self, request: Any) -> Any:
+        return self._send(lambda: self._inner.request(request))
 
     def stream_request(self, request: Any, *args: Any, **kwargs: Any) -> Any:
-        self._count()
-        return self._after(
-            self._counter.record(self._inner.stream_request(request, *args, **kwargs))
-        )
+        return self._send(lambda: self._inner.stream_request(request, *args, **kwargs))
 
 
 # The synthetic library's plain template per sport (#2379).
@@ -958,8 +987,21 @@ def snapshot(server: Any) -> dict[str, Any]:
 
 
 @contextlib.contextmanager
-def case_server(base_url: str, model: str, thinking: str, api_key: str):
-    """A fresh temporary application with the real Coach loop and the live model."""
+def case_server(
+    base_url: str,
+    model: str,
+    thinking: str,
+    api_key: str,
+    *,
+    provider: str,
+    resolved_model: str | None = None,
+):
+    """A fresh temporary application with the real Coach loop and the live model.
+
+    Only ``provider`` gets the key, so no turn can reach the other provider. A
+    Claude family uses ``resolved_model``, the model the preflight listed, so
+    every case runs on the same model without listing the models again.
+    """
     from unittest.mock import Mock, patch
 
     import server_test_support as fixtures
@@ -979,14 +1021,34 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
         tempfile.TemporaryDirectory(prefix="coach-live-eval-") as root,
         contextlib.ExitStack() as stack,
     ):
-        config = make_config(
-            openai_api_key=api_key, openai_base_url=base_url, openai_model=model
+        config = (
+            make_config(anthropic_api_key=api_key, anthropic_base_url=base_url)
+            if provider == "anthropic"
+            else make_config(
+                openai_api_key=api_key, openai_base_url=base_url, openai_model=model
+            )
         )
         stack.enter_context(patch.object(server.CONFIG_HOLDER, "value", config))
         stack.enter_context(isolated_server(server, Path(root)))
         stack.enter_context(canonical_backfill_stopped(server))
         stack.enter_context(metric_export_stopped(server))
         reset_application_state(server)
+        if provider == "anthropic":
+            from backend.providers.claude_models import setting_family
+            from backend.providers.model_wiring import CLAUDE_MODELS_KEY
+
+            # A Claude family setting routes every task to the Messages API.
+            server.SETTINGS.save_model(model)
+            if resolved_model:
+                server.key_value_service().set(
+                    CLAUDE_MODELS_KEY,
+                    json.dumps(
+                        {
+                            "newest": {setting_family(model): resolved_model},
+                            "fetched_at": datetime.now(UTC).isoformat(),
+                        }
+                    ),
+                )
         server.SETTINGS.save_thinking_level(thinking)
         # Food lookups stay offline: Open Food Facts is unreachable and BLS finds
         # nothing; the web search is replaced per case in run_case.
@@ -1107,6 +1169,8 @@ def run_case(
         settings["model"],
         settings["thinking"],
         settings["api_key"],
+        provider=settings["provider"],
+        resolved_model=settings.get("resolved_model"),
     ) as server:
         tags = _seed(server, case)
         before = snapshot(server)
@@ -1191,12 +1255,31 @@ def _failed_tools(receipt: dict[str, Any]) -> list[str]:
 # --- CLI and report ------------------------------------------------------------
 
 
-def fetch_model_ids(base_url: str, api_key: str = "") -> list[str]:
-    """GET <base_url>/models; raises OSError or ValueError when unusable."""
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    request = urllib.request.Request(base_url + "/models", headers=headers)
+def fetch_model_ids(base_url: str, api_key: str, *, provider: str) -> list[str]:
+    """GET the provider's model list; raises OSError or ValueError when unusable.
+
+    For Anthropic, the newest model of each family, as the app resolves them.
+    """
+    from backend.config import DEFAULT_ANTHROPIC_BASE_URL
+    from backend.providers.claude_models import newest_by_family
+    from backend.providers.claude_requests import CLAUDE_MODELS_PATH, claude_headers
+    from backend.providers.http import endpoint
+
+    if provider == "anthropic":
+        url = endpoint(
+            base_url,
+            CLAUDE_MODELS_PATH + "?limit=100",
+            default_base_url=DEFAULT_ANTHROPIC_BASE_URL,
+        )
+        headers = claude_headers(api_key)
+    else:
+        url = base_url + "/models"
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=10) as response:
         body = json.loads(response.read(1_000_000))
+    if provider == "anthropic":
+        return list(newest_by_family(body).values())
     return [str(item["id"]) for item in body["data"]]
 
 
@@ -1206,28 +1289,43 @@ _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 def _preflight(args: argparse.Namespace) -> str | None:
     """None when the endpoint answers and lists the model, else one line saying why.
 
-    A loopback endpoint or the OpenAI API only; the OpenAI API needs the
-    evaluation key and the model's prices, so the cost ceiling can hold.
+    A loopback endpoint or the named provider's API only; that API needs the
+    evaluation key and the model's prices, so the cost ceiling can hold. For
+    Anthropic the model is a Claude family setting, as the app selects it.
     """
     from backend.config import validated_base_url
     from backend.errors import AppError
+    from backend.providers.claude_models import family_setting, setting_family
 
+    api_host, label, _, _ = PROVIDERS[args.provider]
+    anthropic = args.provider == "anthropic"
+    if anthropic != bool(setting_family(args.model)):
+        return (
+            "A Claude family (claude-opus, claude-sonnet or claude-haiku) needs "
+            "--provider anthropic, and --provider anthropic needs one."
+        )
     try:
-        args.base_url = validated_base_url(args.base_url, "OPENAI_BASE_URL")
+        args.base_url = validated_base_url(args.base_url, f"{label} base URL")
     except AppError:
         return "Base URL must be http on loopback or https."
     host = urlsplit(args.base_url).hostname
-    if host not in _LOOPBACK and host != OPENAI_HOST:
-        return "Only a loopback endpoint or the OpenAI API is used for this evaluation."
-    if host == OPENAI_HOST and not (
-        args.api_key and args.price_input > 0 and args.price_output > 0
+    if host not in _LOOPBACK and host != api_host:
+        return (
+            f"Only a loopback endpoint or the {label} API is used for this evaluation."
+        )
+    # An Anthropic key has its own prefix: a key never goes to the other provider.
+    if host == api_host and not (
+        args.api_key
+        and args.api_key.startswith("sk-ant-") == anthropic
+        and args.price_input > 0
+        and args.price_output > 0
     ):
         return (
-            "The OpenAI API needs COACH_EVAL_API_KEY and both --price-input and "
-            "--price-output; nothing was run."
+            f"The {label} API needs a {label} key in COACH_EVAL_API_KEY and both "
+            "--price-input and --price-output; nothing was run."
         )
     try:
-        models = fetch_model_ids(args.base_url, args.api_key)
+        models = fetch_model_ids(args.base_url, args.api_key, provider=args.provider)
     except urllib.error.HTTPError as error:
         # The endpoint answered: name the status, never the key (#2669).
         if error.code in (401, 403):
@@ -1235,7 +1333,16 @@ def _preflight(args: argparse.Namespace) -> str | None:
         return f"Endpoint at {host} answered HTTP {error.code}; nothing was run."
     except OSError, ValueError, KeyError, TypeError, urllib.error.URLError:
         return f"Endpoint at {host} is unreachable; nothing was run."
-    if args.model not in models:
+    # A Claude family resolves to its newest listed model; any other id to itself.
+    args.resolved_model = next(
+        (
+            model
+            for model in models
+            if (family_setting(model) if anthropic else model) == args.model
+        ),
+        None,
+    )
+    if not args.resolved_model:
         return f"Model {args.model} is not listed by the endpoint; nothing was run."
     return None
 
@@ -1253,6 +1360,8 @@ def render_report(
     lines = [
         "# Coach live evaluation",
         "",
+        f"- Provider: {args.provider}",
+        f"- Resolved model: {args.resolved_model}",
         f"- Provider host: {urlsplit(args.base_url).hostname}",
         f"- Model: {args.model}",
         f"- Thinking level: {args.thinking}",
@@ -1312,6 +1421,8 @@ def _errored(case_id: str, error: Exception) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live Coach dialogue evaluation.")
+    # Named explicitly: no default and no fallback to the other provider.
+    parser.add_argument("--provider", required=True, choices=sorted(PROVIDERS))
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--thinking", default="low")
@@ -1338,10 +1449,16 @@ def main(argv: list[str] | None = None) -> int:
         print(problem)
         return 2
     selected = [c for c in cases if not chosen or c["id"] in chosen]
+    _, _, uncached, cached = PROVIDERS[args.provider]
     counter = CallCounter(
-        args.max_calls, args.max_cost_usd, (args.price_input, args.price_output)
+        args.max_calls,
+        args.max_cost_usd,
+        (args.price_input * uncached, args.price_output),
+        args.price_input * cached,
     )
     settings = {
+        "provider": args.provider,
+        "resolved_model": args.resolved_model,
         "base_url": args.base_url,
         "model": args.model,
         "thinking": args.thinking,

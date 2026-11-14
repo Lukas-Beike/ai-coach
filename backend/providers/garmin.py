@@ -124,11 +124,11 @@ def authenticate_client(
 
 
 def targeted_analysis_sources() -> dict[str, dict[str, tuple[str | None, Any]]]:
-    """Return bounded targeted-read contracts supported by garminconnect 0.3.19.
+    """Return bounded targeted-read contracts of the pinned garminconnect SDK.
 
-    The call shapes match the pinned SDK. At runtime, an SDK method absent from
-    the installed client remains an unsupported capability; never guess a
-    Garmin endpoint from a newer or unrelated client.
+    The call shapes match the version pinned in requirements.txt. At runtime, an
+    SDK method absent from the installed client remains an unsupported
+    capability; never guess a Garmin endpoint from a newer or unrelated client.
     """
     date_range = lambda method, first, last: method(first.isoformat(), last.isoformat())
     latest_date = lambda method, _first, last: method(last.isoformat())
@@ -1415,7 +1415,7 @@ def _gear_activity_ids(
     if not isinstance(result, list):
         return None
     if not result and callable(getattr(client, "connectapi", None)):
-        # 0.3.19 maps this endpoint's 404 to []. Check only ambiguous empty
+        # The pinned SDK maps this endpoint's 404 to []. Check only ambiguous empty
         # results against the same authenticated URL so genuine empty 200s clear links.
         base = getattr(client, "garmin_connect_activities_baseurl", None)
         if not isinstance(base, str):

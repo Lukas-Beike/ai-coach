@@ -343,10 +343,18 @@ test("steps and floors carry their own per-day unit, a named basis and whole num
   assert.equal(fns.dailyActivityTitle("Schritte", "Schritte/Tag", days), "Schritte · Ø 8.172 pro Tag", "the header averages the same days the chart plots");
 });
 
-test("zone distributions list the highest zone first", () => {
-  const { trainingFocusZoneSeconds } = extractFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
+test("zone distributions list the highest zone first and draw pace zones after power", () => {
+  const { trainingFocusZoneSeconds, appendTrainingFocusZones } = extractFunctions("analysis.js", ["trainingFocusZoneSeconds", "appendTrainingFocusZones"], {
+    trainingFocusDistribution: (title, readings) => [title, Array.from(readings, (item) => `${item.label}:${item.value}`).join(" ")],
+    trainingFocusZoneInfo: () => "",
+  });
   const readings = trainingFocusZoneSeconds([{ seconds: { Z1: 60, Z3: 30 } }, { seconds: { Z2: 10, Z5: 5, Z1: 15 } }]);
   assert.deepEqual(Array.from(readings, (item) => [item.label, item.value]), [["Z5", 5], ["Z3", 30], ["Z2", 10], ["Z1", 75]]);
+  // The stored run pace-zone seconds are drawn as their own card after power (#2808).
+  const zone = (sensor, seconds, zone_model = "local") => ({ sensor, zone_model, seconds, measured_seconds: Object.values(seconds).reduce((a, b) => a + b, 0) });
+  const cards = [];
+  appendTrainingFocusZones({ zones: [zone("pace", { Z1: 300, Z4: 900 }), zone("power", { Z2: 600 }), zone("heart_rate", { Z2: 1200 }), zone("pace", { Z0: 0 }, "provider")] }, { append: (card) => cards.push(card) });
+  assert.deepEqual(cards.map((card) => Array.from(card)), [["HF-Zonen", "Z2:1200"], ["Power-Zonen", "Z2:600"], ["Pace-Zonen", "Z4:900 Z1:300"]]);
 });
 
 test("provider metrics carry German labels and the unit points where they are scores", () => {

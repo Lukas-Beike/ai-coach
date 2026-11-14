@@ -887,6 +887,45 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             },
         }
 
+    def test_heavy_history_seeds_count_and_full_streams_once(self):
+        # #2801: opt-in history for performance checks, seeded through the env.
+        with self._temporary_fixture_database("fixture-heavy-") as server:
+            with patch.dict("os.environ", {"FIXTURE_HEAVY_HISTORY": "3"}):
+                fixture_runtime.initialise_fixture()
+                with patch.object(fixture_runtime, "ingest_plan") as ingest:
+                    fixture_runtime.initialise_fixture()  # a restart seeds nothing
+                ingest.assert_not_called()
+            # The rows go to the canonical tables, not into the stored snapshot.
+            snapshot = self._snapshot_activity_ids(server)
+            self.assertFalse([item for item in snapshot if "heavy" in item])
+            ids = [f"heavy-history-{n}" for n in range(3)]
+            with server.database_manager().unit_of_work() as db:
+                for index, activity_id in enumerate(ids):
+                    wahoo = fixture_runtime.fixture_wahoo_id(activity_id)
+                    self.assertTrue(analysis_row_for_record(db, "wahoo", wahoo))
+                    garmin = f"garmin-{wahoo}"
+                    channels = {
+                        channel: len(values)
+                        for item in detail_sets_for(db, "garmin", garmin)
+                        for channel, values in getattr(
+                            item.detail, "channels", {}
+                        ).items()
+                    }
+                    extra = (
+                        StreamChannel.POWER_W
+                        if index % 2 == 0
+                        else StreamChannel.SPEED_MPS
+                    )
+                    expected = (
+                        StreamChannel.TIME_S,
+                        StreamChannel.HEART_RATE_BPM,
+                        extra,
+                    )
+                    self.assertEqual(channels, dict.fromkeys(expected, 5400))
+            for count in (0, 1001, 4):  # out of range, then another count
+                with self.assertRaises(ValueError):
+                    fixture_runtime.seed_heavy_history(count)
+
     def test_v6_fresh_seed_contains_each_scenario(self):
         with self._temporary_fixture_database("fixture-v6-fresh-") as server:
             fixture_runtime.initialise_fixture()
