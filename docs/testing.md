@@ -67,7 +67,9 @@ the container, browser and quality jobs are skipped; image, syntax and SBOM
 still run. The `test` and `Browser checks` aggregates print "docs-only: suites
 skipped". Push, release and dispatch runs never classify and always run
 everything. Before this, a docs-only PR ran all 17 jobs like any other PR
-(median PR run 11.9 min, p90 18.1 min over 31 runs on 2026-11-13).
+(median PR run 11.9 min, p90 18.1 min over 31 runs on 2026-11-13). The first
+docs-only run (#2760, run 43569747387) took 1.3 min: 10 of 14 jobs ran, shard 1
+ran 144 affected Python tests and 594 Node tests.
 
 Refresh the recording when shard times drift apart, with a full unsharded run in
 the image. The Windows runner uses the same read-only mounts and writes the file
