@@ -132,6 +132,24 @@ class WeatherProjectionTests(unittest.TestCase):
         same_peak["hourly"]["precipitation_probability"] = [80, 80, 80, 80]
         self.assertIsNone(daily_summary(same_peak)[0]["rain_peak_time"])
 
+        unsorted = {
+            "daily": {"time": ["2026-09-05", "2026-09-06"]},
+            "hourly": {
+                "time": [
+                    "2026-09-05T19:00",
+                    "2026-09-05T06:00",
+                    "2026-09-05T15:00",
+                    "2026-09-06T09:00",
+                ],
+                "precipitation_probability": [80, 5, 80, 0],
+            },
+        }
+        days = daily_summary(unsorted)
+        self.assertEqual(days[0]["rain_peak_time"], "15:00")
+        self.assertIsNone(days[1]["rain_peak_time"])
+        unsorted["hourly"]["precipitation_probability"] = [None, 5, None]
+        self.assertIsNone(daily_summary(unsorted)[0]["rain_peak_time"])
+
     def test_projection_does_not_mutate_forecast(self):
         forecast = {
             "daily": {"time": ["2026-09-01"], "weather_code": [0]},

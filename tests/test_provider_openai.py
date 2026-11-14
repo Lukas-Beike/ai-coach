@@ -1944,6 +1944,15 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             ),
             (400, "invalid_value", "invalid_request_error", "input", "req_test"),
         )
+        stream_failed = next(
+            details
+            for name, details in capture.events
+            if name == "openai_stream_failed"
+        )
+        self.assertEqual(
+            (stream_failed["error_code"], stream_failed["request_id"]),
+            ("invalid_value", "req_test"),
+        )
 
     def test_stream_client_records_http_failure_in_safe_order(self):
         events = []

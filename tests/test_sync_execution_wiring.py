@@ -42,6 +42,9 @@ class SyncJobExecutionBuilderTests(unittest.TestCase):
         ctx.wahoo.sync_service.assert_not_called()
         ctx.sync_job_queue.outcome_service.assert_not_called()
         ctx.external_calendar.sync_service.assert_not_called()
+        self.after_job.assert_not_called()
+        for owner in (ctx.garmin, ctx.wahoo, ctx.sync_persistence, ctx.sync_job_queue):
+            self.assertEqual([], owner.method_calls)
 
     def test_the_executor_resolves_the_shared_owners_and_the_outcome_service(
         self,

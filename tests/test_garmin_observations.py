@@ -48,6 +48,12 @@ class GarminObservationTests(unittest.TestCase):
         original = copy.deepcopy(source)
         self.assertEqual(garmin_source_observed_at(source), "2026-09-06")
         self.assertEqual(source, original)
+        self.assertEqual(
+            garmin_source_observed_at(
+                {"calendarDate": "invalid-date", "nested": source["nested"][:2]}
+            ),
+            "2026-09-05",
+        )
 
     def test_sleep_observed_at_is_the_primary_calendar_date(self):
         night = {
