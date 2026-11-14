@@ -22,7 +22,8 @@ never copy the file. The scripts read the password file only from there or
 the system temp directory. Result files, saved logs and screenshots stay in
 the session scratchpad (the system temp directory; the scripts refuse other
 paths) and are never committed. The
-previous release's results come from the session notes.
+previous release's results come from the session notes. Whether the release
+carries a given fix: [release-contains](../pacecraft-release-contains/SKILL.md).
 
 **Stop rule:** on an unexpected effect (a dropped record count, a failed
 guard, an undo that does not fully restore, any remote write, an error state),
