@@ -158,7 +158,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "garmin_training_mapping": (
         (24,),
-        "5c339b97f7173c09b2a9445454c623e956947d85e356b2317fcc99277469eb06",
+        "53b2771208c6930344bbd397e4646eca012a3953355c01e376218d1ab37835d3",
     ),
     "garmin_weight_walk": (
         (24,),
