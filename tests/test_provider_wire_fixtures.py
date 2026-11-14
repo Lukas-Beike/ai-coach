@@ -24,7 +24,7 @@ from intervals_compaction import compact_snapshot
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance.recovery_context import performance_recovery_context
 from backend.providers.garmin import collect_garmin_data
-from backend.sync.garmin_weight import garmin_weight_metric
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 INTERVALS_ROOT = FIXTURE_ROOT / "intervals"
@@ -368,7 +368,7 @@ class GarminWireFixtureTests(unittest.TestCase):
     def test_weight_fixture_normalises_grams_to_kilograms(self) -> None:
         payload = self.collect()
 
-        metric = garmin_weight_metric(payload)
+        metric = current_garmin_metrics(payload, SYNTHETIC_TODAY)["weight_kg"]
 
         self.assertEqual(metric["value"], 71.5)
         self.assertEqual(metric["unit"], "kg")

@@ -1,37 +1,36 @@
 import copy
 import unittest
+from datetime import date
 
 from backend.performance.wellness import comparison_value
-from backend.sync.garmin_performance_history import readiness_score_value
+from backend.sync.garmin_performance_history import current_garmin_metrics
+
+
+def _readiness(value):
+    result = current_garmin_metrics({"readiness": value}, date(2026, 9, 11))
+    return result["readiness"]["value"]
 
 
 class ReadinessTests(unittest.TestCase):
-    def test_nested_latest_sorted_entry_and_standard_fields(self):
+    # The legacy reader's other record shapes (``date``/``id`` keys, nested
+    # ``trainingReadiness`` or ``readinessScore``, undated records) are named
+    # deviations in test_garmin_health_parity (#2081).
+    def test_latest_dated_entry_and_text_values(self):
         value = [
+            {"calendarDate": "2026-09-10", "score": "72"},
             {"calendarDate": "2026-09-09", "score": 61},
-            {"date": "2026-09-10", "trainingReadiness": {"score": "72"}},
-            {"id": "2026-09-08", "value": 40},
         ]
-        self.assertEqual(readiness_score_value(value), 72)
-        self.assertEqual(
-            readiness_score_value(
-                {
-                    "readinessScore": [
-                        {"date": "2026-09-09", "value": 55},
-                        {"date": "2026-09-10", "value": 66},
-                    ]
-                }
-            ),
-            66,
-        )
+        self.assertEqual(_readiness(value), 72)
 
     def test_empty_and_invalid_readiness_values(self):
-        self.assertIsNone(readiness_score_value([]))
-        self.assertIsNone(
-            readiness_score_value([{"date": "2026-09-10", "score": "bad"}])
+        cases = (
+            ([], None),
+            ([{"calendarDate": "2026-09-10", "score": "bad"}], None),
+            ({"calendarDate": "2026-09-10", "score": float("nan")}, None),
         )
-        self.assertIsNone(readiness_score_value({"score": float("nan")}))
-        self.assertEqual(readiness_score_value({"score": "7,5"}), 7.5)
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(_readiness(value), expected)
 
 
 class ComparisonTests(unittest.TestCase):

@@ -58,7 +58,7 @@ class PerformanceHistoryTests(unittest.TestCase):
     def test_current_metrics_and_readiness_filter_by_current_freshness(self):
         payload = {
             "weight": [{"date": "2026-08-31", "weightKg": 72}],
-            "readiness": [{"date": "2026-08-31", "readiness": 85}],
+            "readiness": [{"calendarDate": "2026-08-31", "score": 85}],
             "source_freshness": {
                 "weight": current_source(),
                 "readiness": current_source(),
@@ -98,10 +98,23 @@ class PerformanceHistoryTests(unittest.TestCase):
                     ],
                 )
 
+    def test_a_newest_readiness_without_a_score_keeps_the_older_score_out(self):
+        for score in (None, 0, "bad"):
+            with self.subTest(score=score):
+                payload = {
+                    "readiness": [
+                        {"calendarDate": "2026-08-30", "score": 61},
+                        {"calendarDate": "2026-08-31", "score": score},
+                    ],
+                    "source_freshness": {"readiness": current_source()},
+                }
+                append_garmin_performance_history(payload, None, date(2026, 9, 1))
+                self.assertEqual(payload["performance_history"], [])
+
     def test_missing_stale_and_undated_values_are_not_added(self):
         payload = {
             "weight": [{"date": "2026-08-31", "weightKg": 72}],
-            "readiness": [{"date": "2026-08-31", "readiness": 85}],
+            "readiness": [{"calendarDate": "2026-08-31", "score": 85}],
             "source_freshness": {
                 "weight": {"freshness": "stale", "observed_at": "2026-08-31"},
                 "readiness": {"freshness": "current"},

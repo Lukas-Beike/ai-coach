@@ -11,7 +11,6 @@ from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.source_policy import preferences_from_profile
-from backend.sync.garmin_weight import garmin_weight_daily_records
 
 TODAY = date(2026, 10, 6)
 
@@ -193,7 +192,10 @@ class BodyHistoryTests(unittest.TestCase):
                 },
             ]
         }
-        self.assertEqual(garmin_weight_daily_records(snapshot), [("2026-10-01", 69.99)])
+        self.assertEqual(
+            garmin_body_from_payload(snapshot, TODAY).garmin_weight_kg,
+            {date(2026, 10, 1): 69.99},
+        )
 
     def test_a_stored_intervals_body_preference_is_ignored_for_the_w_per_kg_weight(
         self,

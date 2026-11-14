@@ -28,12 +28,13 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import canonical_domain_store, garmin_store
 from backend.db.repositories import KeyValueRepository
+from backend.performance.garmin_canonical import read_garmin_state
 from backend.performance.local_tss import LATER_STAND_IN_MAX_DAYS
 from backend.providers.canonical_plans import garmin_ingest_plan
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin import _stamp_changed_zone_sets
-from backend.sync.garmin_payload_metrics import garmin_profile_max_hr
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -295,15 +296,6 @@ class GarminZoneSyncTests(unittest.TestCase):
         _stamp_changed_zone_sets(payload, None, "2026-11-08")
         self.assertNotIn("heart_rate_zones", payload)
 
-    def test_the_profile_max_hr_follows_the_newest_set(self) -> None:
-        sets = [
-            of("DEFAULT", fetchedOn="2026-11-01", maxHeartRateUsed=195),
-            of("DEFAULT", fetchedOn="2026-11-05", maxHeartRateUsed=189),
-        ]
-        self.assertEqual(
-            {"generic": 189}, garmin_profile_max_hr({"heart_rate_zones": sets})
-        )
-
     def test_a_dated_set_maps_from_its_own_day(self) -> None:
         (zones,) = garmin(of("DEFAULT", fetchedOn="2026-10-01"))
         self.assertEqual(date(2026, 10, 1), zones.valid_from)
@@ -348,6 +340,15 @@ class GarminZoneHistoryTests(unittest.TestCase):
         with self.manager.reader() as db:
             stored = garmin_store.read_sections(db, ["heart_rate_zones"])
         self.assertEqual(2, len(stored["heart_rate_zones"]))
+
+    def test_the_profile_max_hr_follows_the_newest_set(self) -> None:
+        first = {**of("DEFAULT", maxHeartRateUsed=195), "id": "2026-11-01-default"}
+        second = {**of("DEFAULT", maxHeartRateUsed=189), "id": "2026-11-05-default"}
+        self._write("2026-11-01T08:00:00+00:00", {**first, "fetchedOn": "2026-11-01"})
+        self._write("2026-11-05T08:00:00+00:00", {**second, "fetchedOn": "2026-11-05"})
+        with self.manager.reader() as db:
+            state = read_garmin_state(CanonicalTableReader(), db)
+        self.assertEqual({"generic": 189}, state.metrics.profile_max_hr)
 
     def test_the_zone_sets_are_a_merge_section(self) -> None:
         self.assertIn("heart_rate_zones", MERGE_SECTIONS)

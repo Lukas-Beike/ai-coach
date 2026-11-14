@@ -39,7 +39,7 @@ from backend.performance.freshness import GarminSyncStatus
 from backend.providers import http as provider_http
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.model_seam import ModelRequest
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server
 # callables. Capture those replacements, restore the process state at once, and let
@@ -152,10 +152,18 @@ class StandardFixtureTestCase(unittest.TestCase):
 
 class StandardFixtureDataTests(StandardFixtureTestCase):
     def test_standard_performance_metrics_survive_provider_normalization(self):
-        garmin = fixture_runtime._fixture_demo_garmin(
-            self.today, fixture_runtime.demo_performance_history(self.today)
-        )
-        metrics = garmin_payload_performance_metrics(garmin, self.today)
+        seeded = fixture_runtime.demo_performance_history(self.today)
+        garmin = fixture_runtime._fixture_demo_garmin(self.today, seeded)
+        metrics = current_garmin_metrics(garmin, self.today)
+        # The demo's flat running_threshold is no SDK shape, so the health mapper
+        # reads none of it (a named deviation in test_garmin_health_parity, #2081);
+        # the seeded history still carries these values.
+        flat = {
+            "run_threshold_watts",
+            "run_threshold_pace_seconds_per_km",
+            "bike_threshold_hr_bpm",
+            "run_threshold_hr_bpm",
+        }
         history = analysis_history(
             GarminSyncStatus.from_state(garmin),
             self.today,
@@ -164,7 +172,12 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             ),
         )
         for key, metric in metrics.items():
+            if key == "readiness":  # the parser's extra key; no source label
+                continue
             with self.subTest(metric=key):
+                if key in flat:
+                    self.assertIsNone(metric["value"])
+                    continue
                 self.assertIsNotNone(metric["value"])
                 self.assertEqual(metric["source"], "Garmin Connect")
                 self.assertEqual(metric["freshness"], "current")
@@ -174,7 +187,12 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                 points = history["metrics"][key][0]["points"]
                 self.assertGreater(sum(p["value"] is not None for p in points), 10)
                 self.assertTrue(any(p["value"] is None for p in points))
-                self.assertEqual(points[-1]["value"], metrics[key]["value"])
+                self.assertEqual(
+                    points[-1]["value"],
+                    seeded[-1]["metrics"][key]
+                    if key in flat
+                    else metrics[key]["value"],
+                )
 
     def test_v6_demo_upgrade_adds_performance_and_recovery_once(self):
         with self._temporary_fixture_database("fixture-v7-upgrade-") as server:
@@ -217,7 +235,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         )
         self.assertEqual(repeated, {"ready": True})
         self.assertEqual(restarted, garmin)
-        metrics = garmin_payload_performance_metrics(garmin, today)
+        metrics = current_garmin_metrics(garmin, today)
         self.assertIsNotNone(metrics["run_marathon_seconds"]["value"])
         self.assertEqual(garmin["morning_body_battery"]["status"], "ready")
         self.assertEqual(garmin["morning_body_battery"]["before_sleep"]["value"], 24)

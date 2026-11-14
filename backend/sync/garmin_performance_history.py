@@ -1,19 +1,37 @@
 """Garmin performance-history merge and retention at ingest.
 
-The sync runs this on a fetched payload before it is stored.
+The sync runs this on a fetched payload before it is stored. The latest-value
+sections are replaced on each sync, so the accumulated history is the only stored
+record of their earlier days. The day's values come from the health mapper, the one
+Garmin health parser, read by the rules of the canonical Garmin metrics.
 """
 
-from datetime import date, timedelta
-from typing import Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.decimal_text import provider_number as _as_number
+from backend.canonical.decimal_text import provider_number
+from backend.canonical.vocabulary import MetricKind
 from backend.performance import freshness as performance_freshness
-from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers.garmin_fields import first_present as _first_present
-from backend.providers.garmin_training_mapping import morning_readiness_records
+from backend.performance.garmin_canonical import garmin_metrics_of
+from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.sync import garmin_metric_history
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_payload_metrics import garmin_source_observed_at
+
+# The sections the history records, read as the current Garmin metrics read them.
+_CURRENT_SECTIONS: Final = (
+    "max_metrics",
+    "race_predictions",
+    "running_threshold",
+    "cycling_ftp",
+    "heart_rate_zones",
+    "readiness",
+    *WEIGHT_SECTIONS,
+)
+# The plausible window of a historical FTP value.
+_FTP_HISTORY_RANGE: Final = (20, 2000)
 
 
 def append_garmin_performance_history(
@@ -25,14 +43,7 @@ def append_garmin_performance_history(
         payload.get("performance_history") or []
     )
     unique = _merged_history(history)
-    current = garmin_payload_performance_metrics(payload, current_date)
-    current["readiness"] = performance_freshness.garmin_metric_freshness(
-        performance_freshness.GarminSyncStatus.from_state(payload),
-        "readiness",
-        {"value": readiness_score_value(payload.get("readiness"))},
-        current_date,
-    )
-    for key, data in current.items():
+    for key, data in current_garmin_metrics(payload, current_date).items():
         if (
             data.get("value") is None
             or data.get("freshness") != "current"
@@ -45,16 +56,64 @@ def append_garmin_performance_history(
     # Historical FTP rows are the only source allowed to add past FTP values;
     # current FTP settings are intentionally not backfilled into this series.
     start = current_date - timedelta(days=89)
-    for row in garmin_metric_history.ftp_points(
-        payload.get("cycling_ftp_history"),
-        start=start,
-        end=current_date,
-    ):
-        entry = unique.setdefault(row["date"], {"date": row["date"], "metrics": {}})
-        entry["metrics"]["cycling_ftp_watts"] = row["value"]
+    for day, value in _ftp_history(payload, start, current_date).items():
+        entry = unique.setdefault(day, {"date": day, "metrics": {}})
+        entry["metrics"]["cycling_ftp_watts"] = value
     provider_metrics = _provider_metrics(payload, start, current_date)
     payload["provider_metrics"] = provider_metrics
     payload["performance_history"] = [unique[key] for key in sorted(unique)[-90:]]
+
+
+def current_garmin_metrics(
+    payload: dict[str, Any], current_date: date
+) -> dict[str, dict[str, Any]]:
+    """The labelled, freshness-stamped Garmin metrics and readiness of a payload.
+
+    The latest-value sections are mapped by the health mapper and read by the rules
+    of the canonical Garmin metrics, without the activity max heart rate fallback.
+    """
+    status = performance_freshness.GarminSyncStatus.from_state(payload)
+    canonical = garmin_metrics_of(
+        _mapped(
+            {name: payload[name] for name in _CURRENT_SECTIONS if name in payload},
+            current_date,
+        )
+    )
+    current = garmin_performance_metrics(status, current_date, canonical)
+    # The newest readiness record counts even without a usable score, so an
+    # older day's score never stands in for it.
+    newest = garmin_source_observed_at(payload.get("readiness"))
+    readiness = canonical.performance_history.get("readiness", {})
+    value = readiness.get(date.fromisoformat(newest)) if newest else None
+    current["readiness"] = performance_freshness.garmin_metric_freshness(
+        status,
+        "readiness",
+        {"value": None if value is None else provider_number(value)},
+        current_date,
+    )
+    return current
+
+
+def _mapped(sections: dict[str, Any], current_date: date) -> tuple[Any, ...]:
+    """Map ``sections``; an undated latest value falls on the local sync day."""
+    retrieved_at = datetime.combine(current_date, time(12), tzinfo=UTC)
+    return map_garmin_health(sections, zone=UTC, retrieved_at=retrieved_at).records
+
+
+def _ftp_history(
+    payload: dict[str, Any], start: date, current_date: date
+) -> dict[str, float]:
+    """The dated cycling FTP of the history section per day; a later record wins."""
+    low, high = _FTP_HISTORY_RANGE
+    return {
+        item.observed_on.isoformat(): round(item.value.value, 2)
+        for item in _mapped(
+            {"cycling_ftp_history": payload.get("cycling_ftp_history")}, current_date
+        )
+        if item.kind is MetricKind.FTP
+        and start <= item.observed_on <= current_date
+        and low <= item.value.value <= high
+    }
 
 
 def _merged_history(history: list) -> dict[str, dict[str, Any]]:
@@ -132,37 +191,3 @@ def _provider_metric_state(
     if pagination.get("available") is False:
         return "unsupported"
     return "unknown"
-
-
-def readiness_score_value(value: Any) -> float | int | None:
-    """Extract a scalar readiness score from nested provider payloads."""
-    if isinstance(value, list):
-        # One reading per day, the morning one, as the canonical mapper keeps.
-        dated = morning_readiness_records(
-            [item for item in value if isinstance(item, dict)]
-        )
-        if not dated:
-            return None
-        dated.sort(
-            key=lambda item: str(
-                _first_present(item, garmin_perf_fields.WELLNESS_ROW_DATE_KEYS) or ""
-            )
-        )
-        return readiness_score_value(dated[-1])
-    if isinstance(value, dict):
-        direct = _first_present(
-            value,
-            (
-                "readiness",
-                "readinessScore",
-                "readiness_score",
-                "trainingReadiness",
-                "training_readiness",
-                "score",
-                "value",
-            ),
-        )
-        if isinstance(direct, (dict, list)):
-            return readiness_score_value(direct)
-        return _as_number(direct)
-    return _as_number(value)

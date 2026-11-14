@@ -3,22 +3,35 @@ from __future__ import annotations
 import copy
 import unittest
 from contextlib import nullcontext
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from performance_day_support import garmin_body_from_payload
 
+from backend.canonical.vocabulary import MetricKind
 from backend.errors import AppError
 from backend.performance.body import body_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.providers.garmin import merge_weight_snapshots
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_service import (
     GarminRemoteReader,
     GarminTargetedRefreshService,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
-from backend.sync.garmin_weight import garmin_weight_records
+
+
+def _weight_readings(snapshot: list[dict[str, Any]]) -> list[tuple[str, float]]:
+    """The mapped weigh-ins of a merged snapshot as (day, kilograms), in walk order."""
+    records = map_garmin_health(
+        {"weight": snapshot}, zone=UTC, retrieved_at=datetime(2026, 11, 1, tzinfo=UTC)
+    ).records
+    return [
+        (obs.observed_on.isoformat(), obs.value.value)
+        for obs in records
+        if obs.kind is MetricKind.WEIGHT
+    ]
 
 
 class GarminNutritionRefreshTests(unittest.TestCase):
@@ -66,7 +79,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             )
         )
         self.assertIn((start + timedelta(days=107)).isoformat(), days)
-        self.assertEqual(len(garmin_weight_records({"weight": snapshot})), len(rows))
+        self.assertEqual(len(_weight_readings(snapshot)), len(rows))
 
     def test_large_history_retains_old_rows_and_walks_newest_rows_first(self) -> None:
         start = date(2025, 1, 1)
@@ -83,7 +96,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         )
 
         rows = snapshot[0]["weight"]
-        walked = garmin_weight_records({"weight": snapshot})
+        walked = _weight_readings(snapshot)
         self.assertEqual(len(rows), 510)
         self.assertIn({"date": start.isoformat(), "weight": 70.0}, rows)
         self.assertIn(((start + timedelta(days=509)).isoformat(), 75.09), walked)
