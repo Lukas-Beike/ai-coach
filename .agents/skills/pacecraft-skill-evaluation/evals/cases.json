@@ -415,7 +415,7 @@
       "prohibited": ["Predict a changed count from the demo container's state"]
     },
     {
-      "id": "pwa-e2e-fixture-route-probe-css-only", "skill": "pacecraft-pwa-e2e", "kind": "negative", "activate": true,
+      "id": "pwa-e2e-fixture-route-probe-css-only", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
       "prompt": "Tighten the calendar card padding and rerun the affected spec.",
       "setup": "Synthetic CSS-only change; no fixture rows or provider mapping change.",
       "expected": ["Run the affected spec without a mapper or fixture-state probe"],
