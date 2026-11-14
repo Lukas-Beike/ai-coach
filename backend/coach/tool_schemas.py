@@ -412,7 +412,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "read_training_state",
-            "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false BEFORE editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.",
+            "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false before editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.",
             {
                 "include_inactive": {"type": "boolean"},
                 "cursor": {"type": "string"},
@@ -953,7 +953,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "start_intervals_plan_sync",
-            "Queue an explicitly requested Intervals.icu push. Intervals.icu takes only indoor and virtual ride units (for Zwift); the job skips runs, strength and outdoor rides without a write and the result names how many it skipped. For repair use repair=true, the current expected_revision, local_plan scope and no entries: the server selects the complete requested period, including already-synced and inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. An explicit repair selection must cover the entire period. For ordinary selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.",
+            "Queue an explicitly requested Intervals.icu push. Intervals.icu takes only indoor and virtual ride units (for Zwift); the job skips runs, strength and outdoor rides without a write and the result names how many it skipped. For repair use repair=true, the current expected_revision, local_plan scope and no entries: the server selects the complete requested period, including already-synced and inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. An explicit repair selection must cover the entire period. For ordinary selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in this turn.",
             {
                 "entries": {
                     "type": "array",

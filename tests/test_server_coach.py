@@ -237,9 +237,10 @@ class ServerCoachTests(ServerTestCase):
         )
         preview = server.COACH_CONTEXT.preview_service().preview()
         self.assertIn(
-            "You are the athlete's long-term endurance coach.", preview["context_text"]
+            "<coaching_rules>\nYou receive a fresh structured training snapshot",
+            preview["context_text"],
         )
-        self.assertIn("BEGIN UNTRUSTED EXTERNAL DATA", preview["context_text"])
+        self.assertIn("<athlete_context>", preview["context_text"])
         self.assertEqual(preview["chat_prompt"]["field"], "input")
         self.assertEqual(
             preview["chat_prompt"]["content"], "Wie soll ich morgen trainieren?"

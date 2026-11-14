@@ -333,7 +333,7 @@ class PlaybookInjectionTests(unittest.TestCase):
         for kind in (None, "morning_checkin", "unknown"):
             self.assertEqual(playbook_for(kind), "")
             self.assertNotIn(
-                "REQUEST PLAYBOOK",
+                "<request_playbook>",
                 compose_model_instructions(
                     "ctx", allow_mutations=True, request_kind=kind
                 ),
@@ -375,8 +375,8 @@ class PlaybookInjectionTests(unittest.TestCase):
             len(playbook_for("plan_week")), sizes[0]["playbook_characters"]
         )
         self.assertEqual(0, sizes[1]["playbook_characters"])
-        self.assertIn("REQUEST PLAYBOOK", planned)
-        self.assertNotIn("REQUEST PLAYBOOK", plain)
+        self.assertIn("<request_playbook>", planned)
+        self.assertNotIn("<request_playbook>", plain)
         # A typed planning request carries the same playbook as the quick action.
         self.assertEqual(
             len(playbook_for("plan_week")), sizes[2]["playbook_characters"]

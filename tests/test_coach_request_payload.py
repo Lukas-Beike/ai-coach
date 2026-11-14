@@ -195,9 +195,19 @@ class CoachRequestPayloadTests(unittest.TestCase):
                     )
                     instructions = payload["instructions"]
                     context_at = instructions.index("dynamic training context")
-                    self.assertTrue(instructions.startswith(dialogue.INSTRUCTIONS))
+                    self.assertTrue(
+                        instructions.startswith(
+                            "<dialogue_rules>" + dialogue.INSTRUCTIONS
+                        )
+                    )
                     self.assertLess(
-                        instructions.index("untrusted evidence"), context_at
+                        instructions.index("untrusted evidence"),
+                        instructions.index("</dialogue_rules>"),
+                    )
+                    self.assertLess(instructions.index("</dialogue_rules>"), context_at)
+                    # Notices of the turn come last, inside their own tag.
+                    self.assertEqual(
+                        "<turn_notices>" in instructions, prior or not allow_mutations
                     )
                     self.assertEqual(
                         "Earlier image pixels are unavailable" in instructions, prior

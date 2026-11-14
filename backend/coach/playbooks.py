@@ -25,7 +25,7 @@ References (only author and year appear in the model text):
 
 from __future__ import annotations
 
-_HEADER = "REQUEST PLAYBOOK (this turn only)."
+_HEADER = "This turn only."
 
 # Topic blocks. Each has its own word budget (tests/test_coach_playbooks.py);
 # a kind composes only the blocks it needs, with a bounded total per kind.
@@ -153,9 +153,11 @@ def playbook_for(request_kind: str | None) -> str:
     if task is None:
         return ""
     parts = [_HEADER, _EVIDENCE, _INTENSITY_MODEL, task, *_BLOCKS[request_kind or ""]]
-    return "\n\n" + "\n".join(parts) + "\n"
+    return "\n\n<request_playbook>\n" + "\n".join(parts) + "\n</request_playbook>\n"
 
 
 def nutrition_playbook(nutrition: bool) -> str:
     """Return the nutrition rules for a turn whose context selects nutrition."""
-    return "\n\n" + _NUTRITION + "\n" if nutrition else ""
+    if not nutrition:
+        return ""
+    return "\n\n<nutrition_playbook>\n" + _NUTRITION + "\n</nutrition_playbook>\n"

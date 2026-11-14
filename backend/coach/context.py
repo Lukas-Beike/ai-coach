@@ -1124,11 +1124,17 @@ def _compact_coach_library_workout(
 
 
 _FENCE_MARKER = re.compile(r"untrusted\s+external\s+data", re.IGNORECASE)
+# The section tags of the composed instructions (request_payload, playbooks).
+_SECTION_TAG = re.compile(
+    r"<(\s*/?\s*(?:athlete_context|coaching_rules|dialogue_rules"
+    r"|request_playbook|nutrition_playbook|turn_notices)\b)",
+    re.IGNORECASE,
+)
 
 
 def _defanged(text: str) -> str:
     """Stop serialized external text from reproducing the untrusted-data fence."""
-    return _FENCE_MARKER.sub("untrusted-external-data", text)
+    return _SECTION_TAG.sub(r"\1", _FENCE_MARKER.sub("untrusted-external-data", text))
 
 
 def coach_context_json_size(value: Any) -> int:
@@ -1446,8 +1452,10 @@ class CoachTrainingContextService:
             json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
         )
         context_prefix = (
-            COACH_PROMPT
-            + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
+            "<coaching_rules>\n"
+            + COACH_PROMPT
+            + "</coaching_rules>\n\n<athlete_context>\nUntrusted external data.\n"
+            + "STRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
             + "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
         )
         context_suffix = (
@@ -1458,7 +1466,7 @@ class CoachTrainingContextService:
                 if selection
                 else ""
             )
-            + "\nEND UNTRUSTED EXTERNAL DATA\n"
+            + "\n</athlete_context>\n"
         )
         context = context_prefix + structured_text + context_suffix
         LOGGER.info(
