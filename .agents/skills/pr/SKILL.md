@@ -99,9 +99,6 @@ confirmation. List every unfixed finding with its reason in the PR body.
   [line-balance](../pacecraft-line-balance/SKILL.md). Name the issue with `Closes #N`, or `Part of #N` when more
   PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
-- Enable `gh pr merge <number> --auto --squash` only when the base is `develop`,
-  Gitar has reviewed the current head, and no feedback is open: review
-  comments do not block an armed auto-merge (#2520 merged past one).
 - While `develop` does not require up-to-date branches, a PR that adds or
   tightens a repository-wide guard or contract test checks the open PRs each time
   before (re-)enabling auto-merge: match its rule against their diffs
@@ -109,11 +106,20 @@ confirmation. List every unfixed finding with its reason in the PR body.
   rule is not textual. For each match, comment on that PR, tell the orchestrator
   (or the user), and keep auto-merge off until the match is fixed, or until that
   PR merged and this branch is rebased so its own CI shows the result (#2645).
+- Then enable squash auto-merge with [pr-merge](../pacecraft-pr-merge/SKILL.md)
+  `--wait 30` only when the base is `develop`, Gitar has reviewed the current
+  head, and no feedback is open: review comments do not block an armed
+  auto-merge (#2520 merged past one). It merges a PR GitHub already calls clean
+  directly (#2776).
 
 ## 4. Monitor to merge
 
-Watch with the host's PR watcher when available (`watch_pull_request`), and
-yield; otherwise poll about every 30 seconds. On each wake:
+Before auto-merge is armed, watch with the host's PR watcher when available
+(`watch_pull_request`), and yield; otherwise poll about every 30 seconds. Once
+it is armed, do not yield: the watcher does not reliably wake on the merge
+itself (#2795). Wait with [pr-merge](../pacecraft-pr-merge/SKILL.md) `--wait`
+in the same turn; after the merge run the develop-run check at once; on its
+exit 1 handle the cause as below. On each wake:
 
 - Read the current head, checks, threads and comments with
   [pr-state](../pacecraft-pr-state/SKILL.md). For each open item: fix it if

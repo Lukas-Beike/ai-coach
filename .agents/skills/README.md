@@ -88,6 +88,7 @@ output never echoes text that can quote a file.
 | [pacecraft-status-snapshot](pacecraft-status-snapshot/SKILL.md) | Compact repository status: release, open PRs, merged work |
 | [pacecraft-pr-state](pacecraft-pr-state/SKILL.md) | PR head, checks, review threads and merge state |
 | [pacecraft-resolve-thread](pacecraft-resolve-thread/SKILL.md) | Resolve a review thread on your own PR after the fix reply |
+| [pacecraft-pr-merge](pacecraft-pr-merge/SKILL.md) | Arm squash auto-merge (or merge a clean PR) and wait for the merge in-turn |
 | [pacecraft-branch-sync](pacecraft-branch-sync/SKILL.md) | Rebase the feature branch and push it safely |
 | [pacecraft-line-balance](pacecraft-line-balance/SKILL.md) | Production, test and other lines added and removed |
 | [pacecraft-develop-run-check](pacecraft-develop-run-check/SKILL.md) | Develop push runs of a merge commit, with superseded and flake hints |
