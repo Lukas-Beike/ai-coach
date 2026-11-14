@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +52,26 @@ class RecoveryCopies:
 
     def count(self) -> int:
         return len(self.paths())
+
+    def summary(self, now: float | None = None) -> dict[str, int | float | None]:
+        """Count, newest age and total size of the copies (stat only, never opened)."""
+        sizes: list[int] = []
+        newest: float | None = None
+        for path in self.paths():
+            if not self._copy_pattern.fullmatch(path.name):
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            sizes.append(stat.st_size)
+            newest = max(newest or stat.st_mtime, stat.st_mtime)
+        age = None if newest is None else ((now or time.time()) - newest) / 3600
+        return {
+            "count": len(sizes),
+            "newest_age_hours": None if age is None else round(age, 1),
+            "total_bytes": sum(sizes),
+        }
 
     def erase(self) -> RecoveryCopyErasure:
         removed = failed = 0

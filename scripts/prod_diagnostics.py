@@ -47,6 +47,17 @@ SECTION_FIELDS = {
         r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
         r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
     ),
+    # Storage and runtime health for the post-release check (#2848).
+    "database": re.compile(
+        r"schema_version|messages|workout_library|competitions|athlete_checkins"
+        r"|activity_feedback|change_history|external_calendar_events|file_bytes"
+        r"|wal_bytes|data_dir_free_bytes|(workout_library_state|stored_payload_bytes)"
+        r"\.[a-z_]+"
+    ),
+    "runtime": re.compile(r"uptime_s|malloc_arena_max|process_memory\.[a-z_]+"),
+    "recovery_copies": re.compile(
+        r"status|available|count|newest_age_hours|total_bytes"
+    ),
     "garmin_past_workout_removal": re.compile(
         r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
         r"|past_links_pending"
