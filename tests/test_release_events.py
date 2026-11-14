@@ -236,14 +236,14 @@ class ReleaseShellGuardTests(unittest.TestCase):
         operations = (self.root / "operations").read_text(encoding="utf-8")
         return result, operations
 
-    def release_test_script(self, just_created=""):
+    def release_test_script(self):
         functions = WORKFLOW.split("          enable_auto_merge() {", 1)[1].split(
             "          version_merge=false", 1
         )[0]
         return (
             "set -euo pipefail\nenable_auto_merge() {"
             + textwrap.dedent(functions)
-            + f"\nensure_release_test 123 chore/release-version-1.7.3 1.7.3 {just_created}\n"
+            + "\nensure_release_test 123 chore/release-version-1.7.3 1.7.3\n"
             + "enable_auto_merge 123\n"
         )
 
@@ -260,21 +260,19 @@ class ReleaseShellGuardTests(unittest.TestCase):
         self.assertNotIn("sleep", operations)
 
     def test_own_pull_request_run_replaces_the_dispatch(self):
-        # #2814: the release PR's own pull_request run is its test run; a PR
-        # just created relies on that run, which registers seconds later.
-        for overrides, created, message in (
-            ({"PR_RUN_COUNT": "1"}, "", "has its own test run; no explicit dispatch"),
-            ({}, "true", "was just created; its own pull_request run is its test"),
-        ):
-            with self.subTest(created=created):
-                result, operations = self.run_script(
-                    self.release_test_script(created), **overrides
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(message, result.stdout)
-                self.assertNotIn("gh workflow run", operations)
-                self.assertNotIn("sleep", operations)
-                self.assertIn("gh pr merge 123", operations)
+        # #2814: the release PR's own pull_request run is its test run and
+        # checks its version; just-created PRs skip ensure_release_test.
+        result, operations = self.run_script(
+            self.release_test_script(), PR_RUN_COUNT="1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("has its own test run; no explicit dispatch", result.stdout)
+        self.assertNotIn("gh workflow run", operations)
+        self.assertNotIn("sleep", operations)
+        self.assertIn("gh pr merge 123", operations)
+        for pr in ("version_pr", "promotion_pr"):
+            self.assertNotIn(f'ensure_release_test "${pr}_number"', WORKFLOW)
+            self.assertIn(f'enable_auto_merge "${pr}_url"', WORKFLOW)
 
     def test_merged_pr_does_not_dispatch_on_deleted_branch(self):
         result, operations = self.run_script(

@@ -167,7 +167,6 @@ jobs:
             local pull_request_number="$1"
             local source_ref="$2"
             local release_tag="$3"
-            local just_created="${4:-false}"
             local test_check_count
             local test_run_count
             local pull_request_run_count
@@ -188,8 +187,9 @@ jobs:
               --jq "[.[] | select(.headSha == \"$source_sha\") | select(.status != \"completed\" or .conclusion == \"success\")] | length")"
             if [[ "$test_check_count" -eq 0 && "$test_run_count" -eq 0 ]]; then
               # The release app token starts the PR's own pull_request run, which
-              # registers seconds after `gh pr create`. A just-created PR relies on
-              # it; a later pass dispatches only when that run never appeared (#2814).
+              # also checks APP_VERSION against the release branch (#2814). A
+              # just-created PR is not checked here; a later pass dispatches only
+              # when that run never appeared.
               pull_request_run_count="$(gh run list \
                 --repo "$REPOSITORY" \
                 --workflow publish-container.yml \
@@ -200,10 +200,6 @@ jobs:
                 --jq '[.[] | select(.status != "completed" or .conclusion == "success")] | length')"
               if [[ "$pull_request_run_count" -gt 0 ]]; then
                 echo "PR #$pull_request_number has its own test run; no explicit dispatch."
-                return 0
-              fi
-              if [[ "$just_created" == "true" ]]; then
-                echo "PR #$pull_request_number was just created; its own pull_request run is its test, and the next release pass dispatches one if it never appears."
                 return 0
               fi
               echo "Starting an explicit test run for PR #$pull_request_number."
@@ -328,7 +324,7 @@ jobs:
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
             promotion_pr_number="$(gh pr view "$promotion_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
-            ensure_release_test "$promotion_pr_number" "$promotion_branch" "$app_version" true
+            echo "Release promotion PR #$promotion_pr_number runs its own test."
             enable_auto_merge "$promotion_pr_url"
             exit 0
           fi
@@ -385,7 +381,7 @@ jobs:
             --title "chore(release): set application version to $next_tag" \
             --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main.")"
           version_pr_number="$(gh pr view "$version_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
-          ensure_release_test "$version_pr_number" "$version_branch" "$next_tag" true
+          echo "Version bump PR #$version_pr_number runs its own test."
           enable_auto_merge "$version_pr_url"
 
   create-release:

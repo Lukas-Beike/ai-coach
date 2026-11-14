@@ -13,6 +13,18 @@ VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 COMMIT_SHA_PATTERN = re.compile(r"^[\da-f]{40}$")
 APP_VERSION_PATTERN = re.compile(r'^APP_VERSION = "(\d+\.\d+\.\d+)"$', re.MULTILINE)
 SAFE_ARG_PATTERN = re.compile(r"^[\da-zA-Z._/:@=^{}-]+$")
+# A release PR's own pull_request run checks its version like a dispatched test (#2814).
+RELEASE_BRANCH_PATTERN = re.compile(
+    r"^chore/release-(?:version|promotion)-(\d+\.\d+\.\d+)$"
+)
+
+
+def expected_version(explicit: str, head_ref: str) -> str:
+    """The release version to check: the explicit one, else a release branch's."""
+    if explicit:
+        return explicit
+    branch = RELEASE_BRANCH_PATTERN.fullmatch(head_ref)
+    return branch.group(1) if branch else ""
 
 
 def git(repository: Path, *arguments: str) -> str:
@@ -117,13 +129,16 @@ def main() -> None:
         verify(repository, args.verify, args.release_tag)
         return
     source = resolve(repository, args.source, args.release_tag)
-    if args.expected_version:
-        if not VERSION_PATTERN.fullmatch(args.expected_version):
+    expected = expected_version(
+        args.expected_version, os.environ.get("GITHUB_HEAD_REF", "")
+    )
+    if expected:
+        if not VERSION_PATTERN.fullmatch(expected):
             raise ValueError("Expected version must be an application version")
         version = APP_VERSION_PATTERN.search(
             git(repository, "show", f"{source}:server.py")
         )
-        if not version or version.group(1) != args.expected_version:
+        if not version or version.group(1) != expected:
             raise ValueError(
                 "Expected release version does not match APP_VERSION at the resolved source"
             )
