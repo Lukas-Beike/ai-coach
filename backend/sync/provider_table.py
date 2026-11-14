@@ -2,9 +2,9 @@
 
 One entry per provider holds its freshness areas and labels, sync-window
 limits and the orchestration policy (job types, scheduling order, Coach refresh
-targets, manual and full-resync HTTP routes). A further provider is a new entry. This is the one sync module that
-names providers; ``ProviderRegistry`` (backend/sync/provider_registry.py) reads
-the table and names none.
+targets, manual and full-resync HTTP routes). A further provider is a new entry.
+``ProviderRegistry`` (backend/sync/provider_registry.py) reads the table and
+names none; backend/sync/state.py maps providers to their stored key names.
 
 The Garmin, Wahoo and Intervals.icu identifiers are canonical provider ids
 (backend/canonical/vocabulary.py); weather and calendar are sync-only ids

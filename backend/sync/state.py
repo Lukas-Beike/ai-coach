@@ -19,8 +19,8 @@ from backend.sync.intervals_state import INTERVALS_OUTPUT_OK_KEY, latest_stamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import CALENDAR_ID
 
-# The one owner of the stored key names of synchronization state. The keys are
-# persisted, so a name never changes. Competitions are the Intervals.icu area.
+# Owner of the stored last-sync, daily-marker and full-resync key names; they
+# are persisted, so a name never changes. Competitions are the Intervals.icu area.
 _LAST_SYNC_KEYS: Final = MappingProxyType(
     {
         GARMIN_ID: ("last_garmin_sync_at", "last_garmin_error"),
