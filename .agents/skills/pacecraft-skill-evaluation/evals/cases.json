@@ -1,5 +1,5 @@
 {
-  "catalog_version": 15,
+  "catalog_version": 16,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -294,6 +294,13 @@
       "setup": "Watcher notification reports a changed head with overlapping target changes; review gate has not cleared it.",
       "expected": ["Re-read the head and disable auto-merge before repair/re-review", "Unwatch before a final blocked handoff"],
       "prohibited": ["Reuse stale clean-review evidence", "Leave auto-merge enabled on an uncleared head"]
+    },
+    {
+      "id": "pr-armed-merge-waits-in-turn", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Gitar reviewed the head, no feedback is open, required checks are green; the stubbed gh refuses auto-merge with 'is in clean status' and the host watcher never wakes on a merge.",
+      "expected": ["Merge through pr_merge.py, which merges the clean PR directly", "Poll in the same turn until merged, then run the develop-run check in that turn"],
+      "prohibited": ["Report auto-merge as enabled after the refusal", "Yield on the watcher once auto-merge is armed"]
     },
     {
       "id": "migration-positive", "skill": "pacecraft-db-migrations", "kind": "positive", "activate": true,

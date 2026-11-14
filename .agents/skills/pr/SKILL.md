@@ -99,9 +99,11 @@ confirmation. List every unfixed finding with its reason in the PR body.
   [line-balance](../pacecraft-line-balance/SKILL.md). Name the issue with `Closes #N`, or `Part of #N` when more
   PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
-- Enable `gh pr merge <number> --auto --squash` only when the base is `develop`,
-  Gitar has reviewed the current head, and no feedback is open: review
-  comments do not block an armed auto-merge (#2520 merged past one).
+- Enable squash auto-merge with `python scripts/pr_merge.py <number> --wait 30`
+  only when the base is `develop`, Gitar has reviewed the current head, and no
+  feedback is open: review comments do not block an armed auto-merge (#2520
+  merged past one). When GitHub refuses auto-merge because the PR is already
+  clean, the script merges it directly (#2776).
 - While `develop` does not require up-to-date branches, a PR that adds or
   tightens a repository-wide guard or contract test checks the open PRs each time
   before (re-)enabling auto-merge: match its rule against their diffs
@@ -112,8 +114,13 @@ confirmation. List every unfixed finding with its reason in the PR body.
 
 ## 4. Monitor to merge
 
-Watch with the host's PR watcher when available (`watch_pull_request`), and
-yield; otherwise poll about every 30 seconds. On each wake:
+Until auto-merge is armed, watch with the host's PR watcher when available
+(`watch_pull_request`), and yield; otherwise poll about every 30 seconds. Once
+it is armed, do not yield: the watcher does not reliably wake on the merge
+itself (#2795). `pr_merge.py --wait` polls in the same turn (run it in the
+background and wait for it when the shell limits a foreground command); on
+exit 0 run the develop-run check at once, on exit 1 handle the cause below,
+on exit 3 rerun it. On each wake:
 
 - Read the current head, checks, threads and comments with
   [pr-state](../pacecraft-pr-state/SKILL.md). For each open item: fix it if
