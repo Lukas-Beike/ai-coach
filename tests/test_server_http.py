@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, call, patch
+from urllib.parse import urlencode
 
 import snapshot_seed
 from server_test_support import (
@@ -30,6 +31,7 @@ from backend.coach import streams as coach_streams
 from backend.errors import AppError, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import response_transport, responses
+from backend.http_api import server as http_server_module
 from backend.http_api.handler import create_request_handler
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
@@ -39,6 +41,7 @@ from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
 from backend.providers.model_seam import ModelRequest
 from backend.providers.openai_responses_adapter import request_payload
+from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -702,6 +705,13 @@ class ServerHttpTests(ServerTestCase):
                     [item["content"] for item in page["messages"]], [expected]
                 )
 
+    def test_chat_reset_changes_history_generation(self):
+        before = server.HTTP_API.chat_history_page_service().page()["generation"]
+        server.APP.coach_conversation.reset_service().reset()
+        self.assertNotEqual(
+            server.HTTP_API.chat_history_page_service().page()["generation"], before
+        )
+
     def test_coach_and_http_library_views_include_the_same_active_templates(self):
         with server.database_manager().unit_of_work() as db:
             db.executemany(
@@ -750,6 +760,66 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(
             [entry["id"] for entry in coach_entries], ["active-after-limit"]
         )
+
+    def test_library_http_pagination_reaches_every_active_template_beyond_1000(self):
+        records = [
+            {"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"}
+            for i in range(1001)
+        ]
+        records += [
+            {"id": "archived", "name": "Archived", "archived": True},
+            {"id": "dated", "name": "Dated", "date": "2026-09-09"},
+        ]
+        with server.database_manager().unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                [
+                    (item["id"], item["id"], json.dumps(item), runtime_clock.utc_now())
+                    for item in records
+                ],
+            )
+        token = create_test_session(server)
+        # This temporary SQLite fixture exercises pagination and real session
+        # authentication; secure startup has separate SQLCipher integration tests.
+        startup = patch.object(
+            server.app_config, "security_configuration_error", return_value=None
+        )
+        startup.start()
+        self.addCleanup(startup.stop)
+        httpd = http_server_module.CoachHTTPServer(
+            ("127.0.0.1", 0), server.HTTP_API.request_handler_class()
+        )
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", httpd.server_port, timeout=5
+        )
+        ids, cursor = [], None
+        try:
+            for _ in range(12):
+                query = {"limit": 100}
+                if cursor:
+                    query["cursor"] = cursor
+                connection.request(
+                    "GET",
+                    "/api/library?" + urlencode(query),
+                    headers={"Cookie": f"ic_session={token}"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                page = json.loads(response.read())
+                self.assertLessEqual(len(page["workouts"]), 100)
+                ids.extend(item["id"] for item in page["workouts"])
+                cursor = page["next_cursor"]
+                if not cursor:
+                    break
+        finally:
+            connection.close()
+            httpd.shutdown()
+            worker.join(5)
+            httpd.server_close()
+        self.assertIsNone(cursor)
+        self.assertEqual(ids, [f"template-{i:04}" for i in range(1001)])
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()

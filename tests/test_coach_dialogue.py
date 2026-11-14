@@ -23,6 +23,7 @@ from support import (
 )
 
 from backend.activities.hr_cap import effective_caps
+from backend.coach import dialogue as coach_dialogue
 from backend.coach import service as coach_service
 from backend.coach import streams as coach_streams
 from backend.coach import structured_tool_round
@@ -36,6 +37,7 @@ from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
+from backend.sync.adaptive import IllnessPauseSyncService
 
 server = fixtures.server
 WRITE_IMPACT = "write_impact"  # name of the write gate's classifier schema
@@ -2933,6 +2935,109 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(model.call_count, 2)
         sync.assert_called_once()
+
+    def test_adaptive_apply_requires_a_published_preview_and_later_user_turn(self):
+        def preview(_):
+            return self.call("preview_adaptive_replan", scope=["adaptive_replan"])
+
+        def apply(_):
+            latest = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_preview()
+            return self.call(
+                "apply_adaptive_replan",
+                {"adjustment_id": latest["id"]},
+                scope=["adaptive_replan:" + latest["id"]],
+            )
+
+        # Even an accepting verdict cannot approve a preview from its own turn.
+        self.confirm_impact("planning", accepts=True)
+        first, _ = self.turn(
+            "Show a preview, do not apply it.",
+            [preview, apply, {"output_text": "Preview ready."}],
+        )
+        self.assertEqual(
+            first["command_receipts"][1]["result"]["reason"],
+            "adaptive_approval_required",
+        )
+        with (
+            patch.object(
+                IllnessPauseSyncService,
+                "apply_local",
+                return_value={"status": "applied"},
+            ) as mutation,
+            patch.object(
+                IllnessPauseSyncService,
+                "complete",
+                return_value={"status": "applied"},
+            ),
+        ):
+            second, _ = self.turn(
+                "Apply that preview.", [apply, {"output_text": "Applied."}]
+            )
+        mutation.assert_called_once()
+        self.assertEqual(second["status"], "completed")
+
+    def test_incomplete_provider_answer_is_partial_and_keeps_pending_request(self):
+        result, _ = self.turn(
+            "Explain the week",
+            [
+                {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "output_text": "Monday starts",
+                }
+            ],
+        )
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("nicht abgeschlossen", result["message"]["content"])
+        self.assertIsNotNone(
+            json.loads(server.key_value_service().get("coach_pending_request"))
+        )
+
+    def test_completed_async_job_refreshes_model_context(self):
+        job = server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 1})
+        server.SYNC_JOB_QUEUE.store().claim()
+        server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
+        steps = iter(
+            [
+                lambda _: self.call("get_sync_job", {"job_id": job["id"]}),
+                {"output_text": "Fresh data read."},
+            ]
+        )
+
+        def response(payload, *_args, **kwargs):
+            step = next(steps)
+            return step(payload) if callable(step) else step
+
+        with (
+            fixtures.patch_coach_conversation(
+                "provision_service",
+                return_value=Mock(binding=Mock(return_value="synthetic")),
+            ),
+            patch(
+                "backend.coach.context.CoachTrainingContextService.build",
+                side_effect=["Old Garmin data", "Fresh Garmin data"],
+            ) as context,
+            fixtures.patch_coach_conversation(
+                "response_transport"
+            ) as transport_factory,
+        ):
+            transport_factory.return_value.stream_request.side_effect = wire_step(
+                response
+            )
+            result = server.COACH_TURNS.chat_turn_service().run(
+                "Read refreshed data",
+                client_turn_id="refresh-context",
+                session_csrf_hash="synthetic",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(context.call_count, 2)
+        instructions = transport_factory.return_value.stream_request.call_args.args[
+            0
+        ].instructions
+        # The refreshed context replaces the stale one; static rules lead for
+        # prompt caching and the per-turn context follows them.
+        self.assertTrue(instructions.startswith(coach_dialogue.INSTRUCTIONS))
+        self.assertIn("\n\nFresh Garmin data", instructions)
 
 
 if __name__ == "__main__":

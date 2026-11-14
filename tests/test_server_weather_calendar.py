@@ -1,6 +1,7 @@
 """Server integration tests for weather calendar."""
 
 import json
+import threading
 import unittest
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -32,6 +33,7 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
 from backend.runtime import clock as runtime_clock
+from backend.runtime import maintenance as runtime_maintenance
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 from backend.weather import projection as weather_projection
@@ -158,6 +160,105 @@ class ServerWeatherCalendarTests(ServerTestCase):
         server.ATHLETE_DATA.profile().patch({"weather_location": "Koeln"})
         self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
+
+    def test_weather_fetch_participates_in_maintenance_and_rechecks_location(self):
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
+
+        def fetch(query):
+            self.assertGreater(
+                runtime_maintenance.MAINTENANCE_GATE.state()["running_operations"], 0
+            )
+            server.ATHLETE_DATA.profile().save({"weather_location": ""})
+            return {
+                "query": query,
+                "forecast": {},
+                "fetched_at": runtime_clock.utc_now(),
+            }
+
+        with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
+            self.assertEqual(
+                server.WEATHER.service().state()["state"], "not_configured"
+            )
+        self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
+
+    def test_privacy_delete_drains_a_direct_weather_read(self):
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
+        entered, release, deleted = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        failures = []
+
+        def fetch(query):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("Synthetic weather barrier timed out")
+            return {
+                "query": query,
+                "forecast": {},
+                "fetched_at": runtime_clock.utc_now(),
+            }
+
+        def read():
+            try:
+                server.PUBLIC_STATE.weather_state_service().state()
+            except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
+                failures.append(type(error).__name__)
+
+        def erase():
+            try:
+                server.PRIVACY.delete_service().delete("LOKALE DATEN LÖSCHEN")
+                deleted.set()
+            except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
+                failures.append(type(error).__name__)
+
+        with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
+            reader = threading.Thread(target=read)
+            reader.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                deletion = threading.Thread(target=erase)
+                deletion.start()
+                self.assertFalse(deleted.wait(0.05))
+            finally:
+                release.set()
+                reader.join(5)
+            deletion.join(5)
+        self.assertEqual(failures, [])
+        self.assertTrue(deleted.is_set())
+        self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
+        self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
+
+    def test_cached_weather_remains_stale_without_refresh(self):
+        server.ATHLETE_DATA.profile().save({"weather_location": "Synthetic city"})
+        server.key_value_service().set(
+            weather_cache.CACHE_KEY,
+            json.dumps(
+                {
+                    "query": "Synthetic city",
+                    "forecast": {},
+                    "fetched_at": "2020-01-01T00:00:00+00:00",
+                }
+            ),
+        )
+        self.assertEqual(
+            server.WEATHER.service().state(refresh=False)["state"], "stale"
+        )
+        with patch.object(
+            server.WEATHER.service(),
+            "state",
+            return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
+        ):
+            server.WEATHER_SYNC().sync()
+        with server.database_manager().unit_of_work() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()["status"],
+                "error",
+            )
 
     def test_coach_context_reads_weather_cache_without_refreshing_it(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})

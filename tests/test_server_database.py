@@ -14,7 +14,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -712,6 +712,40 @@ class ServerDatabaseTests(ServerTestCase):
 
         self.assertEqual(planning["season"]["as_of"], "2026-01-02")
         self.assertGreaterEqual(local_clock.call_count, 1)
+
+    def test_privacy_export_has_every_checkin_and_library_record(self):
+        for offset in range(20):
+            server.ATHLETE_DATA.checkin().save(
+                {
+                    "checkin_date": (
+                        date(2026, 9, 7) - timedelta(days=offset)
+                    ).isoformat(),
+                    "notes": "Synthetic",
+                }
+            )
+        with server.database_manager().unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                [
+                    (
+                        str(i),
+                        str(i),
+                        json.dumps({"id": str(i), "name": "Synthetic"}),
+                        runtime_clock.utc_now(),
+                    )
+                    for i in range(1001)
+                ],
+            )
+        with self.privacy_archive() as archive:
+            self.assertEqual(
+                len(archive.read("athlete_checkins.jsonl").splitlines()), 20
+            )
+            self.assertEqual(
+                len(archive.read("workout_library.jsonl").splitlines()), 1001
+            )
+            self.assertEqual(
+                json.loads(archive.read("manifest.json"))["status"], "complete"
+            )
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(
         self,
@@ -1537,6 +1571,48 @@ class ServerDatabaseTests(ServerTestCase):
                 self.assertEqual(
                     list(data_dir.glob(".intervals-coach-restore-*.db")), []
                 )
+
+    @unittest.skipUnless(
+        server.SQLCIPHER_AVAILABLE,
+        "SQLCipher ist in dieser Testumgebung nicht verfügbar.",
+    )
+    def test_restore_makes_interrupted_sync_job_claimable(self):
+        with tempfile.TemporaryDirectory(prefix="audit-encrypted-") as directory:
+            root = Path(directory)
+            config = server.CONFIG_HOLDER.value
+            with (
+                patch.object(
+                    server.CONFIG_HOLDER,
+                    "value",
+                    replace(config, app_password="synthetic-password-123"),
+                ),
+                patch.object(server, "DATA_DIR", root),
+                patch.object(server, "DB_PATH", root / "test.db"),
+                patch.object(server, "LOG_PATH", root / "test.log"),
+                canonical_backfill_stopped(server),
+            ):
+                try:
+                    server.initialise_database()
+                    job = server.SYNC_JOB_QUEUE.service().enqueue(
+                        "garmin", "refresh", {"days": 1}
+                    )
+                    server.SYNC_JOB_QUEUE.store().claim()
+                    backup = server.BACKUP.backup_service().read_bytes()
+                    server.SYNC_JOB_QUEUE.outcome_service().update(
+                        job["id"], "completed"
+                    )
+                    self.assertTrue(
+                        server.BACKUP.restore_service().restore(backup)["restored"]
+                    )
+                    self.assertEqual(
+                        server.SYNC_JOB_QUEUE.service().state(job["id"])["status"],
+                        "queued",
+                    )
+                    self.assertEqual(
+                        server.SYNC_JOB_QUEUE.store().claim()["id"], job["id"]
+                    )
+                finally:
+                    server.database_manager.reset()
 
     def test_readiness_fails_when_database_is_unavailable(self):
         manager = server.database_manager()
