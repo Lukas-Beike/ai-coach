@@ -393,7 +393,7 @@ class NutritionPostRoutes:
         if self._nutrition_refresh_service is None:
             return {"status": "partial", "reason": "not_configured"}
         try:
-            return self._nutrition_refresh_service().refresh(
+            return self._nutrition_refresh_service().refresh_nutrition(
                 source,
                 date.fromisoformat(start),
                 date.fromisoformat(end),

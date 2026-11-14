@@ -140,10 +140,9 @@ from backend.sync.garmin_activity_details import GarminActivityDetailService
 from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.garmin_service import (
-    GarminAnalysisRefreshService,
-    GarminNutritionRefreshService,
     GarminRemoteReader,
     GarminSyncService,
+    GarminTargetedRefreshService,
 )
 from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
 from backend.sync.library import (
@@ -429,10 +428,9 @@ class CompositionRootTests(ServerTestCase):
             (garmin.remote_reader, GarminRemoteReader),
             (garmin.sync_service, GarminSyncService),
             (garmin.activity_detail_service, GarminActivityDetailService),
-            (garmin.nutrition_refresh_service, GarminNutritionRefreshService),
+            (garmin.targeted_refresh_service, GarminTargetedRefreshService),
             (garmin.wellness_history_service, GarminWellnessHistoryService),
             (garmin.stream_backfill_service, StreamBackfillService),
-            (garmin.analysis_refresh_service, GarminAnalysisRefreshService),
             (garmin.projection_service, GarminProjectionService),
         ):
             with self.subTest(kind=kind.__name__):

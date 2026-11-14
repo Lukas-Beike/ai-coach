@@ -34,13 +34,12 @@ from backend.sync.garmin_projection_service import (
     GarminProjectionService,
 )
 from backend.sync.garmin_service import (
-    GarminAnalysisRefreshService,
-    GarminNutritionRefreshService,
     GarminRemoteReader,
     GarminSyncCoordination,
     GarminSyncLifecycleState,
     GarminSyncService,
     GarminSyncSource,
+    GarminTargetedRefreshService,
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -74,10 +73,9 @@ class GarminServices:
     change_personal_client: Callable[[], GarminPersonalClient | None]
     sync_service: Callable[[], GarminSyncService]
     activity_detail_service: Callable[[], GarminActivityDetailService]
-    nutrition_refresh_service: Callable[[], GarminNutritionRefreshService]
+    targeted_refresh_service: Callable[[], GarminTargetedRefreshService]
     wellness_history_service: Callable[[], GarminWellnessHistoryService]
     stream_backfill_service: Callable[[], StreamBackfillService]
-    analysis_refresh_service: Callable[[], GarminAnalysisRefreshService]
     projection_service: Callable[[], GarminProjectionService]
 
 
@@ -284,7 +282,7 @@ def build_garmin(
                     local_now=ctx.clock.now,
                     logger=ctx.logger,
                     store_daytime=lambda day, values: (
-                        nutrition_refresh_service().store_daytime(day, values)
+                        targeted_refresh_service().store_daytime(day, values)
                     ),
                 )
             return change_check_instance
@@ -331,10 +329,10 @@ def build_garmin(
             capability_allowed=sync_state_service().capability_allowed,
         )
 
-    def nutrition_refresh_service() -> GarminNutritionRefreshService:
-        """Bounded Garmin reads used by nutrition, without a full sync."""
+    def targeted_refresh_service() -> GarminTargetedRefreshService:
+        """Bounded Garmin reads for nutrition and Analyse, without a full sync."""
         reader = remote_reader()
-        return GarminNutritionRefreshService(
+        return GarminTargetedRefreshService(
             reader=reader,
             database_manager=ctx.database(),
             snapshot_writer=snapshot_writer(),
@@ -378,19 +376,6 @@ def build_garmin(
             batch_limit=STREAM_BATCH_LIMIT,
         )
 
-    def analysis_refresh_service() -> GarminAnalysisRefreshService:
-        """Bounded Garmin reads used by Analyse without a full sync."""
-        reader = remote_reader()
-        return GarminAnalysisRefreshService(
-            reader=reader,
-            database_manager=ctx.database(),
-            snapshot_writer=snapshot_writer(),
-            payload_service=payload_service(),
-            coordination=sync_coordination(),
-            utc_now=utc_now,
-            configured=remote_configured(reader),
-        )
-
     def projection_service() -> GarminProjectionService:
         """Public and Coach projections over current Garmin state."""
         return GarminProjectionService(
@@ -424,9 +409,8 @@ def build_garmin(
         change_personal_client,
         sync_service,
         activity_detail_service,
-        nutrition_refresh_service,
+        targeted_refresh_service,
         wellness_history_service,
         stream_backfill_service,
-        analysis_refresh_service,
         projection_service,
     )

@@ -473,7 +473,7 @@ def _read_routes(
         AnalysisRoutes(
             ctx.performance.training_reports,
             lambda: AnalysisRefreshService(
-                ctx.garmin.analysis_refresh_service,
+                ctx.garmin.targeted_refresh_service,
                 lambda: _local_today(ctx),
                 ctx.wahoo.sync_service,
             ),
@@ -549,7 +549,7 @@ def _domain_routes(
         NutritionPostRoutes(
             nutrition.diary_service,
             nutrition.meal_library_service,
-            ctx.garmin.nutrition_refresh_service,
+            ctx.garmin.targeted_refresh_service,
             ctx.clock.now,
         ),
         SyncCommandPostRoute(sync_command_endpoint),

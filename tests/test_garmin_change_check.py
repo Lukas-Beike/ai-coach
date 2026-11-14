@@ -25,8 +25,8 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_service import (
-    GarminNutritionRefreshService,
     GarminSyncCoordination,
+    GarminTargetedRefreshService,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.schedule_policies import GarminSchedulePolicy
@@ -144,7 +144,7 @@ class GarminChangeCheckTests(unittest.TestCase):
         spy = Mock(wraps=writer.write_refresh)
         writer.write_refresh = spy  # type: ignore[method-assign]
         coordination = GarminSyncCoordination(threading.Lock())
-        service = GarminNutritionRefreshService(
+        service = GarminTargetedRefreshService(
             Mock(),
             self.database,
             writer,

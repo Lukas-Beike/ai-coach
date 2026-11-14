@@ -14,8 +14,8 @@ from backend.performance.body import body_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.garmin_service import (
-    GarminNutritionRefreshService,
     GarminRemoteReader,
+    GarminTargetedRefreshService,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.garmin_weight import garmin_weight_records
@@ -271,7 +271,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         service._payload_service.view.return_value = {"weight": existing}
         reader.fetch_nutrition_data.return_value = ([incoming], True)
 
-        result = service.refresh("weight", start, date(2026, 9, 24))
+        result = service.refresh_nutrition("weight", start, date(2026, 9, 24))
 
         self.assertEqual(result["status"], "ok")
         persisted = writer.write_refresh.call_args.kwargs["view"]
@@ -291,7 +291,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         kept = {"date": "2026-09-21", "weight": 70.1}
         reader.fetch_nutrition_data.return_value = ([kept], False)
 
-        result = service.refresh("weight", date(2026, 9, 1), date(2026, 9, 24))
+        result = service.refresh_nutrition(
+            "weight", date(2026, 9, 1), date(2026, 9, 24)
+        )
 
         self.assertEqual(result["status"], "partial")
         self.assertEqual(writer.write_refresh.call_args.kwargs["windows"], {})
@@ -579,7 +581,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         coordination = Mock()
         coordination.operation.return_value = nullcontext()
         coordination.acquire.return_value = True
-        service = GarminNutritionRefreshService(
+        service = GarminTargetedRefreshService(
             reader,
             manager,
             writer,
@@ -593,7 +595,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
     def test_refresh_reads_and_persists_only_the_selected_garmin_source(self) -> None:
         service, reader, manager, writer, coordination = self.make_service()
 
-        result = service.refresh("daily_stats", date(2026, 9, 24), date(2026, 9, 24))
+        result = service.refresh_nutrition(
+            "daily_stats", date(2026, 9, 24), date(2026, 9, 24)
+        )
 
         self.assertEqual(result["status"], "ok")
         reader.fetch_nutrition_data.assert_called_once_with(
@@ -630,7 +634,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         }
         service._payload_service.view.return_value = snapshot
 
-        result = service.refresh("weight", date(2026, 9, 1), date(2026, 9, 24))
+        result = service.refresh_nutrition(
+            "weight", date(2026, 9, 1), date(2026, 9, 24)
+        )
 
         self.assertEqual(result["status"], "partial")
         persisted = writer.write_refresh.call_args.kwargs["view"]
@@ -649,7 +655,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         service, reader, _manager, writer, _coordination = self.make_service()
         reader.fetch_nutrition_data.side_effect = RuntimeError("provider unavailable")
 
-        result = service.refresh("daily_stats", date(2026, 9, 24), date(2026, 9, 24))
+        result = service.refresh_nutrition(
+            "daily_stats", date(2026, 9, 24), date(2026, 9, 24)
+        )
 
         self.assertEqual(
             result, {"status": "partial", "reason": "provider_unavailable"}
@@ -660,7 +668,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         service, reader, _manager, writer, _coordination = self.make_service()
         cast(Any, service)._configured = lambda: False
 
-        result = service.refresh("weight", date(2026, 9, 1), date(2026, 9, 24))
+        result = service.refresh_nutrition(
+            "weight", date(2026, 9, 1), date(2026, 9, 24)
+        )
 
         self.assertEqual(result, {"status": "partial", "reason": "not_configured"})
         reader.fetch_nutrition_data.assert_not_called()
