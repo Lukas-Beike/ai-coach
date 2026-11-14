@@ -1,6 +1,7 @@
 """Server integration tests for coach."""
 
 import json
+import threading
 import unittest
 import uuid
 from datetime import timedelta
@@ -398,6 +399,73 @@ class ServerCoachTests(ServerTestCase):
         publish.assert_called_once()
         register_event.assert_called_once()
         wake_worker.assert_called_once()
+
+    def test_cancel_set_before_enqueue_is_persisted_with_the_job(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Synthetic request",
+            "early-cancel",
+            "synthetic-session",
+            operation_id="early-cancel-operation",
+            cancel_event=cancel_event,
+        )
+
+        with server.database_manager().unit_of_work() as db:
+            receipt = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id='early-cancel'"
+            ).fetchone()
+        self.assertTrue(json.loads(receipt["receipt"])["cancel_requested"])
+        self.assertTrue(
+            server.COACH_BACKGROUND_JOBS.job_store().cancel_requested("early-cancel")
+        )
+
+    def test_restart_job_observes_cancel_during_session_restore(self):
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Synthetic request",
+            "cancel-race",
+            "synthetic-session",
+            operation_id="cancel-operation",
+        )
+        job = server.COACH_BACKGROUND_JOBS.job_store().claim()
+        coach_streams.CHAT_STREAM_REGISTRY.clear_state()  # Process restart loses in-memory events.
+
+        def restore(_):
+            self.assertEqual(
+                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
+                    "synthetic-session", "cancel-operation"
+                )["status"],
+                "cancelling",
+            )
+            self.assertIsNone(
+                coach_streams.CHAT_STREAM_REGISTRY.get_background_event(
+                    "cancel-operation"
+                )
+            )
+            with server.database_manager().unit_of_work() as db:
+                receipt = db.execute(
+                    "SELECT receipt FROM coach_commands WHERE client_turn_id='cancel-race'"
+                ).fetchone()
+            self.assertTrue(json.loads(receipt["receipt"])["cancel_requested"])
+            return "synthetic-session"
+
+        def coach(*args, **kwargs):
+            self.assertTrue(kwargs["cancel_event"].is_set())
+            return {"status": "cancelled"}
+
+        with (
+            patch.object(
+                server.session_auth_service(),
+                "restore_coach_session_csrf_hash",
+                side_effect=restore,
+            ),
+            patch(
+                "backend.coach.chat_turn.CoachChatTurnService.run", side_effect=coach
+            ) as execute,
+        ):
+            server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
+        execute.assert_called_once()
 
     def test_saved_profile_is_included_in_coach_context(self):
         server.ATHLETE_DATA.profile().save(

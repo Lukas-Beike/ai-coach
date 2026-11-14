@@ -13,6 +13,7 @@ from backend.calendar.ical_mapping import (
     ical_training_relevant,
 )
 from backend.errors import AppError
+from backend.planning import context as planning_context
 from backend.providers import calendar as calendar_provider
 from backend.providers.calendar import (
     EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -539,6 +540,23 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertTrue(events[0]["short_only"])
         self.assertFalse(events[1]["training_relevant"])
         self.assertTrue(events[1]["no_training"])
+
+    def test_an_ongoing_all_day_event_with_a_nested_alarm_ends_with_its_last_day(self):
+        payload = feed(
+            "UID:synthetic\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\nSUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM"
+        )
+        events = parse(payload, start=date(2026, 9, 7), end=date(2026, 9, 10))
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["short_only"])
+        self.assertEqual(
+            planning_context.external_calendar_event_dates(
+                events[0], today=date(2026, 9, 7), window_days=30
+            ),
+            ["2026-09-06", "2026-09-07", "2026-09-08"],
+        )
+        self.assertEqual(
+            parse(payload, start=date(2026, 9, 9), end=date(2026, 9, 10)), []
+        )
 
     def test_timezone_and_unknown_tzid_fallback_to_local_zone(self):
         events = parse(

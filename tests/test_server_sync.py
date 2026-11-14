@@ -40,8 +40,10 @@ from backend.planning import library as planning_library
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
+from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_service
 from backend.sync import queue as sync_queue
+from backend.sync import wiring as sync_wiring
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.library import WorkoutLibrarySyncService
@@ -620,6 +622,31 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("import server", module_source)
         self.assertNotIn("from server", module_source)
         self.assertNotIn("[:10]", daily_scheduler)
+
+    def test_garmin_daily_schedule_is_independent_of_intervals(self):
+        with (
+            patch.object(
+                server.CONFIG_HOLDER,
+                "value",
+                replace(
+                    server.CONFIG_HOLDER.value,
+                    intervals_api_key="",
+                    calendar_ical_url="",
+                ),
+            ),
+            patch.object(
+                garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")
+            ),
+            patch.object(sync_wiring, "DailySyncMarkerService") as marker_service,
+        ):
+            marker_service.return_value.is_due.return_value = True
+            server.SYNC_SCHEDULERS.daily_scheduler().schedule()
+        with server.database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT provider, payload FROM sync_jobs WHERE type='refresh'"
+            ).fetchall()
+        self.assertEqual([row["provider"] for row in rows], ["garmin"])
+        self.assertEqual(json.loads(rows[0]["payload"])["days"], 84)
 
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
         server.ATHLETE_DATA.checkin().save({"illness": "Erkältung"})
@@ -1372,6 +1399,102 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(
             server.PLANNING_DATA.competition().list()[0]["name"], "Swim Race"
         )
+
+    def _synced_competition_with_remote_event(self):
+        self.enterContext(
+            patch.object(
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
+            )
+        )
+        self.enterContext(
+            patch.object(
+                server.ATHLETE_CLOCK,
+                "now",
+                return_value=datetime(2026, 9, 7, 12, tzinfo=UTC),
+            )
+        )
+        item = server.PLANNING_DATA.competition().save(
+            {"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"}
+        )["competition"]
+        external = planning_competitions.competition_external_id(item["id"])
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
+                (external, item["id"]),
+            )
+        remote = {
+            "id": 123,
+            "external_id": external,
+            "name": "Synthetic race",
+            "start_date_local": "2026-10-01T08:00:00",
+            "category": "RACE_B",
+            "type": "Ride",
+        }
+        return item, remote
+
+    def test_competition_fetch_preserves_a_concurrent_local_edit(self):
+        item, remote = self._synced_competition_with_remote_event()
+
+        def fetch(*args):
+            server.PLANNING_DATA.competition().save(
+                {"competition_id": item["id"], "name": "New local name"}
+            )
+            return [remote]
+
+        client = Mock()
+        client.fetch_competition_events.side_effect = fetch
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
+        current = server.PLANNING_DATA.competition().list()[0]
+        self.assertEqual(current["name"], "New local name")
+        self.assertEqual(current["sync_dirty"], 1)
+
+    def test_competition_tombstone_suppresses_import_before_and_after_remote_delete(
+        self,
+    ):
+        item, remote = self._synced_competition_with_remote_event()
+        server.PLANNING_DATA.competition().delete(item["id"])
+        client = Mock()
+        client.fetch_competition_events.return_value = [remote]
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
+            self.assertEqual(server.PLANNING_DATA.competition().list(), [])
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
+        self.assertEqual(server.PLANNING_DATA.competition().list(), [])
+        client.bulk_delete_events.assert_called_once()
+
+    def test_competition_remote_delete_only_acknowledges_captured_tombstones(self):
+        item, remote = self._synced_competition_with_remote_event()
+        server.PLANNING_DATA.competition().delete(item["id"])
+        client = Mock()
+        client.fetch_competition_events.return_value = [remote]
+
+        def delete(_):
+            with server.database_manager().unit_of_work() as db:
+                db.execute(
+                    "INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?, NULL)",
+                    (runtime_clock.utc_now(),),
+                )
+
+        client.bulk_delete_events.side_effect = delete
+        with patch.object(
+            intervals_client_module, "IntervalsClient", return_value=client
+        ):
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
+        with server.database_manager().unit_of_work() as db:
+            self.assertEqual(
+                [
+                    row["id"]
+                    for row in db.execute("SELECT id FROM competition_sync_tombstones")
+                ],
+                ["later"],
+            )
 
     def test_intervals_snapshot_gives_no_threshold_recovery_or_load(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
