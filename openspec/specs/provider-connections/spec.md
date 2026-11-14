@@ -487,7 +487,7 @@ Evidence:
 - `tests/test_provider_connection_checks.py:test_local_failure_is_not_reported_as_a_provider_outage_and_not_stored`
 - `tests/test_provider_connection_checks.py:test_model_provider_listing_failures_are_classified`
 - `tests/test_provider_connection_checks.py:test_other_provider_404_is_a_misconfiguration_not_unsupported`
-- `tests/test_provider_connection_checks.py:test_restore_during_the_check_is_not_stored_as_verified`
+- `tests/test_provider_connection_checks.py:test_a_check_keeps_its_success_only_if_it_rotated_its_own_identity`
 - `tests/test_provider_connection_checks.py:test_running_resync_reports_busy_and_skips_the_login`
 - `tests/test_provider_connection_checks.py:test_unknown_intervals_athlete_is_a_misconfiguration`
 - `tests/test_provider_connection_checks.py`
