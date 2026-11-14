@@ -164,6 +164,25 @@ class ProdChecksTests(unittest.TestCase):
         )  # fmt: skip
         self.assertIn("FAIL count messages 40 -> 39", text)
         self.assertIn("ok count competitions 3 -> 3", text)
+        self.assertEqual(
+            prod_diagnostics.comparison_lines(
+                {
+                    "counts": {"external_calendar_events": 20, "competitions": 2},
+                    "memory": {},
+                },
+                {"counts": {"external_calendar_events": 21, "competitions": 3}},
+            ),
+            [
+                ("info", "count external_calendar_events 21 -> 20"),
+                ("FAIL", "count competitions 3 -> 2"),
+            ],
+        )
+        self.assertEqual(
+            prod_diagnostics.comparison_lines(
+                {"counts": {"external_calendar_events": 20}, "memory": {}}, None
+            ),
+            [("info", "count external_calendar_events 20")],
+        )
 
     def test_diagnostics_version_mismatch_and_wrong_password(self):
         code, text = self.run_main(

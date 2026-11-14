@@ -22,7 +22,8 @@ version and schema against the expected values, whether `sync.last_error` is
 set (never its text), provider and calendar refresh ages, stuck plan-sync
 jobs, unsynced plan units with error kinds (never error text), record counts,
 and process memory. With `--compare`, a lower record count is a `FAIL`: an
-unexplained drop stops the check.
+unexplained drop stops the check. `external_calendar_events` is only `info`:
+the calendar sync refills it from today on every refresh.
 
 Exit 0 all ok, 1 a check failed, 2 unreachable or login refused. The script
 prints no response body, cookie, or password; do not add a mode that does.
