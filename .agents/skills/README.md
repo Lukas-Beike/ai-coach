@@ -100,6 +100,7 @@ output never echoes text that can quote a file.
 | [pacecraft-graphify-query](pacecraft-graphify-query/SKILL.md) | Symbols, callers and paths from the local code graph |
 | [pacecraft-worktree-prune](pacecraft-worktree-prune/SKILL.md) | Remove merged, clean, idle worktrees |
 | [pacecraft-release-dispatch](pacecraft-release-dispatch/SKILL.md) | Dispatch the daily release and follow its chain |
+| [pacecraft-release-contains](pacecraft-release-contains/SKILL.md) | Whether a release tag carries a develop commit despite the squash promote |
 | [pacecraft-image-verify](pacecraft-image-verify/SKILL.md) | GHCR digests of the release tag, `latest` and the running container |
 | [pacecraft-prod-diagnostics](pacecraft-prod-diagnostics/SKILL.md) | Named production diagnostics fields and record counts, compared; one section's allow-listed counts |
 | [pacecraft-prod-logs](pacecraft-prod-logs/SKILL.md) | Warning and error counts by event name, never log text |

@@ -21,7 +21,8 @@ Use this skill only when the user explicitly asks to start or carry out a Pacecr
    blocks progress is reported, and the release stops.
 4. The release must be the one this chain produced: its tag equals the chain's
    version and its target is the promotion PR's merge commit on `main`; never
-   select an unrelated or merely newest release. The publish run for that tag,
+   select an unrelated or merely newest release. Which develop fixes it carries:
+   [release-contains](../pacecraft-release-contains/SKILL.md). The publish run for that tag,
    including its test, browser, quality and `build-and-push` jobs, must have
    succeeded ([pr-state](../pacecraft-pr-state/SKILL.md) and `gh run view` for
    detail). The publish run's final digest-parity step can fail transiently
