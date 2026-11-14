@@ -592,7 +592,7 @@ The system SHALL store one observation row per natural key `provider|metric|spor
 
 #### Scenario: Two Garmin sections with one key
 - **WHEN** a Garmin health observation meets an active row of the same natural key that another source record wrote at the same or a newer mapper version
-- **THEN** a fill-only history value loses to any other section; otherwise the later retrieval wins, then the section that comes first in the Garmin section order (for example `readiness` before `training_readiness_history`, `cycling_ftp` before `cycling_ftp_history`), and on the same section the value written first, in the live ingest and the re-projection alike, so a re-projection reproduces the live rows; a Garmin raw record delivered again unchanged keeps its row and takes the later fetch time.
+- **THEN** a fill-only history value loses to any other section; otherwise the later retrieval wins, then the section that comes first in the Garmin section order (for example `readiness` before `training_readiness_history`, `cycling_ftp` before `cycling_ftp_history`), in the live ingest and the re-projection alike, so a re-projection reproduces the live rows; a Garmin raw record delivered again unchanged keeps its row and takes the later fetch time.
 
 #### Scenario: Local per-session value
 - **WHEN** a locally derived per-session kind (session load, intensity factor, efficiency factor, variability index, mechanical work, aerobic decoupling, the five activity weather kinds) is stored without a provider

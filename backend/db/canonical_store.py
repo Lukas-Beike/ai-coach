@@ -920,9 +920,10 @@ def _outranked(
 ) -> bool:
     """Whether the stored row of another record wins over ``values`` (#2782).
 
-    The order is total: a value of the last-ranked (fill-only) section loses to
-    any other; then the later retrieval wins; then the lower rank; on the same
-    rank the stored row, so the first value written stays, as inside one payload.
+    A value of the last-ranked (fill-only) section loses to any other; then the
+    later retrieval wins; then the lower rank. On the same rank the later write
+    wins, so a replaced element of one section moves the row to its successor
+    (several elements of one section on one key are #2844).
     """
     if ranks is None or existing["owner_record_id"] == values["owner_record_id"]:
         return False
@@ -940,7 +941,7 @@ def _outranked(
     )
     if stored is not None and new is not None and stored != new:
         return stored > new
-    return stored_rank <= new_rank
+    return stored_rank < new_rank
 
 
 def upsert_observation(

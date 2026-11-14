@@ -340,7 +340,8 @@ class ObservationStoreTests(StoreFixture):
 
     def test_a_shared_garmin_key_follows_one_order(self) -> None:
         # #2782: the fill-only history loses to any section, then the later
-        # retrieval wins, then the earlier section, then the value written first.
+        # retrieval wins, then the earlier section; within one section the later
+        # write wins (a replaced element hands its row to its successor).
         later = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
         cases = (
             (
@@ -359,7 +360,7 @@ class ObservationStoreTests(StoreFixture):
             ),
             ("readiness/D", RETRIEVED_AT, "training_readiness_history/D", later, 66.0),
             ("performance_history/D", later, "readiness/D", RETRIEVED_AT, 66.0),
-            ("readiness/D", RETRIEVED_AT, "readiness/D#1", RETRIEVED_AT, 81.0),
+            ("readiness/D", RETRIEVED_AT, "readiness/D#1", RETRIEVED_AT, 66.0),
             (None, RETRIEVED_AT, "training_readiness_history/D", RETRIEVED_AT, 81.0),
         )
         ranks = canonical_plans.GARMIN_SECTION_RANKS
