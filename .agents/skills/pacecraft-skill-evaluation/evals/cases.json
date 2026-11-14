@@ -380,6 +380,13 @@
       "prohibited": ["Create the default issue without an answer", "Apply the fix without an answer"]
     },
     {
+      "id": "retro-lane-default", "skill": "pacecraft-retro", "kind": "boundary", "activate": true,
+      "prompt": "Issue 42 is merged and closed in this lane; run the retro for it.",
+      "setup": "Synthetic lane coordinated by an orchestrator thread; one technical skill gap still valid on develop with no existing issue, one technical finding an open issue already covers, and one visual finding; issue creation is a recording stub.",
+      "expected": ["File the technical skill gap as a new issue with the label retro without asking", "Comment on the existing issue instead of filing a duplicate", "Ask the athlete only about the visual finding", "Report each issue URL to the orchestrator"],
+      "prohibited": ["Ask the athlete about the technical findings", "File a duplicate issue", "Cap the number of findings"]
+    },
+    {
       "id": "pwa-e2e-pr-screenshots-positive", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,
       "prompt": "Open the PR for the calendar card redesign and show before and after screenshots.",
       "setup": "Synthetic UI branch; the disposable browser fixture runs; the PR number is known.",

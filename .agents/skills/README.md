@@ -58,7 +58,7 @@ skills of lower layers.
 | [pacecraft-orchestrator](pacecraft-orchestrator/SKILL.md) | Coordinate delivery lanes: AGENTS.md turn, path warnings, merge rules, ledger, periodic check |
 | [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | Delegation decision (main model by default), fixed Claude/Gemini tiers, parent-owned integration |
 | [pacecraft-skill-evaluation](pacecraft-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
-| [pacecraft-retro](pacecraft-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
+| [pacecraft-retro](pacecraft-retro/SKILL.md) | Retrospective on request and after every issue a deliver-issue run delivers |
 | [openspec-explore](openspec-explore/SKILL.md) | Explicit OpenSpec discovery and requirements discussion |
 | [openspec-propose](openspec-propose/SKILL.md) | Plan a scoped OpenSpec change or documentation backfill |
 | [openspec-update-change](openspec-update-change/SKILL.md) | Revise existing OpenSpec planning artifacts |
