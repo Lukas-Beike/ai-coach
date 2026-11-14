@@ -159,6 +159,7 @@ class CoachUiParityTests(unittest.TestCase):
         # read is replaced (`tests/test_mean_max_curve.py` covers it).
         profiles = TrainingProfileSelectionService(lambda: TODAY)
         profiles.curve_records = _curve_records  # type: ignore[assignment]
+        profiles.all_time_records = lambda: (tuple(_curve_records()), True)  # type: ignore[assignment]
         # Wired as `backend/performance/wiring.py` does: the Coach report sections
         # read the services the analysis routes and the public state use.
         self.reports = TrainingReportServices(
@@ -337,7 +338,9 @@ class CoachUiParityTests(unittest.TestCase):
             (ui["method"], ui["method_version"], ui["status"]),
         )
         coach = self.coach_report("power_profiles")["power_profiles"]
-        self.assertEqual(ui, coach)
+        # The cards add the all-time bests; the Coach keeps the 90 days (#2694).
+        self.assertIn("all_time", ui)
+        self.assertEqual(_without(ui, {"all_time"}), coach)
         # The CP/CS model estimate (card M4) travels in the same payload.
         self.assertEqual(
             ("critical-power-speed", "experimental"),

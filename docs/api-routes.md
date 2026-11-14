@@ -231,7 +231,9 @@ takes the optional query `record_type` (only `equipment`) and `record_id`
 Response: 200. `power-profiles`: `status` (`ok` or `insufficient_data`),
 `best`, `critical_power`, `power_meter_changes`, `activities`, `windows`
 (keys `28` and `90`), `running`, `method`, `method_version`,
-`input_fingerprint` and `scope`. `training-records`: `{"equipment": object}`
+`input_fingerprint`, `scope` and `all_time` (the window of every stored
+session, for the analysis cards only; `{"status": "pending"}` before its
+first background read finished, `{"status": "failed"}` after a failed one). `training-records`: `{"equipment": object}`
 without query, `{"record_type": "equipment", "record": object}` for one
 record.
 

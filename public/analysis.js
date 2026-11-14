@@ -653,13 +653,15 @@ function clearAnalysisReportCache() {
 }
 
 let cyclingPowerProfileGeneration = 0;
+const ALL_TIME_RETRY_MS = 3000;
 // One power-profile read fills the cycling profile and the running best efforts (#2265).
-const PROFILE_CARDS = [["cyclingPowerProfile", "Leistungsprofil"], ["runningBestEfforts", "Bestwerte · 90 Tage"]];
+const PROFILE_CARDS = [["cyclingPowerProfile", "Leistungsprofil"], ["runningBestEfforts", "Bestwerte"]];
 const ANALYSIS_PERFORMANCE_ROUTES = new Set(["analysis", "analysis/running", "analysis/cycling"]);
 const CYCLING_POWER_PROFILE_DURATIONS = [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]];
 
+// Both cards show the all-time bests, each with its date (#2694).
 function cyclingPowerProfilePoint(result, duration) {
-  const candidates = result?.windows?.["90"]?.power || [];
+  const candidates = result?.all_time?.power || [];
   return candidates.filter((item) => item.duration_seconds === duration && item.status === "ok" && item.watts != null && Number.isFinite(Number(item.watts))).sort((a, b) => Number(b.watts) - Number(a.watts))[0];
 }
 
@@ -668,13 +670,13 @@ function cyclingPowerProfileHasValues(result) {
 }
 
 function cyclingPowerProfileTable(result) {
-  const head = h("thead", null, h("tr", null, ["Dauer", "Leistung"].map((label) => h("th", { scope: "col" }, label))));
+  const head = h("thead", null, h("tr", null, ["Dauer", "Leistung", "Datum"].map((label) => h("th", { scope: "col" }, label))));
   const body = h("tbody");
   for (const [duration, label] of CYCLING_POWER_PROFILE_DURATIONS) {
     const point = cyclingPowerProfilePoint(result, duration);
-    const cell = h("td", { title: point && [dateLabel(point.date), point.source].filter(Boolean).join(" · ") }, point && analysisValue(point.watts, "W"));
+    const cell = h("td", { title: point?.source }, point && analysisValue(point.watts, "W"));
     if (!point) markValueMissing(cell);
-    body.append(h("tr", { dataset: { powerDuration: String(duration) } }, h("th", { scope: "row" }, label), cell));
+    body.append(h("tr", { dataset: { powerDuration: String(duration) } }, h("th", { scope: "row" }, label), cell, h("td", null, point ? dateLabel(point.date) : null)));
   }
   const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Leistung nach Dauer");
   scroll.append(h("table", "race-predictions-table", head, body));
@@ -724,6 +726,13 @@ async function renderCyclingPowerProfile() {
   try {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
+    // The server reads the all-time bests in the background; the cards keep loading until then (#2694).
+    const allTime = result?.all_time;
+    const again = allTime?.status === "pending" || allTime?.stale === true;
+    if (again || allTime?.status === "failed") invalidateAnalysisReport("/api/analysis/power-profiles");
+    if (allTime?.status === "failed") throw new Error("Konnte nicht geladen werden.");
+    if (again) setTimeout(() => { if (generation === cyclingPowerProfileGeneration) void renderCyclingPowerProfile(); }, ALL_TIME_RETRY_MS);
+    if (allTime?.status === "pending") return;
     renderPowerProfile(result);
     renderRunningBestEfforts(result);
     renderAnalysisSegmentsIfActive();
@@ -740,10 +749,10 @@ function renderPowerProfile(result) {
   root.replaceChildren(h("h4", null, "Leistungsprofil"));
   const hasValues = cyclingPowerProfileHasValues(result);
   if (hasValues) {
-    root.append(h("p", "analysis-reference-note", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen"));
+    root.append(h("p", "analysis-reference-note", "Beste gemessene Durchschnittsleistung · Rad und Indoor zusammen"));
     root.append(cyclingPowerProfileTable(result));
   } else root.append(h("p", "muted", "Noch keine Leistungsdaten."));
-  const coverage = result.windows?.["90"]?.cache_coverage;
+  const coverage = result.all_time?.cache_coverage;
   if (coverage?.power_unknown_records > 0) {
     const gap = h("p", "analysis-reference-note", `Für ${coverage.power_unknown_records} von ${coverage.power_records} Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.`);
     gap.dataset.powerProfileGap = "true";
@@ -754,7 +763,7 @@ function renderPowerProfile(result) {
   root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
 }
 
-// The fastest observed pace per duration and time per distance of the last 90 days (#2265),
+// The fastest observed pace per duration and time per distance of all stored sessions (#2265, #2694),
 // in the targets and order the report returns.
 function runningBestEffortRow(kind, point) {
   const minutes = point.duration_seconds / 60;
@@ -763,26 +772,27 @@ function runningBestEffortRow(kind, point) {
   let text = null;
   if (kind === "speed" && point.speed_mps > 0) text = formatPace(1000 / Number(point.speed_mps));
   else if (kind === "distance" && point.seconds > 0) text = AppFormat.clock(point.seconds);
-  return { label, text, key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
+  return { label, text, date: text && dateLabel(point.date), key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
 }
 
 function renderRunningBestEfforts(result) {
   const root = document.getElementById("runningBestEfforts");
-  const running = result?.windows?.["90"]?.running || {};
-  root.replaceChildren(h("h4", null, "Bestwerte · 90 Tage"));
+  const running = result?.all_time?.running || {};
+  root.replaceChildren(h("h4", null, "Bestwerte"));
   const body = h("tbody");
   let values = 0;
   for (const kind of ["speed", "distance"]) {
     for (const point of running[kind] || []) {
-      const { label, text, key } = runningBestEffortRow(kind, point);
-      const cell = h("td", { title: text ? [dateLabel(point.date), point.source].filter(Boolean).join(" · ") : null }, text);
+      const { label, text, date, key } = runningBestEffortRow(kind, point);
+      const cell = h("td", { title: text ? point.source : null }, text);
       if (text) values += 1; else markValueMissing(cell);
-      body.append(h("tr", { dataset: { runningBest: key } }, h("th", { scope: "row" }, label), cell));
+      body.append(h("tr", { dataset: { runningBest: key } }, h("th", { scope: "row" }, label), cell, h("td", null, date)));
     }
   }
   if (values) {
     const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Lauf-Bestwerte");
-    scroll.append(h("table", "race-predictions-table", body)); root.append(scroll);
+    const head = h("thead", null, h("tr", null, ["Dauer / Strecke", "Bestwert", "Datum"].map((label) => h("th", { scope: "col" }, label))));
+    scroll.append(h("table", "race-predictions-table", head, body)); root.append(scroll);
   } else root.append(h("p", "muted", "Noch keine Lauf-Bestwerte."));
   const criticalSpeed = criticalPowerLine(result, "run", values > 0);
   if (criticalSpeed) root.append(criticalSpeed);

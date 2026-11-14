@@ -183,6 +183,10 @@ def watts_at(curve, duration):
     )
 
 
+def _without_all_time(payload):
+    return {key: value for key, value in payload.items() if key != "all_time"}
+
+
 class SessionCurveReaderTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
@@ -391,7 +395,7 @@ class ProfileSelectionTests(unittest.TestCase):
         self.session_records = Mock(wraps=CanonicalTableReader().session_activities)
         self.day = date(2026, 10, 18)
 
-    def service(self, summaries):
+    def service(self, summaries, spawn=None):
         @contextmanager
         def read_snapshot():
             yield self.db
@@ -405,7 +409,7 @@ class ProfileSelectionTests(unittest.TestCase):
         return TrainingProfileSelectionService(
             lambda: self.day,
             canonical=canonical,
-            curves=SessionCurveReader(self.session_records),
+            curves=SessionCurveReader(self.session_records, spawn=spawn),
         )
 
     def add_ride(self, summaries, activity_id, day="2026-10-10", peak=350.0):
@@ -658,6 +662,88 @@ class ProfileSelectionTests(unittest.TestCase):
         (kept,) = reader.shared_records(self.db, ["act_1"], "newer", lambda: build("x"))
         self.assertEqual("newer", kept["build"])
         self.assertEqual(["newer", "older"], builds)
+
+    def test_all_time_bests_keep_old_efforts_while_the_90_days_and_coach_do_not(self):
+        summaries = []
+        self.add_ride(summaries, "act_old", day="2025-03-14", peak=450.0)
+        self.add_ride(summaries, "act_recent", day="2026-10-10", peak=350.0)
+        builds = []
+        service = self.service(summaries, spawn=builds.append)
+
+        def best(window):
+            return next(
+                (point["watts"], point["activity_id"], point["date"])
+                for point in window["power"]
+                if point["duration_seconds"] == 180
+                and point["environment"] == "outdoor"
+            )
+
+        # The request never reads the whole history cold: it starts one
+        # background build and answers pending until that build is done.
+        self.assertEqual(
+            {"status": "pending"}, service.power_profiles(all_time=True)["all_time"]
+        )
+        self.assertEqual(
+            {"status": "pending"}, service.power_profiles(all_time=True)["all_time"]
+        )
+        self.assertEqual(1, len(builds))
+        read = {call.args[1] for call in self.session_records.call_args_list}
+        self.assertNotIn("act_old", read)
+        builds.pop()()
+        cards = service.power_profiles(all_time=True)
+        self.assertEqual([], builds)
+        self.assertEqual((450.0, "act_old", "2025-03-14"), best(cards["all_time"]))
+        self.assertEqual("2025-03-14", cards["all_time"]["date_start"])
+        self.assertFalse(cards["all_time"]["stale"])
+        self.assertEqual(2, cards["all_time"]["cache_coverage"]["power_records"])
+        # The 90-day window, the CP/CS input and the Coach's copy stay recent.
+        self.assertEqual(
+            (350.0, "act_recent", "2026-10-10"), best(cards["windows"]["90"])
+        )
+        self.assertEqual(
+            ["act_recent"], [row["activity_id"] for row in cards["activities"]]
+        )
+        self.assertNotIn("act_old", str(cards["critical_power"]))
+        coach = service.power_profiles()
+        self.assertNotIn("all_time", coach)
+        self.assertEqual(_without_all_time(cards), coach)
+
+    def test_a_background_build_keeps_the_last_records_and_pauses_after_a_failure(self):
+        add_session(self.db, "act_1")
+        builds = []
+        reader = SessionCurveReader(self.session_records, spawn=builds.append)
+
+        def broken():
+            raise ValueError("unreadable stream")
+
+        self.assertIsNone(
+            reader.background_records(self.db, ["act_1"], "a", lambda: [{"n": 1}])
+        )
+        builds.pop()()
+        (first,), current = reader.background_records(self.db, ["act_1"], "a", list)
+        self.assertTrue(current)
+        # Changed inputs build again in the background; the last records show
+        # meanwhile, marked as not current.
+        self.assertEqual(
+            ((first,), False),
+            reader.background_records(self.db, ["act_1"], "b", broken),
+        )
+        with self.assertLogs("intervals_coach", "ERROR"):
+            builds.pop()()
+        with self.assertRaises(RuntimeError):
+            reader.background_records(self.db, ["act_1"], "b", broken)
+        self.assertEqual([], builds)
+        later = SimpleNamespace(monotonic=lambda: float("inf"))
+        with patch.object(mean_max_curve, "time", later):
+            reader.background_records(self.db, ["act_1"], "b", broken)
+        self.assertEqual(1, len(builds))
+        # A thread that cannot start leaves no build marked as running.
+        spawn = Mock(side_effect=RuntimeError("can't start new thread"))
+        failing = SessionCurveReader(self.session_records, spawn=spawn)
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                failing.background_records(self.db, ["act_1"], "a", list)
+        self.assertEqual(2, spawn.call_count)
 
     def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
         summaries = []

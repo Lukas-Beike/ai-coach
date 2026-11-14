@@ -55,7 +55,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
     requests += 1;
     return fail
       ? route.fulfill({ status: 503, json: { error: "E2E fixture: Leistungsprofil nicht erreichbar" } })
-      : route.fulfill({ json: { windows: { "90": { power: [{ sport: "Ride", duration_seconds: 5, watts: 640, status: "ok", date: "2026-10-01", source: "Garmin Connect" }] } } } });
+      : route.fulfill({ json: { all_time: { power: [{ sport: "Ride", duration_seconds: 5, watts: 640, status: "ok", date: "2026-10-01", source: "Garmin Connect" }] } } });
   });
   await openAnalysis(page, "cycling");
   const profile = page.locator("#cyclingPowerProfile");
@@ -74,7 +74,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
 
   fail = false;
   await error.getByRole("button", { name: "Erneut versuchen" }).click();
-  await expect(profile.locator("[data-power-duration='5'] td")).toHaveText("640 W");
+  await expect(profile.locator("[data-power-duration='5'] td").first()).toHaveText("640 W");
   await expect(profile.locator("[data-power-duration='60'] td.value-missing")).toHaveText("nicht erfasst");
   await expect(profile.locator(".error-state")).toHaveCount(0);
   expect(requests - startupRequests, "the retry reads the profile once").toBe(1);
