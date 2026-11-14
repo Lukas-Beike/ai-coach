@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_cli import CliError, gh, gh_json, positive_int, read_body
-from issue_status import CHECKBOX, open_boxes, open_checkboxes
+from issue_status import CHECKBOX, linked_pulls, open_boxes, open_checkboxes
 
 IN_PROGRESS = "in progress"
 
@@ -65,10 +65,11 @@ def blockers(number: int) -> tuple[dict[str, Any], list[str]]:
     """The issue's state and body, and what keeps it from being done."""
     issue = gh_json("issue", "view", str(number), "--json", "state,body")
     found = [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
-    for pull in gh_json(
+    pulls = gh_json(
         "pr", "list", "--state", "all", "--search", f"#{number} in:body",
-        "--json", "number,state,title",
-    ):  # fmt: skip
+        "--json", "number,state,title,body",
+    )  # fmt: skip
+    for pull in linked_pulls(pulls, number):
         if pull["state"] == "OPEN":
             found.append(f"open PR #{pull['number']}: {pull['title']}")
     return issue, found

@@ -10,7 +10,8 @@ python scripts/issue_status.py <issue-number>
 ```
 
 - Read-only. Prints the issue state, each open `- [ ]` checkbox and every
-  linked PR with its state.
+  linked PR with its state. A PR links the issue only with `Closes`, `Fixes`,
+  `Resolves` or `Part of #<n>` in its body; a plain mention does not.
 - Exit 0: no open checkbox and no open PR. Exit 1: the issue is not done (an
   open checkbox or an open PR). Exit 2: bad issue number. Open boxes under an
   acceptance-criteria heading are listed but do not count: `issue_update close`

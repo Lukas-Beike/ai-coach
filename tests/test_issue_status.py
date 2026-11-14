@@ -44,6 +44,21 @@ class IssueStatusTests(unittest.TestCase):
             ["closing summary covers this", "still a criterion"],
         )
 
+    def test_only_closing_or_part_of_references_link_a_pr(self):
+        bodies = {  # #2798: a mention in prose or a longer number does not link
+            1: "Closes #12",
+            2: "Part of #12",
+            3: "fixed: #12.",
+            4: "RESOLVES #12 and more",
+            5: "Builds on #12 (merge hold).",
+            6: "Closes #123",
+            7: "Part of #1",
+            8: None,
+        }
+        pulls = [{"number": n, "body": body} for n, body in bodies.items()]
+        linked = issue_status.linked_pulls(pulls, 12)
+        self.assertEqual([pull["number"] for pull in linked], [1, 2, 3, 4])
+
     def test_empty_body_has_no_checkboxes(self):
         self.assertEqual(issue_status.open_checkboxes(None), [])
 
