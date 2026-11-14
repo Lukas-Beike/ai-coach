@@ -97,33 +97,6 @@ def _scalar_fields(record: dict[str, Any]) -> dict[str, float]:
     return fields
 
 
-def ftp_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]:
-    """Return only dated finite cycling FTP values from the range response."""
-    points: dict[str, dict[str, Any]] = {}
-    for record in _records(value):
-        # The biometric range API uses from/value; latest FTP uses
-        # calendarDate/functionalThresholdPower. An unqualified value is not FTP.
-        range_record = garmin_perf_fields.FTP_RANGE_DAY in record
-        observed = _observed(record)
-        if observed is None or not start <= observed <= end:
-            continue
-        field = (
-            garmin_perf_fields.FTP_RANGE_VALUE
-            if range_record
-            else garmin_perf_fields.FTP_VALUE
-        )
-        candidate = _number(record.get(field))
-        if candidate is None or not 20 <= candidate <= 2000:
-            continue
-        points[observed.isoformat()] = {
-            "date": observed.isoformat(),
-            "value": round(candidate, 2),
-            "source": GARMIN_SOURCE,
-            "field": field,
-        }
-    return [points[key] for key in sorted(points)]
-
-
 def metric_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]:
     """Return dated numeric fields without assigning unknown Garmin units."""
     points: dict[str, dict[str, Any]] = {}

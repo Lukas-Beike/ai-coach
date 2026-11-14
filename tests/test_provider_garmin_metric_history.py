@@ -10,13 +10,25 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.sync.garmin_metric_history import (
-    ftp_points,
     metric_points,
     projected_metric,
+)
+from backend.sync.garmin_performance_history import (
+    append_garmin_performance_history,
 )
 
 TODAY = date(2026, 10, 6)
 START = date(2026, 7, 9)
+
+
+def _ftp_history_rows(records):
+    """The dated FTP the ingest history keeps of a ``cycling_ftp_history`` section."""
+    payload = {"cycling_ftp_history": records}
+    append_garmin_performance_history(payload, None, TODAY)
+    return [
+        (row["date"], row["metrics"]["cycling_ftp_watts"])
+        for row in payload["performance_history"]
+    ]
 
 
 class GarminHistoricMetricCollectorTests(unittest.TestCase):
@@ -560,22 +572,23 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
         )
 
     def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
-        points = ftp_points(
+        points = _ftp_history_rows(
             [
                 {"from": "2026-10-01T00:00:00", "value": 270, "series": "CYCLING"},
                 {"from": "2026-10-02", "value": 275},
                 {"from": "2026-10-03", "calendarDate": "2026-10-04", "value": 280},
                 {"from": "2026-10-07", "value": 290},
                 {"value": 300},
-            ],
-            start=START,
-            end=TODAY,
+            ]
         )
+        # A range record also naming a calendarDate keeps its range day: a named
+        # deviation from the legacy reader, which dropped it (#2081).
         self.assertEqual(
-            [(row["date"], row["value"]) for row in points],
+            points,
             [
                 ("2026-10-01", 270),
                 ("2026-10-02", 275),
+                ("2026-10-03", 280),
             ],
         )
         endurance = metric_points(
@@ -595,7 +608,7 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
         )
 
     def test_ftp_requires_known_field_dated_finite_bounded_non_future_values(self):
-        points = ftp_points(
+        points = _ftp_history_rows(
             [
                 {"calendarDate": "2026-10-01", "functionalThresholdPower": 270},
                 {"calendarDate": "2026-10-01", "functionalThresholdPower": 0},
@@ -606,21 +619,9 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
                     "calendarDate": "2026-10-02",
                     "functionalThresholdPower": float("inf"),
                 },
-            ],
-            start=START,
-            end=TODAY,
+            ]
         )
-        self.assertEqual(
-            points,
-            [
-                {
-                    "date": "2026-10-01",
-                    "value": 270,
-                    "source": "Garmin Connect",
-                    "field": "functionalThresholdPower",
-                }
-            ],
-        )
+        self.assertEqual(points, [("2026-10-01", 270)])
 
     def test_generic_metrics_keep_field_names_unknown_and_deduplicate_dates(self):
         points = metric_points(

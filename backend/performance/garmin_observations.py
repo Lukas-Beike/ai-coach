@@ -2,7 +2,7 @@
 
 The Garmin snapshot synchronizer owns persistence and freshness state.  This
 module only reads the supplied sync state and never reaches into that state.
-The ingest-time observation-date parser lives in
+The ingest-time observation days of a fetched payload come from
 ``backend.sync.garmin_payload_metrics``.
 """
 

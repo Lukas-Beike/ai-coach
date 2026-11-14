@@ -369,6 +369,17 @@ _READ_KINDS = (
 )
 
 
+def garmin_metrics_of(observations: Iterable[Observation]) -> GarminCanonicalMetrics:
+    """Apply the ``read_garmin_state`` rules to already mapped Garmin observations."""
+    items = tuple(observations)
+    return _metrics(
+        {
+            kind: tuple(item for item in items if item.kind is kind)
+            for kind in _READ_KINDS
+        }
+    )
+
+
 def _garmin_only(
     reader: ObservationReader, db: Any, kind: MetricKind
 ) -> tuple[Observation, ...]:

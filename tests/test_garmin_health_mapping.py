@@ -34,7 +34,7 @@ from backend.providers.garmin_health_mapping import (
 from backend.providers.garmin_personal import wrap_daily_sleep
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
 from backend.sync.garmin_metric_history import projected_metric
-from backend.sync.garmin_performance_history import readiness_score_value
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 type Triple = tuple[str | None, str, IssueReason]
 
@@ -810,6 +810,71 @@ class AliasAndUnitTests(unittest.TestCase):
                 result = _map({"weight": {"calendarDate": DAY, "weight": raw}})
                 self.assertEqual(_rows(result), [("weight", expected, DAY, "-")])
                 self.assertEqual(_issues(result), [])
+
+    def test_nested_weights_inherit_the_date_and_accept_key_aliases(self) -> None:
+        result = _map(
+            {
+                "weight": {
+                    "calendarDate": "2026-08-30",
+                    "entries": [
+                        {"weightKg": 70},
+                        {"weight_kg": 70},
+                        {"date": "2026-08-31", "weight": 71},
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("weight", 70.0, "2026-08-30", "-"),
+                ("weight", 70.0, "2026-08-30", "-"),
+                ("weight", 71.0, "2026-08-31", "-"),
+            ],
+        )
+
+    def test_weight_list_cap_and_excluded_summary_keys(self) -> None:
+        entries = [
+            {"date": "2026-08-30", "weightKg": 70 + index / 100} for index in range(501)
+        ]
+        result = _map(
+            {
+                "weight": {
+                    "records": entries,
+                    "minWeight": {"date": "2026-08-30", "weightKg": 999},
+                    "max-weight": {"date": "2026-08-30", "weightKg": 999},
+                    "weightDelta": {"date": "2026-08-30", "weightKg": 999},
+                    "totalAverage": {"weightKg": 71.0},
+                }
+            }
+        )
+
+        values = [obs.value.value for obs in result.records]
+        self.assertEqual((len(values), values[0], values[-1]), (500, 70.0, 74.99))
+        self.assertEqual(result.issues, ())
+
+    def test_weight_bounds_are_inclusive_in_kilograms(self) -> None:
+        cases: list[tuple[dict[str, object], float | None]] = [
+            ({"weightKg": 30}, 30.0),
+            ({"weight_kg": 300}, 300.0),
+            ({"weight": 154.323583, "unit": "lb"}, 70.0),
+            ({"weight": 71000}, 71.0),
+            ({"weight": 29.99}, None),
+            ({"weight": 300.01}, None),
+        ]
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                result = _map({"weight": [{"calendarDate": DAY, **fields}]})
+                if expected is None:
+                    self.assertEqual(result.records, ())
+                    self.assertEqual(
+                        _issues(result),
+                        [("weight[0]", "weight", IssueReason.OUT_OF_RANGE)],
+                    )
+                else:
+                    (obs,) = result.records
+                    self.assertAlmostEqual(obs.value.value, expected, places=2)
 
     def test_whitespace_weight_unit_uses_the_magnitude_guess(self) -> None:
         result = _map(
@@ -1913,8 +1978,11 @@ class MorningReadinessTests(unittest.TestCase):
         result = _map({"readiness": [utc_only, local]})
         self.assertEqual(_find(result, MetricKind.READINESS).value.value, 70.0)
 
-    def test_legacy_readiness_reads_the_morning_reading(self) -> None:
-        self.assertEqual(readiness_score_value([_MORNING, _AFTERNOON]), 78)
+    def test_current_readiness_reads_the_morning_reading(self) -> None:
+        metrics = current_garmin_metrics(
+            {"readiness": [_MORNING, _AFTERNOON]}, date(2026, 10, 11)
+        )
+        self.assertEqual(metrics["readiness"]["value"], 78)
 
     def test_legacy_readiness_history_keeps_the_morning_reading(self) -> None:
         projected = projected_metric(

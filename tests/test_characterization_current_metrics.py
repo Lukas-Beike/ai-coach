@@ -22,7 +22,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
 )
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 TODAY = date(2026, 5, 4)
 GARMIN = "Garmin Connect"
@@ -47,7 +47,7 @@ INTERVALS_ONLY_KEYS = (
 
 
 def _garmin(raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    return garmin_payload_performance_metrics(raw or {}, TODAY)
+    return current_garmin_metrics(raw or {}, TODAY)
 
 
 def _snapshot(
@@ -409,7 +409,9 @@ class CurrentThresholdTests(unittest.TestCase):
                     _pair(result["run_threshold_pace_seconds_per_km"]), (None, None)
                 )
 
-        garmin = _garmin({"running_threshold": {"speedInMetersPerSecond": 4.0}})
+        garmin = _garmin(
+            {"running_threshold": {"speed_and_heart_rate": {"speed": 4.0}}}
+        )
         result = _current(
             _snapshot(
                 athlete={"sport_settings": [_setting("Run", threshold_pace=3.5)]}
@@ -580,7 +582,13 @@ class CurrentEftpTests(unittest.TestCase):
 
 class CurrentVo2AndRacePredictionTests(unittest.TestCase):
     def test_vo2max_cycling_is_garmins_only(self) -> None:
-        garmin = _garmin({"max_metrics": [{"cycling": {"vo2MaxValue": 61.0}}]})
+        garmin = _garmin(
+            {
+                "max_metrics": [
+                    {"cycling": {"calendarDate": "2026-05-04", "vo2MaxValue": 61.0}}
+                ]
+            }
+        )
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", vo2max=52)]}),
             garmin=garmin,
@@ -603,7 +611,13 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
 
     def test_vo2max_running_uses_garmin_generic_only(self) -> None:
         # Quirk: a Garmin "generic" VO2max is reported as the running value.
-        garmin = _garmin({"max_metrics": {"generic": {"vo2MaxValue": 51.0}}})
+        garmin = _garmin(
+            {
+                "max_metrics": {
+                    "generic": {"calendarDate": "2026-05-04", "vo2MaxValue": 51.0}
+                }
+            }
+        )
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", vo2max=52)]}),
             garmin=garmin,

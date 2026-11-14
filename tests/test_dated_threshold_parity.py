@@ -55,7 +55,7 @@ from backend.performance.source_policy import NO_PREFERENCES
 from backend.performance.threshold_staleness import ThresholdStalenessService
 from backend.planning.load_checks import load_thresholds
 from backend.planning.planned_unit_load import resolve_thresholds
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 from backend.sync.wahoo_workout_export import plan_references
 
 GARMIN = ProviderId.GARMIN
@@ -135,7 +135,7 @@ class WatchLthrParityTests(unittest.TestCase):
 
     def _metrics(self):
         inputs = read_current_inputs(self.reader, None, as_of=DAY)
-        garmin = garmin_payload_performance_metrics(
+        garmin = current_garmin_metrics(
             {"running_threshold": {"speed_and_heart_rate": {"heartRate": 168}}}, DAY
         )
         metrics = current_performance_metrics(

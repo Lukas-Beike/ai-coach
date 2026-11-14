@@ -37,7 +37,7 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 DAY = date(2026, 9, 20)
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
@@ -226,7 +226,7 @@ class EftpTests(unittest.TestCase):
         metrics = snapshot_metrics(
             snapshot,
             {},
-            garmin_payload_performance_metrics({}, DAY),
+            current_garmin_metrics({}, DAY),
             canonical=inputs.current,
         )
         self.assertNotIn("cycling_eftp_watts", metrics)

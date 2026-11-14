@@ -543,7 +543,6 @@
  "test_performance_garmin_metrics.GarminMetricHelperTests": 0.0,
  "test_performance_garmin_metrics.GarminPerformanceMetricTests": 0.008,
  "test_performance_garmin_projection.GarminProjectionTests": 0.016,
- "test_performance_garmin_weight.GarminWeightTests": 0.016,
  "test_performance_history.PerformanceHistoryTests": 0.005,
  "test_performance_intervals_hrv_path.IntervalsHrvPathTests": 0.02,
  "test_performance_load.PerformanceLoadTests": 0.002,

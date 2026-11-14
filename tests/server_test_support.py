@@ -21,7 +21,7 @@ from support import (
 
 from backend.performance import context as performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.sync import garmin_payload_metrics
+from backend.sync import garmin_performance_history
 
 # Give the application deterministic, fake configuration before importing it.
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
@@ -94,7 +94,7 @@ def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str
 
 
 def _garmin_metrics(snapshot):
-    return garmin_payload_metrics.garmin_payload_performance_metrics(
+    return garmin_performance_history.current_garmin_metrics(
         snapshot, server.ATHLETE_CLOCK.now().date()
     )
 

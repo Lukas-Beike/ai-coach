@@ -78,8 +78,7 @@ athlete-zone date of ``retrieved_at``. Undated ``heart_rate_zones`` and
 value also uses the sync day when it has no date; dated FTP history still
 requires a provider date and is never backdated from an undated current value.
 
-Weight and body fat follow the legacy reader, now the ingest weight parser
-``backend/sync/garmin_weight``, for record shapes. A record's day is the first present of calendarDate,
+Weight and body fat follow the retired legacy weight reader for record shapes. A record's day is the first present of calendarDate,
 summaryDate, date, timestampGMT or timestamp. Epoch milliseconds are read as a UTC
 date, as the legacy reader does. A record with no date of its own inherits its
 nearest dated ancestor's day. A present but unreadable ISO date is not inherited: a record under it with no
@@ -92,8 +91,8 @@ aware datetime (UTC when naive), so consumers can choose the latest value per da
 
 Alias precedence: the first present, non-empty name in each field's tuple wins.
 The tuples follow the readers they replaced (``recovery_context``, the deleted
-``planning_recovery`` snapshot reader, and the ingest parsers
-``backend/sync/garmin_weight`` and ``backend/sync/garmin_payload_metrics``).
+``planning_recovery`` snapshot reader, and the retired ingest parsers of the
+performance history, #2081).
 
 Weight units: ``gram``/``grams``/``g`` are divided by 1000, ``kilogram``/
 ``kilograms``/``kg`` are kept, and any unit containing ``lb`` or ``pound`` is
@@ -1075,7 +1074,7 @@ class _WeightWalk:
 
     Each record the shared walk yields is a candidate. Traversal order, the depth,
     visit and list limits, and the skipped min, max and delta keys come from
-    ``garmin_weight_walk``, the same walk the legacy reader uses. A weight record
+    ``garmin_weight_walk``, the walk of the retired legacy reader. A weight record
     takes the index of the list item it sits under, when there is one, which keeps
     the legacy reader's order for latest-per-day selection.
     """

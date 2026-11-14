@@ -1,7 +1,7 @@
 """Pure Garmin performance metric projection from canonical values.
 
-The ingest-time parser of a fetched payload lives in
-``backend.sync.garmin_payload_metrics``; both build the same metric shape here.
+The read paths and the sync's performance-history merge both build their metrics
+here.
 """
 
 from __future__ import annotations
