@@ -267,8 +267,8 @@ class ProdChecksTests(unittest.TestCase):
         }
         expected = {
             "garmin_past_workout_removal": [
-                "checked 4", 'last_outcome "ok"', "one_time_done true",
-                "past_links_pending 0", "removed 2",
+                "checked 4", 'last_outcome "ok"', "last_run_hours 2.0",
+                "one_time_done true", "past_links_pending 0", "removed 2",
             ],
             "stream_backfill": [
                 'garmin.cursor "finished"', "garmin.finished true",
@@ -279,12 +279,43 @@ class ProdChecksTests(unittest.TestCase):
                 "garmin.ride.unmapped_fields.20.134 4",
             ],
         }  # fmt: skip
+        now = datetime.fromisoformat(RECENT) + timedelta(hours=2)
         for name, fields in expected.items():
             with self.subTest(section=name):
                 self.assertEqual(
-                    prod_diagnostics.section_lines(report, name),
+                    prod_diagnostics.section_lines(report, name, now),
                     [("info", f"{name}.{field}") for field in fields],
                 )
+        # One login reads several sections; a missing one fails the run.
+        code, text = self.run_main(
+            prod_diagnostics, "--url", self.url, "--password-file", str(self.secret),
+            "--section", "decoupling_eligibility",
+            "--section", "garmin_past_workout_removal",
+        )  # fmt: skip
+        self.assertEqual(code, 1)
+        self.assertIn("info decoupling_eligibility.days 365", text)
+        self.assertIn("FAIL section garmin_past_workout_removal missing", text)
+        # A stopped or failed state is a FAIL line; an empty section is no failure.
+        stopped = {
+            "stream_backfill": {"garmin": {"cursor": "blocked"}},
+            "garmin_past_workout_removal": {"last_outcome": "failed"},
+            "fit_inventory": {},
+        }
+        self.assertEqual(
+            [
+                line
+                for name in ("stream_backfill", "garmin_past_workout_removal")
+                for line in prod_diagnostics.section_lines(stopped, name)
+            ],
+            [
+                ("FAIL", 'stream_backfill.garmin.cursor "blocked"'),
+                ("FAIL", 'garmin_past_workout_removal.last_outcome "failed"'),
+            ],
+        )
+        self.assertEqual(
+            prod_diagnostics.section_lines(stopped, "fit_inventory"),
+            [("info", "section fit_inventory empty")],
+        )
         # The FIT allow-list names every origin and sport of the vocabulary.
         fit = prod_diagnostics.SECTION_FIELDS["fit_inventory"]
         for origin in RecordingOrigin:

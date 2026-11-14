@@ -28,20 +28,22 @@ the calendar sync refills it from today on every refresh.
 Exit 0 all ok, 1 a check failed, 2 unreachable or login refused. The script
 prints no response body, cookie, or password; do not add a mode that does.
 
-## One section
+## Sections
 
 ```powershell
-python scripts/prod_diagnostics.py --url <app address> --password-file <secret file> --section <name>
+python scripts/prod_diagnostics.py --url <app address> --password-file <secret file> --section <name> [--section <name> ...]
 ```
 
-Prints, instead of the checks, only the fields of that section that
-`SECTION_FIELDS` in the script allows: numbers and flags by dotted path, and
-state words from `STATES` (such as `ready`, `pending`, `finished`), sorted by
-path; `failed` and `unavailable` print as `FAIL`. Free text, ids and any field not on the allow-list are never printed.
-Sections with an allow-list: `decoupling_eligibility` (temporary, #2779),
-`garmin_past_workout_removal`, `stream_backfill` and `fit_inventory`.
-A section without an allow-list entry is refused; add the entry and its test
-in `tests/test_prod_checks.py` together with the section.
+Prints, instead of the checks, only the fields of those sections that
+`SECTION_FIELDS` in the script allows: numbers and flags by dotted path, state
+words from `STATES`, and a `*_at` time as its age `*_hours`, sorted by path. A
+state word in `FAIL_STATES` (`failed`, `unavailable`, `blocked`) and a missing
+section print as `FAIL`; an empty section is `info`. Free text, ids and any
+field not on the allow-list are never printed. Sections with an allow-list:
+`decoupling_eligibility` (temporary, #2779), `garmin_past_workout_removal`,
+`stream_backfill` and `fit_inventory`. A section without an allow-list entry is
+refused; add the entry and its test in `tests/test_prod_checks.py` together
+with the section.
 
 ## Temporary production probe
 
