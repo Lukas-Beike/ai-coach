@@ -43,6 +43,15 @@ write the fixture password from the script header to a scratchpad file, walk
 uses only synthetic data, never the real data directory, `.env` or the token
 store.
 
+For a start-up or curve performance measurement (#2801), add
+`-HeavyHistory 900` (900 synthetic 1.5 h rides and runs with full streams and
+analyses over several years; the first start seeds for about 5 minutes).
+Measure "right after a restart" with `docker restart fixture-walk`, then the
+walk with `--compare` against the previous walk; note other running containers,
+they share the CPU. To see which thread holds the interpreter once the app is
+ready, run `docker kill -s USR1 fixture-walk` and read the stacks with
+`docker logs`; before readiness the signal stops the container.
+
 It presses no control that saves, synchronizes, deletes or sends. Exit 0 no
 error, 1 a view logged errors or logout failed, 2 bad input or the walk
 stopped.

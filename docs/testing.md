@@ -399,7 +399,9 @@ add their synthetic activities to the existing snapshot instead of replacing
 it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume, `-Port`/`-Name` to adjust the
-container, and `-Stop` to remove it again (never its volume). `-Name` must start with `demo` or `fixture` (optionally after an
+container, `-HeavyHistory <n>` (1 to 1000) for a large synthetic history with
+full streams for performance checks (seeded once, about 5 minutes for 900), and
+`-Stop` to remove it again (never its volume). `-Name` must start with `demo` or `fixture` (optionally after an
 `pacecraft-` or `ai-coach-` prefix); the production container `pacecraft` (formerly `ai-coach`) and every other name are
 refused before anything is built, stopped or removed. The fixture refuses to
 start unless `AI_COACH_DISPOSABLE_FIXTURE=1` is set; only the demo script and the
