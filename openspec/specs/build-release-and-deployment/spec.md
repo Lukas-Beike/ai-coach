@@ -218,12 +218,16 @@ The daily-release workflow SHALL prepare version changes through release-version
 - **WHEN** the relevant source has an existing release-test run
 - **THEN** the workflow does not dispatch a duplicate test solely because a check context is absent
 
+#### Scenario: Release PR's own test run
+- **WHEN** a release PR was just created, or an open release PR already has its own `pull_request` test run of the head
+- **THEN** that run is the PR's test and no explicit test run is dispatched; a later pass dispatches one only for an open PR with neither a test check nor its own run, and the workflow never sleeps to wait for it
+
 #### Scenario: Version choice
 - **WHEN** the process computes the next version
 - **THEN** it increments the patch of APP_VERSION unless a manual dispatch names a MAJOR.MINOR.PATCH version, which must be greater than the latest release and cannot be chosen while a different APP_VERSION still awaits promotion
 - **AND** a merged version branch must match the merged APP_VERSION, and commits that only set the application version do not count as releasable changes
 
-Evidence: `.github/workflows/daily-release.yml` (`prepare-version`: `version_is_greater`, `count_releaseable_commits`). Tests: `tests/test_release_events.py::test_open_pr_dispatches_release_test`; `tests/test_release_events.py::test_existing_tests_do_not_dispatch_again`; `tests/test_release_events.py::test_unmerged_version_test_defers_without_waiting_or_mutating`; `tests/test_release_events.py::test_pending_promotion_has_a_same_tree_duplicate_guard`.
+Evidence: `.github/workflows/daily-release.yml` (`prepare-version`: `version_is_greater`, `count_releaseable_commits`). Tests: `tests/test_release_events.py::test_open_pr_dispatches_release_test`; `tests/test_release_events.py::test_existing_tests_do_not_dispatch_again`; `tests/test_release_events.py::test_own_pull_request_run_replaces_the_dispatch`; `tests/test_release_events.py::test_unmerged_version_test_defers_without_waiting_or_mutating`; `tests/test_release_events.py::test_pending_promotion_has_a_same_tree_duplicate_guard`.
 
 ### Requirement: Scheduled release start and release blockers
 

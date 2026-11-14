@@ -179,6 +179,7 @@ class ReleaseShellGuardTests(unittest.TestCase):
             "MERGE_DURING_DISPATCH": "false",
             "TEST_CHECK_COUNT": "0",
             "TEST_RUN_COUNT": "0",
+            "PR_RUN_COUNT": "0",
         }
         environment.update(overrides)
         mocks = r"""
@@ -210,6 +211,7 @@ class ReleaseShellGuardTests(unittest.TestCase):
                   printf '%s' "$TEST_CHECK_COUNT" ;;
                 'pr view 123 --repo example/release-test --json headRefOid '* )
                   printf '%s' "$TESTED_SHA" ;;
+                'run list '*'--event pull_request '* ) printf '%s' "$PR_RUN_COUNT" ;;
                 'run list '* ) printf '%s' "$TEST_RUN_COUNT" ;;
                 'workflow run '* )
                   if [[ "$MERGE_DURING_DISPATCH" == "true" ]]; then PR_STATE=MERGED; fi
@@ -234,14 +236,14 @@ class ReleaseShellGuardTests(unittest.TestCase):
         operations = (self.root / "operations").read_text(encoding="utf-8")
         return result, operations
 
-    def release_test_script(self):
+    def release_test_script(self, just_created=""):
         functions = WORKFLOW.split("          enable_auto_merge() {", 1)[1].split(
             "          version_merge=false", 1
         )[0]
         return (
             "set -euo pipefail\nenable_auto_merge() {"
             + textwrap.dedent(functions)
-            + "\nensure_release_test 123 chore/release-version-1.7.3 1.7.3\n"
+            + f"\nensure_release_test 123 chore/release-version-1.7.3 1.7.3 {just_created}\n"
             + "enable_auto_merge 123\n"
         )
 
@@ -252,6 +254,27 @@ class ReleaseShellGuardTests(unittest.TestCase):
         self.assertGreater(
             operations.index("gh pr merge"), operations.index("gh workflow run")
         )
+        # #2814: an open PR without its own pull_request run gets the fallback.
+        own_run = "--event pull_request --commit " + "a" * 40
+        self.assertLess(operations.index(own_run), operations.index("gh workflow run"))
+        self.assertNotIn("sleep", operations)
+
+    def test_own_pull_request_run_replaces_the_dispatch(self):
+        # #2814: the release PR's own pull_request run is its test run; a PR
+        # just created relies on that run, which registers seconds later.
+        for overrides, created, message in (
+            ({"PR_RUN_COUNT": "1"}, "", "has its own test run; no explicit dispatch"),
+            ({}, "true", "was just created; its own pull_request run is its test"),
+        ):
+            with self.subTest(created=created):
+                result, operations = self.run_script(
+                    self.release_test_script(created), **overrides
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(message, result.stdout)
+                self.assertNotIn("gh workflow run", operations)
+                self.assertNotIn("sleep", operations)
+                self.assertIn("gh pr merge 123", operations)
 
     def test_merged_pr_does_not_dispatch_on_deleted_branch(self):
         result, operations = self.run_script(
