@@ -44,6 +44,12 @@ class SyncQueueFixtureMixin:
                 CREATE TABLE kv (
                     key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE provider_refresh_history (
+                    id TEXT PRIMARY KEY, provider TEXT NOT NULL, area TEXT NOT NULL,
+                    operation_id TEXT NOT NULL, trigger TEXT NOT NULL,
+                    started_at TEXT NOT NULL, finished_at TEXT, phase TEXT NOT NULL,
+                    status TEXT NOT NULL, error_code TEXT, next_retry_at TEXT
+                );
                 """
             )
         self.identifiers = iter(f"job-{index}" for index in range(1, 100))

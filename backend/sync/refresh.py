@@ -46,6 +46,19 @@ def cleanup_refresh_history(db: Any, *, cutoff: str, max_rows: int) -> None:
     )
 
 
+def settle_interrupted_refreshes(db: Any, *, now: str) -> None:
+    """Close the refresh rows a stopped process left ``running`` (#2707).
+
+    Such a run has no outcome: ``skipped`` keeps it out of freshness and the
+    retry hold, so the last real outcome shows instead of "syncing".
+    """
+    db.execute(
+        "UPDATE provider_refresh_history SET status='skipped', phase='interrupted', "
+        "error_code='process_interrupted', finished_at=? WHERE status='running'",
+        (now,),
+    )
+
+
 def retry_at(
     rows: list[Any],
     *,

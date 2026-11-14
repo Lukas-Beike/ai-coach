@@ -655,6 +655,12 @@ class SyncJobStoreTests(unittest.TestCase):
                 CREATE TABLE kv (
                     key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE provider_refresh_history (
+                    id TEXT PRIMARY KEY, provider TEXT NOT NULL, area TEXT NOT NULL,
+                    operation_id TEXT NOT NULL, trigger TEXT NOT NULL,
+                    started_at TEXT NOT NULL, finished_at TEXT, phase TEXT NOT NULL,
+                    status TEXT NOT NULL, error_code TEXT, next_retry_at TEXT
+                );
                 """
             )
         self.current_now = self.now
@@ -996,6 +1002,37 @@ class SyncJobStoreTests(unittest.TestCase):
         listed = self.store.list(10)
         self.assertEqual([job["id"] for job in listed], ["old-4", "old-3"])
         self.assertEqual(len(listed[0]["items"]), 1)
+
+    def test_a_restart_closes_the_refreshes_left_running(self):
+        # A crash left refresh rows running, and freshness showed "syncing"
+        # until the next attempt (#2707); a live refresh between claims stays.
+        with self.manager.unit_of_work() as db:
+            for row_id, status in (("r-1", "running"), ("r-2", "success")):
+                db.execute(
+                    "INSERT INTO provider_refresh_history(id, provider, area, "
+                    "operation_id, trigger, started_at, finished_at, phase, status) "
+                    "VALUES (?, 'garmin', 'data', 'op', 'scheduler', ?, NULL, "
+                    "'fetching', ?)",
+                    (row_id, self.now, status),
+                )
+
+        def rows():
+            with self.manager.reader() as db:
+                return {
+                    row["id"]: (row["status"], row["error_code"], row["finished_at"])
+                    for row in db.execute("SELECT * FROM provider_refresh_history")
+                }
+
+        self.store.requeue_unowned_running()
+        self.assertEqual(("running", None, None), rows()["r-1"])
+        self.store.resume_interrupted()
+        self.assertEqual(
+            {
+                "r-1": ("skipped", "process_interrupted", self.now),
+                "r-2": ("success", None, None),
+            },
+            rows(),
+        )
 
     def test_resume_interrupted_resets_running_records_and_claims_again(self):
         job, _ = self.enqueue(

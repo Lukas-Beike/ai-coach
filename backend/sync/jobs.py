@@ -23,6 +23,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
 from backend.runtime.clock import utc_now as system_utc_now
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.refresh import settle_interrupted_refreshes
 
 PROVIDERS = frozenset(DEFAULT_PROVIDER_REGISTRY.ids())
 JOB_TYPES = frozenset(
@@ -834,11 +835,13 @@ class SyncJobStore:
 
         A restart is a lost outcome like any other (#2137, A-501): a job that may
         have written to a remote service, or that used up its attempts, fails
-        with ``outcome_not_persisted`` instead of running again.
+        with ``outcome_not_persisted`` instead of running again. Provider
+        refreshes the stopped process left running are closed as well (#2707).
         """
         self._fail_unreplayable_running()
         now = self._now()
         with self._database_manager.unit_of_work() as db:
+            settle_interrupted_refreshes(db, now=now)
             return self._requeue_running(db, now)
 
     def requeue_unowned_running(self) -> int:
