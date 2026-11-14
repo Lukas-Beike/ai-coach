@@ -21,6 +21,10 @@ as a commit message; pass that text through a file. Beside it,
 `scripts/hooks/guard_destructive_git.py` blocks git commands that discard work
 (`reset --hard`, `clean -f`, `branch -D`, `checkout .`, `restore .` and a force
 push without `--force-with-lease`); normal and lease pushes stay allowed.
+`scripts/hooks/guard_shell_backslashes.py` blocks Bash edits whose backslashes
+the Windows shell tool collapses: a heredoc with a backslash fed to an
+interpreter or a file, and `python -c`, `sed -i` and similar edits with `\\`;
+write such files and scripts with the Write or Edit tool.
 `.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
 subagents. `scripts/hooks/thread_model_rule.py` blocks a T3 thread launch whose
