@@ -48,6 +48,7 @@ REPLACE_SECTIONS: Final = (
     "gear",
     "readiness",
     "race_predictions",
+    "personal_records",
     "max_metrics",
     "cycling_ftp",
     "running_threshold",

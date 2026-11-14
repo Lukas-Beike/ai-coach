@@ -95,6 +95,15 @@ class ServerPerformanceTests(ServerTestCase):
         save_garmin(
             {
                 "race_predictions": {"5k": 1500},
+                # Garmin's running records reach the context with their own day (#2806).
+                "personal_records": [
+                    {
+                        "typeId": 5,
+                        "activityType": "running",
+                        "value": 5772.0,
+                        "prStartTimeLocalFormatted": "2025-04-12T09:01:22.0",
+                    }
+                ],
                 "performance_history": [
                     {
                         "date": (today - timedelta(days=29)).isoformat(),
@@ -104,6 +113,17 @@ class ServerPerformanceTests(ServerTestCase):
             }
         )
         performance = _mapped_performance_context(snapshot, today)
+        self.assertEqual(
+            performance["personal_records"],
+            [
+                {
+                    "distance_meters": 21097.5,
+                    "seconds": 5772.0,
+                    "date": "2025-04-12",
+                    "source": "Garmin Connect",
+                }
+            ],
+        )
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])

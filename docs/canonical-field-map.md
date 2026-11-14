@@ -184,6 +184,11 @@ Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility 
 | `race_prediction_10k` | `s` | 60 to 100,000 | Garmin predicted 10 km time. | `garmin_health_mapping.py` | read |
 | `race_prediction_half` | `s` | 60 to 100,000 | Garmin predicted half-marathon time. | `garmin_health_mapping.py` | read |
 | `race_prediction_full` | `s` | 60 to 100,000 | Garmin predicted marathon time. | `garmin_health_mapping.py` | read |
+| `personal_record_1k` | `s` | 60 to 100,000 | Garmin personal record over 1 km, dated by the record's own day. | `garmin_health_mapping.py` | read |
+| `personal_record_5k` | `s` | 60 to 100,000 | Garmin personal record over 5 km. | `garmin_health_mapping.py` | read |
+| `personal_record_10k` | `s` | 60 to 100,000 | Garmin personal record over 10 km. | `garmin_health_mapping.py` | read |
+| `personal_record_half` | `s` | 60 to 100,000 | Garmin personal record over the half marathon. | `garmin_health_mapping.py` | read |
+| `personal_record_full` | `s` | 60 to 100,000 | Garmin personal record over the marathon. | `garmin_health_mapping.py` | read |
 | `endurance_score` | `score` | 0 to 20,000 | Garmin endurance score. | `garmin_health_mapping.py` | read |
 | `daily_energy_resting` | `kcal` | 0 to 20,000 | Resting energy expenditure of the day. | `garmin_health_mapping.py` | read |
 | `body_battery_charged` | `score` | 0 to 500 | Body Battery charged over the day (total). | `garmin_health_mapping.py` | export only: no reader |
@@ -1629,7 +1634,7 @@ Garmin's own calendar day, never converted by the athlete zone. Undated records 
 Exceptions: Body Battery samples are dated by their own instant in the athlete zone (`local_date(observed_at, zone)`);
 weight epoch milliseconds are read as a UTC date (`_epoch_day`).
 
-Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAMES`; `map_sections` and the canonical plan visit sections in it): `sleep`, `hrv`, `resting_hr`, `readiness`, `max_metrics`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `heart_rate_zones`, `weight` (weight and body fat), `daily_stats`, `race_predictions`, `endurance_score`, `body_battery`, the `TRAINING_SECTIONS` (`daily_training_status`, `training_load_balance`, `training_status`, `weekly_training_status`, `running_tolerance`, `training_readiness_history`), and last `performance_history`. Ingest keeps the first value of a natural key, so when two sections emit the same key (for example `readiness` and `training_readiness_history` on one day) the earlier section wins; the order is part of the mapping.
+Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAMES`; `map_sections` and the canonical plan visit sections in it): `sleep`, `hrv`, `resting_hr`, `readiness`, `max_metrics`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `heart_rate_zones`, `weight` (weight and body fat), `daily_stats`, `race_predictions`, `personal_records`, `endurance_score`, `body_battery`, the `TRAINING_SECTIONS` (`daily_training_status`, `training_load_balance`, `training_status`, `weekly_training_status`, `running_tolerance`, `training_readiness_history`), and last `performance_history`. Ingest keeps the first value of a natural key, so when two sections emit the same key (for example `readiness` and `training_readiness_history` on one day) the earlier section wins; the order is part of the mapping.
 
 #### Section index (collector call → section → mapper entry)
 
@@ -1648,6 +1653,7 @@ Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAM
 | `daily_stats` | `get_daily_summaries(start, end)` (Personal `/usersummary-service/v2/dailysummaries`), per-day `get_user_summary(day)` fallback and `_with_resting_energy` | `_GROUPED_SECTIONS["daily_stats"]` after `flatten_daily_summary` | observed `garmin_personal_dailysummaries` |
 | `body_battery` | `get_body_battery(start, end)` (Personal `/wellness-service/wellness/bodyBattery/reports/daily`), read by the morning flow (`garmin_morning.py`), by the first refresh of each local day over the last 7 days (`_collect_body_battery`) and by the wellness history backfill in ranges of at most 31 days | `_GROUPED_SECTIONS["body_battery"]` + `_map_body_battery_levels` | documented, fixture `body_battery` |
 | `race_predictions` | SDK `get_race_predictions()` | `_map_race_predictions` | documented, fixture `race_predictions` |
+| `personal_records` | SDK `get_personal_record()` | `_map_personal_records` | documented (garminconnect 0.3.20 `get_personal_record` type ids) |
 | `endurance_score` | SDK `get_endurance_score(start, end, aggregation="daily")` | `_GROUPED_SECTIONS["endurance_score"]` | documented, fixture `endurance_score` |
 | `performance_history` | none: written by `append_garmin_performance_history` (90 days of `{date, metrics}`) | `_map_performance_history` | documented |
 | training sections | SDK calls named in "Training sections" | `training_values`, `endurance_group_values` | documented |
@@ -1823,6 +1829,21 @@ digits only, order matters): contains `halfmarathon` or `half` → half; `marath
 | `race_prediction_full` | key named for marathon, e.g. fixture `marathon` | same | |
 
 The module docstring says deeper nesting is not searched; the code searches nested containers to depth 8.
+
+#### Personal records (`personal_records`)
+
+One record per running type, read by the `typeId` that garminconnect 0.3.20 documents in `get_personal_record`. Day =
+`prStartTimeLocalFormatted`, else the `prStartTimeLocal` epoch milliseconds; a record without either is MISSING. A record
+whose `activityType` is not running is skipped; running type 2 (mile) and 7 (longest run) are skipped; another running
+type is UNKNOWN_VALUE. Source record id `personal_records:<day>:<kind>`.
+
+| Canonical field | Provider key(s) | Unit / conversion | Notes |
+|---|---|---|---|
+| `personal_record_1k` | `typeId` 1, `value` | seconds, rounded to 2 decimals; bounds 60 to 100000 | Src `provider_reported`; sport `run`. Documented. |
+| `personal_record_5k` | `typeId` 3, `value` | same | |
+| `personal_record_10k` | `typeId` 4, `value` | same | |
+| `personal_record_half` | `typeId` 5, `value` | same | |
+| `personal_record_full` | `typeId` 6, `value` | same | |
 
 #### Endurance score (`endurance_score`)
 

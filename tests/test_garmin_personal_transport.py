@@ -223,6 +223,7 @@ SDK_ONLY_METHODS = frozenset(
         "get_training_load_activities",
         "get_endurance_score",
         "get_race_predictions",
+        "get_personal_record",
         "get_running_tolerance",
         "get_training_four_week_load_balance",
         "get_weekly_training_status",

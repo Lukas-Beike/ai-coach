@@ -71,6 +71,7 @@ GARMIN_DAILY_METRIC_SOURCES = (
     "heart_rate_zones",
     "gear",
     "race_predictions",
+    "personal_records",
     "max_metrics",
     "cycling_ftp",
     "running_threshold",
@@ -1157,6 +1158,8 @@ def _collect_current_metrics(
             {"date": today.isoformat()},
         ),
         ("race_predictions", "get_race_predictions", lambda fetch: fetch(), None),
+        # Read-only; the running records fill missing own distance bests (#2806).
+        ("personal_records", "get_personal_record", lambda fetch: fetch(), None),
         (
             "max_metrics",
             "get_max_metrics_range",
@@ -1607,6 +1610,7 @@ def _validate_current_metrics(
         "heart_rate_zones",
         "readiness",
         "race_predictions",
+        "personal_records",
         "max_metrics",
         "cycling_ftp",
         "running_threshold",

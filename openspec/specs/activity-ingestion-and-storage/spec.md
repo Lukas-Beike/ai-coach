@@ -28,7 +28,7 @@ The system SHALL read Garmin through the official read-only Personal API when it
 
 #### Scenario: SDK-only families
 - **WHEN** a Personal API key is configured
-- **THEN** readiness, training status, training load, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, running tolerance, gear, activity splits and per-activity zone times stay on the SDK.
+- **THEN** readiness, training status, training load, load balance, VO2 max, FTP, lactate threshold, race predictions, personal records, endurance score, running tolerance, gear, activity splits and per-activity zone times stay on the SDK.
 
 #### Scenario: Both transports
 - **WHEN** the same Garmin activity or night was stored through one transport and is read through the other

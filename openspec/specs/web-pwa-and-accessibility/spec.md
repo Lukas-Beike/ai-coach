@@ -527,7 +527,7 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 
 #### Scenario: Laufen
 - **WHEN** the athlete opens Analyse › Laufen
-- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace with the LT1 pace line, VO2max, running tolerance), the race predictions, directly below them the all-time best efforts under the title "Bestwerte" (only the best time over 1 km, 5 km, 10 km, half marathon and marathon, always these five rows, each with its date in its own column and its source, "–" where no best exists; no per-minute rows) with the experimental critical-speed line; no cycling value appears.
+- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace with the LT1 pace line, VO2max, running tolerance), the race predictions, directly below them the all-time best efforts under the title "Bestwerte" (only the best time over 1 km, 5 km, 10 km, half marathon and marathon, always these five rows, each with its date in its own column and its source; a distance without an own best shows Garmin's personal record with its record date and a dashed "Garmin" chip, and "–" where neither exists; no per-minute rows) with the experimental critical-speed line; no cycling value appears.
 
 #### Scenario: Radfahren
 - **WHEN** the athlete opens Analyse › Radfahren

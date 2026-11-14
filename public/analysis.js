@@ -765,8 +765,15 @@ function renderPowerProfile(result) {
 }
 
 // The fastest observed time per race distance of all stored sessions (#2694); running bests
-// are distances only, every row stays with a dash where no best exists (#2786).
+// are distances only, every row stays with a dash where no best exists (#2786). A missing own
+// best takes Garmin's personal record, marked with a "Garmin" chip (#2806).
 const RUNNING_BEST_DISTANCES = [[1000, "1 km"], [5000, "5 km"], [10000, "10 km"], [21097.5, "Halbmarathon"], [42195, "Marathon"]];
+
+function garminRecordChip() {
+  const chip = createStatusChip("Garmin");
+  chip.classList.add("source-chip");
+  return chip;
+}
 
 function renderRunningBestEfforts(result) {
   const root = document.getElementById("runningBestEfforts");
@@ -774,9 +781,12 @@ function renderRunningBestEfforts(result) {
   root.replaceChildren(h("h4", null, "Bestwerte"));
   const body = h("tbody");
   let values = 0;
+  const records = state.data?.performance?.personal_records || [];
   for (const [meters, label] of RUNNING_BEST_DISTANCES) {
-    const point = points.find((item) => item.distance_meters === meters && item.seconds > 0);
+    const own = points.find((item) => item.distance_meters === meters && item.seconds > 0);
+    const point = own || records.find((item) => item.distance_meters === meters && item.seconds > 0);
     const cell = h("td", { title: point?.source }, point && AppFormat.clock(point.seconds));
+    if (point && !own) cell.append(garminRecordChip());
     if (point) values += 1; else markValueMissing(cell, "–");
     body.append(h("tr", { dataset: { runningBest: `distance:${meters}` } }, h("th", { scope: "row" }, label), cell, h("td", null, point ? dateLabel(point.date) : null)));
   }

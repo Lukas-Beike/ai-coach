@@ -562,7 +562,7 @@ Affected history, recovery, nutrition and Coach reads SHALL obtain retained prov
 Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence. Added evidence: `tests/test_garmin_training_load_canonical_parity.py:test_fresh_values_of_today`, `tests/test_garmin_training_load_canonical_parity.py:test_stale_or_older_values_are_dated_but_hidden`, `tests/test_garmin_training_load_canonical_parity.py:test_without_values_there_is_no_section`.
 
 ### Requirement: Garmin current performance metrics are read from canonical data only
-The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The Garmin sync status SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
+The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) and the performance context's `personal_records` (Garmin's latest running record per race distance: `distance_meters`, `seconds`, `date`, `source`) SHALL be read from canonical Garmin data only. The Garmin sync status SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
 
 #### Scenario: Activity maximum heart rate
 - **WHEN** a sport has neither its own nor a generic canonical Garmin profile maximum heart rate

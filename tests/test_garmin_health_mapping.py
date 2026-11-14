@@ -1750,6 +1750,76 @@ class RacePredictionTests(unittest.TestCase):
                 )
         self.assertEqual(self._seconds({"5k": "25:30"}), {"race_prediction_5k": 1530.0})
 
+    def test_personal_records_follow_the_sdk_documented_running_types(self) -> None:
+        # garminconnect 0.3.20 ``get_personal_record``: running typeId 1 = 1 km,
+        # 2 = 1 mile, 3 = 5 km, 4 = 10 km, 5 = half marathon, 6 = marathon,
+        # 7 = longest run (#2806).
+        def record(type_id: int, value: float, sport: str = "running") -> dict:
+            return {
+                "typeId": type_id,
+                "activityType": sport,
+                "value": value,
+                "prStartTimeLocalFormatted": "2025-04-12T09:01:22.0",
+            }
+
+        result = _map(
+            {
+                "personal_records": [
+                    record(1, 228.0),
+                    record(2, 380.0),
+                    record(3, 1236.4),
+                    record(4, 2581.0),
+                    {**record(5, 5772.0), "prStartTimeLocalFormatted": None,
+                     "prStartTimeLocal": 1_744_448_482_000},
+                    record(6, 12_400.0),
+                    record(7, 42_500.0),
+                    record(8, 1_000.0, "cycling"),
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("personal_record_10k", 2581.0, "2025-04-12", "run"),
+                ("personal_record_1k", 228.0, "2025-04-12", "run"),
+                ("personal_record_5k", 1236.4, "2025-04-12", "run"),
+                ("personal_record_full", 12400.0, "2025-04-12", "run"),
+                ("personal_record_half", 5772.0, "2025-04-12", "run"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+        observation = _find(result, MetricKind.PERSONAL_RECORD_5K, Sport.RUN)
+        self.assertEqual(
+            observation.provenance.source_record_id,
+            "personal_records:2025-04-12:personal_record_5k",
+        )
+
+    def test_unknown_record_types_and_undated_records_are_reported(self) -> None:
+        result = _map(
+            {
+                "personal_records": [
+                    {"typeId": 99, "activityType": "running", "value": 300},
+                    {"activityType": "running", "value": 300},
+                    {"typeId": 3, "activityType": "running", "value": 1236},
+                ]
+            }
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [
+                ("personal_records[0]", "typeId", IssueReason.UNKNOWN_VALUE),
+                ("personal_records[1]", "typeId", IssueReason.UNKNOWN_VALUE),
+                (
+                    "personal_records[2]",
+                    "prStartTimeLocalFormatted",
+                    IssueReason.MISSING,
+                ),
+            ],
+        )
+
 
 class EnduranceScoreTests(unittest.TestCase):
     def test_wrapped_endurance_score_is_mapped(self) -> None:

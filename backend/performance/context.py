@@ -38,6 +38,7 @@ from backend.performance.pace_at_hr import LT1_DAYS, output_at_heart_rate
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.training_focus import training_focus
+from backend.providers.garmin_health_mapping import GARMIN_LABEL
 
 # The reason an unavailable context gives while the canonical source serves nothing yet.
 REASON_CANONICAL_PENDING: Final = "canonical_pending"
@@ -399,6 +400,18 @@ def current_performance_context(
         ),
         **_sync_status(canonical),
         "metrics": metrics,
+        # Garmin's running records; the Bestwerte card fills missing own bests (#2806).
+        "personal_records": [
+            {
+                "distance_meters": metres,
+                "seconds": seconds,
+                "date": day.isoformat(),
+                "source": GARMIN_LABEL,
+            }
+            for metres, (day, seconds) in sorted(
+                _garmin_canonical(canonical).personal_records.items()
+            )
+        ],
         "thresholds": {
             **performance_current_metrics.coach_thresholds(
                 metrics,

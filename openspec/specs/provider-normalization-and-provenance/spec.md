@@ -198,6 +198,10 @@ The system SHALL normalize Garmin health and body values to canonical units usin
 - **WHEN** Garmin supplies sleep duration and score, night SpO2, respiration and sleeping heart rate, last-night RMSSD, weekly HRV average, resting heart rate, readiness, body measurements, daily counts and energy, VO2max, thresholds, race predictions or endurance score
 - **THEN** each is mapped through its supported aliases and plausible bounds, and an invalid value is dropped with a content-free issue.
 
+#### Scenario: Garmin personal records
+- **WHEN** Garmin's personal records include running records
+- **THEN** the records of the types the pinned SDK documents as 1 km (1), 5 km (3), 10 km (4), half marathon (5) and marathon (6) become `personal_record_1k`, `_5k`, `_10k`, `_half` and `_full` in seconds, each dated by its own local start day; other sports, the mile and the longest run are skipped, and another running type or a record without a day is a content-free issue.
+
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
 - **THEN** canonical weight is converted once to kilograms and its dated provenance is retained.
