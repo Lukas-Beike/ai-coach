@@ -127,7 +127,11 @@ test("a meal shows its source only when it differs from the default @responsive"
   // #2709: the fixture seeds meals once per run, up to the day it ran; read after local midnight,
   // the server's today is empty. The day before today always holds seeded meals.
   await page.goto("/#nutrition/diary");
+  const date = page.locator("#nutritionDate");
+  await expect(date).not.toHaveValue("");
+  const today = await date.inputValue();
   await page.getByRole("button", { name: "Vorheriger Tag" }).click();
+  await expect(date).not.toHaveValue(today);
   await expect(page.locator("#nutritionEntries .nutrition-card").first()).toBeVisible();
   await expect(page.locator("#nutritionEntries")).not.toContainText("Manuelle Angabe");
 });
