@@ -457,6 +457,21 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("cosign attest --type spdxjson", publish)
         self.assertIn("org.opencontainers.image.source=", workflow)
 
+    def test_jobs_set_up_python_314_before_running_repository_python(self):
+        # #2796: ruff targets py314 syntax; the runner's system Python is older.
+        # Repository code in the CI image runs from /review or /app on 3.14.
+        root = Path(__file__).resolve().parents[1]
+        script = re.compile(r"\bpython3? (?:\.github/scripts|scripts|tools|tests)/")
+        setup = re.compile(r"\n +python-version: (['\"]?)3\.14\1\n")
+        for path in sorted((root / ".github/workflows").glob("*.yml")):
+            jobs = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[-1]
+            for job in re.split(r"\n(?=  [\w-]+:[ \t]*(?:#.*)?\n)", jobs):
+                if not (first := script.search(job)):
+                    continue
+                with self.subTest(workflow=path.name, job=job.split(":", 1)[0]):
+                    found = setup.search(job)
+                    self.assertTrue(found and found.start() < first.start(), first[0])
+
     def test_pull_request_runs_cancel_only_their_own_older_run(self):
         workflow = (
             Path(__file__).resolve().parents[1]
@@ -1233,11 +1248,6 @@ class ChangedFileClassifierTests(unittest.TestCase):
             ("docs", "node --test tests/*.cjs"),
         ):
             self.assertIn(f"if: env.MODE == '{mode}'\n        run: {command}", shards)
-        # The scripts may use Python 3.14 syntax; the runner's own Python is older.
-        self.assertLess(
-            source.index("python-version: '3.14'"),
-            source.index("run: python .github/scripts/release_source.py"),
-        )
         # Aggregators accept a skip only when the run is docs-only.
         test = _job(workflow, "test", "quality")
         self.assertIn(

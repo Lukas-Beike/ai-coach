@@ -525,6 +525,11 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
+      # release_source.py may use Python 3.14 syntax (#2796).
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
       - name: Verify build uses tested source and release version
         env:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
