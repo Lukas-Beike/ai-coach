@@ -131,6 +131,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         "--apply", action="store_true", help="remove (default: dry run)"
     )
     parser.add_argument("--idle-days", type=float, default=3.0)
+    # Warn while there is still room for another worktree and image build.
     parser.add_argument("--min-free-gb", type=float, default=10.0)
     parser.add_argument("--base", default="origin/develop")
     args = parser.parse_args(argv)

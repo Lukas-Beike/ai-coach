@@ -1,5 +1,11 @@
 # Coach-first and complete usage audit
 
+Contents: 1 required coverage artifacts; 2 Coach-first acceptance model;
+3 message lifecycle and disappearing messages; 4 race conditions and shared
+state; 5 400-class and API contracts; 6 Coach tools end to end; 7 integration
+and source-of-truth matrix; 8 complete UI/UX journeys; 9 runtime observation
+protocol; 10 usage-review completion gate.
+
 This is the mandatory runtime and white-box audit for the application's primary user experience. Execute it against the local test application where possible and trace every observed behavior back through source and tests. Do not reduce it to a visual smoke test.
 
 ## 1. Required coverage artifacts

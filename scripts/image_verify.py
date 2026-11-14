@@ -36,6 +36,7 @@ class RegistryError(RuntimeError):
 
 def fetch(request: urllib.request.Request) -> tuple[int, dict, bytes]:
     try:
+        # 30 s only bounds a hung registry request.
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as exc:

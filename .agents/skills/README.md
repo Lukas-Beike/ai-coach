@@ -1,5 +1,10 @@
 # Repository AI skills
 
+Contents: [Layers](#layers), [Routing](#routing) with [Base skills](#base-skills),
+[Selecting a workflow](#selecting-a-workflow),
+[OpenSpec integration](#openspec-integration),
+[Claude Code compatibility](#claude-code-compatibility).
+
 Project-specific skills live only in this repository. Never copy, synchronize,
 or install them into a user-global skill directory or an application cache.
 

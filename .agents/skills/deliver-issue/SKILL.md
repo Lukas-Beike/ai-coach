@@ -10,6 +10,16 @@ that queues issues, or "Deliver this inline issue brief through to a merged PR."
 Every issue handed over for delivery runs through this skill (athlete rule
 2026-11-11); a small fix keeps the light spec path of section 2.
 
+Copy this checklist into your response and tick it as you go:
+
+```text
+- [ ] 1 Brief: issue started, no blocking question left
+- [ ] 2 Spec: criteria in the PR body; main specs or OpenSpec change updated
+- [ ] 3 Implemented with tests; run-tests-changed and validation pass; evidence per criterion
+- [ ] 4 pr workflow to a verified merge; develop push runs green
+- [ ] 5 issue-status clean; issue closed or part ticked; ledger line; retro
+```
+
 ## Authorization
 
 An explicit delivery request, or an issue queued for you by the user or a

@@ -38,6 +38,8 @@ COUNTS = (
 MEMORY = ("rss_bytes", "peak_rss_bytes")
 # Storage and runtime health compared between releases (#2848).
 STORAGE = ("file_bytes", "wal_bytes", "data_dir_free_bytes")
+# Providers and calendars refresh daily: a last sync older than one day plus
+# half a day of slack is stale. A job still open after 2 h counts as stuck.
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}

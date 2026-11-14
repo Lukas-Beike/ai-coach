@@ -28,6 +28,7 @@ def tls_days(url: str, ca_file: str | None) -> float:
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     try:
         with (
+            # 15 s only bounds a hung handshake.
             socket.create_connection((host, port), timeout=15) as raw,
             context.wrap_socket(raw, server_hostname=host) as tls,
         ):
@@ -42,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", required=True)
     parser.add_argument("--password-file", required=True)
+    # Two weeks' warning leaves time to renew the certificate.
     parser.add_argument("--min-tls-days", type=float, default=14)
     parser.add_argument("--ca-file")
     args = parser.parse_args(argv)

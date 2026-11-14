@@ -1,5 +1,16 @@
 # Pacecraft application review checklist
 
+Contents: 1 product invariants and architecture; 2 authentication, sessions,
+CSRF, HTTP boundary; 3 secrets, privacy, untrusted content; 4 SQLCipher
+persistence; 5 backup, restore, recovery; 6 provider clients and network
+security; 7 synchronization and concurrency; 8 Coach context, provenance,
+training correctness; 9 OpenAI Responses lifecycle and Coach tools; 10 planning,
+workouts, competitions, calendars; 11 dates, timezones, units, numbers;
+12 frontend state and API contracts; 13 PWA, service worker, offline;
+14 reliability, performance, observability; 15 tests and verification;
+16 dependencies, container, runtime hardening; 17 CI/CD, Actions, releases;
+18 documentation and maintainability.
+
 Use this as a coverage map, not as a request to manufacture one finding per section. Read the current code and instructions because filenames and behavior can evolve.
 
 ## 1. Product invariants and architecture
