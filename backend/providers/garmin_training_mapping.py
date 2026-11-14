@@ -181,7 +181,7 @@ def _morning_rank(record: Mapping[str, Any]) -> _MorningRank:
     local, utc = _text(record, _LOCAL_TIME), _text(record, _UTC_TIME)
     return (
         not scored,
-        record.get(_READINESS_CONTEXT) != _WAKE_CONTEXT,
+        _text(record, _READINESS_CONTEXT) != _WAKE_CONTEXT,
         local is None,
         local or "",
         utc is None,
@@ -189,7 +189,7 @@ def _morning_rank(record: Mapping[str, Any]) -> _MorningRank:
     )
 
 
-def _readiness_day(record: Mapping[str, Any]) -> date | None:
+def readiness_day(record: Mapping[str, Any]) -> date | None:
     """The day the mappers date a readiness reading by: ``calendarDate`` first."""
     return _iso_day(record.get(_CALENDAR_DATE)) or _row_day(record)
 
@@ -209,9 +209,10 @@ def morning_readiness[T](
     undated: set[int] = set()
     for position, item in enumerate(items):
         record = record_of(item)
-        if record.get(_READINESS_CONTEXT) in _RESCORE_CONTEXTS:
+        # A non-text context (untrusted provider data) is no re-score (#2870).
+        if _text(record, _READINESS_CONTEXT) in _RESCORE_CONTEXTS:
             continue
-        day = _readiness_day(record)
+        day = readiness_day(record)
         if day is None:
             undated.add(position)
             continue

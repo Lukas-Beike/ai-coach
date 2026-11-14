@@ -17,6 +17,7 @@ from canonical_consumer_cases import MAX_METRICS_DAILY
 
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
+from backend.canonical.section_items import split_section
 from backend.canonical.vocabulary import (
     MetricKind,
     ObservationAggregation,
@@ -26,6 +27,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.providers import canonical_plans
+from backend.providers.canonical_plans import garmin_morning_keys
 from backend.providers.garmin_health_mapping import (
     GARMIN_LABEL,
     MAPPER_VERSION,
@@ -1995,6 +1997,52 @@ class MorningReadinessTests(unittest.TestCase):
         )
         (point,) = projected["points"]
         self.assertEqual(point["value"], 78)
+
+    def test_a_non_text_context_is_an_ordinary_reading(self) -> None:
+        # #2870: provider data is untrusted; a list or a mapping as inputContext
+        # neither breaks the mapper nor counts as a re-score or a wake-up: beside
+        # an earlier ordinary reading, the earlier one wins.
+        earlier = {
+            "calendarDate": DAY,
+            "score": 60,
+            "level": "MODERATE",
+            "timestampLocal": "2026-10-10T10:00:00.0",
+        }
+        for context in (["AFTER_WAKEUP_RESET"], {"name": "UPDATE_REALTIME_VARIABLES"}):
+            with self.subTest(context=type(context).__name__):
+                odd = {**_AFTERNOON, "inputContext": context, "score": 55}
+                for section in ("readiness", "training_readiness_history"):
+                    self.assertEqual(
+                        _find(_map({section: [odd]}), MetricKind.READINESS).value.value,
+                        55.0,
+                    )
+                    self.assertEqual(
+                        _find(
+                            _map({section: [odd, earlier]}), MetricKind.READINESS
+                        ).value.value,
+                        60.0,
+                    )
+                    codes = map_garmin_status_codes(
+                        section,
+                        [odd],
+                        source_record_id=section,
+                        retrieved_at=RETRIEVED_AT,
+                    )
+                    self.assertEqual([code.code for code in codes], ["LOW"])
+                # The callers that choose a day's reading across stored elements.
+                items = split_section([odd, earlier])
+                self.assertEqual(
+                    garmin_morning_keys("readiness", items), frozenset({f"{DAY}#1"})
+                )
+                (point,) = projected_metric(
+                    [odd, earlier],
+                    start=date(2026, 10, 1),
+                    end=date(2026, 10, 31),
+                    aggregation="daily",
+                    metric="training_readiness_history",
+                    synced_at=None,
+                )["points"]
+                self.assertEqual(point["value"], 60)
 
     def test_readiness_level_follows_the_morning_reading(self) -> None:
         for section in ("readiness", "training_readiness_history"):

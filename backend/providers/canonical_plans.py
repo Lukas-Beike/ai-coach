@@ -65,7 +65,10 @@ from backend.providers.garmin_status_mapping import (
     STATUS_SECTIONS as GARMIN_STATUS_SECTIONS,
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
-from backend.providers.garmin_training_mapping import morning_readiness
+from backend.providers.garmin_training_mapping import (
+    morning_readiness,
+    readiness_day,
+)
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.providers.sleep_period_mapping import map_sleep_periods
@@ -510,7 +513,14 @@ def garmin_day_reading(
         return None
     siblings = day_items(section, item.observed_on)
     keys = garmin_morning_keys(section, siblings) or frozenset()
-    return tuple(sibling for sibling in siblings if sibling.key in keys)[:1]
+    kept = [sibling for sibling in siblings if sibling.key in keys]
+    # The reading the mapper dates to this day wins over a kept undated one.
+    dated = [
+        sibling
+        for sibling in kept
+        if readiness_day(_item_record(sibling)) == date.fromisoformat(item.observed_on)
+    ]
+    return tuple(dated or kept)[:1]
 
 
 def _garmin_unchosen_readings(payload: Mapping[str, Any]) -> frozenset[str]:
