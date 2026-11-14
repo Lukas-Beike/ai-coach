@@ -116,19 +116,25 @@ test("@responsive Alt+1 to Alt+5 switch the main views outside text fields and a
   await page.keyboard.press("Alt+Digit2");
   await page.locator("#messageInput").blur();
   await page.keyboard.press("Control+Alt+Digit2");
-  // An open dialog or popover menu keeps the view behind it.
-  for (const open of ["showModal", "showPopover"]) {
-    await page.evaluate((method) => {
-      const layer = document.body.appendChild(document.createElement(method === "showModal" ? "dialog" : "div"));
-      layer.id = "shortcutProbe";
-      if (method === "showPopover") layer.popover = "manual";
-      layer[method]();
-    }, open);
+  // An open dialog or popover menu keeps the view behind it; an open tooltip does not.
+  const probe = (role) => page.evaluate((kind) => {
+    const layer = document.body.appendChild(document.createElement(kind === "dialog" ? "dialog" : "div"));
+    layer.id = "shortcutProbe";
+    if (kind === "dialog") return layer.showModal();
+    layer.setAttribute("role", kind);
+    layer.popover = "manual";
+    layer.showPopover();
+  }, role);
+  for (const role of ["dialog", "menu"]) {
+    await probe(role);
     await page.keyboard.press("Alt+Digit2");
     await page.evaluate(() => document.getElementById("shortcutProbe").remove());
   }
   await expect(page).toHaveURL(/#coach/);
-  await page.evaluate(async () => { await AppRouter.navigate("more/appearance", { historyMode: "replace" }); });
+  await probe("tooltip");
+  await page.keyboard.press("Alt+Digit3");
+  await expect(page).toHaveURL(/#analysis/);
+  await page.evaluate(async () => { document.getElementById("shortcutProbe").remove(); await AppRouter.navigate("more/appearance", { historyMode: "replace" }); });
   const help = page.locator(".shortcut-help");
   if ((page.viewportSize()?.width || 0) < 768) {
     await expect(help).toBeHidden();

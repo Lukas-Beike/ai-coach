@@ -31,7 +31,7 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
 document.addEventListener("keydown", (event) => {
   const position = /^Digit([1-5])$/.exec(event.code)?.[1];
   if (!position || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
-  if (event.target?.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open], :popover-open")) return;
+  if (event.target?.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open], [role='menu']:popover-open")) return;
   const link = document.querySelectorAll(".desktop-nav .nav-item")[Number(position) - 1];
   if (!link) return;
   event.preventDefault();
