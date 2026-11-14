@@ -30,11 +30,9 @@ _NUMBER = r"(\d+(?:[.,]\d+)?)"
 _SECTION = re.compile(
     rf"km\s*{_NUMBER}\s*(?:-|–|—|bis)\s*(?:km\s*)?{_NUMBER}(.*)", re.IGNORECASE
 )
-# The first grade in % or climb in Hm after the range counts; a typed or
-# autocorrected dash is a minus, and "1.200 Hm" is a thousands separator.
-_SLOPE = re.compile(
-    r"([+\-−–—]?)\s*(\d+(?:[.,]\d+)*)\s*(%|hm\b|höhenmeter\b)", re.IGNORECASE
-)
+# Units of a grade or climb; the number before the first one counts.
+_UNIT = re.compile(r"%|(?<![a-zäöüß])(?:hm|höhenmeter)\b", re.IGNORECASE)
+_MINUS = frozenset("-−–—")
 # Sections end at a newline, a semicolon or a comma that starts the next "km".
 _SECTION_BREAK = re.compile(r"[\n;]|,\s*(?=km)", re.IGNORECASE)
 _HMS = re.compile(r"\b(\d{1,2}):([0-5]\d):([0-5]\d)\b")
@@ -45,21 +43,37 @@ def _float(text: str) -> float:
     return float(text.replace(",", "."))
 
 
+def _grade(rest: str, length_km: float) -> float:
+    """The first grade in % or climb in Hm after the range, as a grade in %.
+
+    A typed or autocorrected dash before the number is a minus, and the
+    separator in "1.200 Hm" groups thousands. The number is read backwards
+    from its unit, so no pattern backtracks over long text.
+    """
+    for unit in _UNIT.finditer(rest):
+        end = len(rest[: unit.start()].rstrip())
+        start = end
+        while start > 0 and (rest[start - 1].isdigit() or rest[start - 1] in ".,"):
+            start -= 1
+        number = rest[start:end]
+        if not number or not (number[0].isdigit() and number[-1].isdigit()):
+            continue
+        sign = -1 if rest[:start].rstrip()[-1:] in _MINUS else 1
+        if unit[0] != "%":
+            return sign * float(re.sub(r"[.,]", "", number)) / (length_km * 10)
+        if re.fullmatch(_NUMBER, number):
+            return sign * _float(number)
+    return 0.0
+
+
 def _section(line: str) -> dict[str, float] | None:
     found = _SECTION.search(line)
     if found is None:
         return None
-    start, end, rest = _float(found[1]), _float(found[2]), found[3]
+    start, end = _float(found[1]), _float(found[2])
     if end <= start:
         return None
-    grade = 0.0
-    if slope := _SLOPE.search(rest):
-        sign = -1 if slope[1] not in {"", "+"} else 1
-        if slope[3] != "%":
-            metres = float(re.sub(r"[.,]", "", slope[2]))
-            grade = sign * metres / ((end - start) * 10)
-        elif re.fullmatch(_NUMBER, slope[2]):
-            grade = sign * _float(slope[2])
+    grade = _grade(found[3], end - start)
     return {"from_km": start, "to_km": end, "grade_pct": round(grade, 1)}
 
 

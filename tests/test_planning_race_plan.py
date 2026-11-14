@@ -30,6 +30,7 @@ class RacePlanTests(unittest.TestCase):
             ("km 0-5 flach, km 5-10 +3 %", [(0, 5, 0), (5, 10, 3)]),
             ("km 0–4 –2 %; km 4–10 — 60 Hm", [(0, 4, -2), (4, 10, -1)]),
             ("km 0-30 +1.200 Hm", [(0, 30, 4)]),
+            ("km 0-2 120Hm bis 8 %", [(0, 2, 6)]),
             ("km 0-4 −80 Hm (Gefälle bis 5 %)", [(0, 4, -2)]),
         ]:
             with self.subTest(profile=profile):
