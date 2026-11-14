@@ -42,6 +42,7 @@ STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
 WORD = re.compile(r"[a-z][a-z_]{0,31}")
+ERROR_KIND = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,63}")
 # What `--section` prints of a section: dotted paths of numbers and flags, and
 # state words from STATES; nothing else of the section is printed (#2779, #2781).
 SECTION_FIELDS = {
@@ -118,39 +119,41 @@ def plan_errors(jobs: list[dict[str, Any]]) -> dict[str, int]:
     kinds: dict[str, int] = {}
     for job in jobs:
         for item in [job, *(job.get("items") or [])]:
-            kind = str(item.get("error_class") or "")[:64]
-            if kind:
+            if kind := error_kind(item):
                 kinds[kind] = kinds.get(kind, 0) + 1
     return kinds
+
+
+def error_kind(item: dict[str, Any]) -> str:
+    """The error class as an identifier, `?` for anything else, `` for none."""
+    kind = str(item.get("error_class") or "")
+    return kind if not kind or ERROR_KIND.fullmatch(kind) else "?"
+
+
+def word(value: Any) -> str:
+    """A provider or status word; `?` for anything else, so no text is printed."""
+    text = str(value or "")
+    return text if WORD.fullmatch(text) else "?"
 
 
 def plan_pushes(jobs: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     """Per provider: job and item status counts and error kinds (#2849).
 
-    Providers and statuses are printed only as short lower-case words; any
-    other value is counted as `other`, so no free text reaches the output.
+    The report keeps the 10 most recent push jobs of all providers and leaves
+    settled (completed, skipped) items out, so item counts are the open and
+    failed items only.
     """
     result: dict[str, dict[str, int]] = {}
-
-    def word(value: Any) -> str:
-        text = str(value or "")
-        return text if WORD.fullmatch(text) else "other"
-
     for job in jobs:
         counts = result.setdefault(word(job.get("provider")), {})
-        for kind, item in [
-            ("job", job),
-            *(("item", i) for i in job.get("items") or []),
-        ]:
-            for key in (f"{kind} {word(item.get('status'))}", error_key(item)):
-                if key:
-                    counts[key] = counts.get(key, 0) + 1
+        rows = [("job", job)] + [("item", item) for item in job.get("items") or []]
+        for level, row in rows:
+            keys = [f"{level} {word(row.get('status'))}"]
+            if kind := error_kind(row):
+                keys.append(f"{level} error {kind}")
+            for key in keys:
+                counts[key] = counts.get(key, 0) + 1
     return result
-
-
-def error_key(item: dict[str, Any]) -> str:
-    kind = str(item.get("error_class") or "")[:64]
-    return f"error {kind}" if kind else ""
 
 
 def stuck_jobs(jobs: list[dict[str, Any]], now: datetime) -> int:
@@ -285,12 +288,11 @@ def plan_line(result: dict[str, Any]) -> tuple[str, str]:
 
 def push_lines(result: dict[str, Any]) -> list[tuple[str, str]]:
     """One line per provider of the recent plan pushes, sorted."""
-    return [
-        ("info", f"plan push {provider}: " + ", ".join(
-            f"{key} {count}" for key, count in sorted(counts.items())
-        ))
-        for provider, counts in sorted((result.get("plan_pushes") or {}).items())
-    ]  # fmt: skip
+    lines = []
+    for provider, counts in sorted((result.get("plan_pushes") or {}).items()):
+        text = ", ".join(f"{key} {count}" for key, count in sorted(counts.items()))
+        lines.append(("info", f"plan push {provider}: {text}"))
+    return lines
 
 
 def comparison_lines(

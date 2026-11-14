@@ -58,10 +58,12 @@ def report(messages=40):
                     "items": [{"status": "failed", "error_class": "HTTPError"}],
                 },
                 {
+                    # The report leaves settled items out; a running one stays.
                     "provider": "intervals",
-                    "status": "completed",
-                    "items": [{"status": "synced"}, {"status": "synced"}],
+                    "status": "running",
+                    "items": [{"status": "running"}],
                 },
+                {"provider": "intervals", "status": "completed"},
                 {"provider": "text never printed", "status": "Done!"},
             ],
         },
@@ -180,13 +182,20 @@ class ProdChecksTests(unittest.TestCase):
         self.assertIn("info provider wahoo last sync never", text)
         self.assertIn("2 unsynced, 1 with error; error kinds: HTTPError 2", text)
         self.assertIn("info workout library: pending 1", text)
-        # Per provider (#2849); words outside the vocabulary count as `other`.
+        # Per provider and level (#2849); other text prints as `?`.
         self.assertIn(
-            "info plan push garmin: error HTTPError 2, item failed 1, job failed 1",
+            "info plan push garmin: item error HTTPError 1, item failed 1, "
+            "job error HTTPError 1, job failed 1",
             text,
         )
-        self.assertIn("info plan push intervals: item synced 2, job completed 1", text)
-        self.assertIn("info plan push other: job other 1", text)
+        self.assertIn(
+            "info plan push intervals: item running 1, job completed 1, job running 1",
+            text,
+        )
+        self.assertIn("info plan push ?: job ? 1", text)
+        self.assertEqual(
+            prod_diagnostics.error_kind({"error_class": "boom: remote said no"}), "?"
+        )
         self.assertIn("ok logout 200", text)
         self.assertEqual(FakeApp.state["logouts"], 1)
         self.assertEqual(json.loads(result.read_text())["counts"]["messages"], 40)
