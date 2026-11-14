@@ -905,13 +905,20 @@ def _observation_series(observation: Observation) -> str:
     return ""
 
 
-def rank_section(owner: str | None, source_record_id: str | None) -> str:
-    """The section a ranked observation comes from: its owner's, else its source's."""
+def rank_section(
+    owner: str | None, source_record_id: str | None, ranks: object = True
+) -> str | None:
+    """The section a ranked observation comes from: its owner's, else its source's.
+
+    None for an observation without ``ranks``, which has no section precedence.
+    """
+    if ranks is None:
+        return None
     return section_of(owner) if owner else str(source_record_id).partition(":")[0]
 
 
 def _rank_section(row: Mapping[str, Any]) -> str:
-    return rank_section(row["owner_record_id"], row["source_record_id"])
+    return rank_section(row["owner_record_id"], row["source_record_id"]) or ""
 
 
 def _outranked(

@@ -204,22 +204,18 @@ def ingest_plan(
     # Natural-key collisions inside one payload: the first wins, later ones are
     # skipped. Two ranked Garmin sections are left to the store, which decides
     # them by the one rule the re-projection follows (#2782).
-    seen_keys: dict[str, str | None] = {}
+    seen_keys: set[tuple[str, str | None]] = set()
     for item in plan.observations:
-        natural_key = canonical_store.observation_natural_key(item.observation)
-        section = (
-            None
-            if item.ranks is None
-            else canonical_store.rank_section(
-                item.owner, item.observation.provenance.source_record_id
-            )
+        slot = (
+            canonical_store.observation_natural_key(item.observation),
+            canonical_store.rank_section(
+                item.owner, item.observation.provenance.source_record_id, item.ranks
+            ),
         )
-        if natural_key in seen_keys and (
-            section is None or seen_keys[natural_key] == section
-        ):
+        if slot in seen_keys:
             counters.skipped_invalid += 1
             continue
-        seen_keys.setdefault(natural_key, section)
+        seen_keys.add(slot)
         counters.count(
             canonical_store.upsert_observation(
                 db,
