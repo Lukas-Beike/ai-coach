@@ -52,7 +52,6 @@ from backend.config import (
     ConfigHolder,
     load_config,
 )
-from backend.db import manager as database_manager_runtime
 from backend.db import row_factory as database_row_factory
 from backend.db.bootstrap import (
     initialize_application_database,
@@ -389,9 +388,7 @@ ATHLETE_DATA = build_athlete_data(
     thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
     threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
 )
-ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
-    database_manager_runtime.DATABASE_MANAGER_CACHE
-)
+ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(database_manager)
 # Declared ahead of its first lambda reference; assigned by build_canonical_read below.
 CANONICAL_READ: CanonicalReadSelector
 

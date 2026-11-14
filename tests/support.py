@@ -22,7 +22,7 @@ from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
 from backend.config import Config
-from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
+from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.route_table import RouteRequest, RouteTable
@@ -288,7 +288,7 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
         server.initialise_database()
         yield
     finally:
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         for item in reversed(patches):
             item.stop()
 

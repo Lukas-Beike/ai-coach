@@ -9,11 +9,14 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
+
+from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore import (
@@ -23,6 +26,7 @@ from backend.backup.restore import (
 )
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.worker import SyncJobWorker
 
 
 class DatabaseRestoreServiceTests(unittest.TestCase):
@@ -174,6 +178,82 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.assertTrue(cancel.is_set())
         self.assertTrue(result["restored"])
         self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+
+    def test_restore_waits_for_a_running_sync_job_then_swaps_the_database(
+        self,
+    ) -> None:
+        self.database_path.unlink()
+        manager = temp_database(self, path=self.database_path)
+        with manager.unit_of_work() as db:
+            db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+        in_job = threading.Event()
+        finish_job = threading.Event()
+        refused: list[AppError] = []
+
+        class OneJobStore:
+            claimed = False
+
+            def claim(self) -> dict[str, Any] | None:
+                if self.claimed:
+                    return None
+                self.claimed = True
+                return {"id": "job-1"}
+
+        class WritingRunner:
+            def run(self, _job: dict[str, Any]) -> None:
+                with manager.unit_of_work() as db:
+                    db.execute("INSERT INTO records(value) VALUES ('before')")
+                in_job.set()
+                finish_job.wait(5)
+                with manager.unit_of_work() as db:
+                    db.execute("INSERT INTO records(value) VALUES ('after')")
+
+        store: Any = OneJobStore()
+        worker = SyncJobWorker(store, WritingRunner(), self.gate, 5)
+        self.addCleanup(worker.join, 2)
+        self.addCleanup(worker.stop)
+        service = DatabaseRestoreService(
+            replace(self.service._dependencies, database_manager=lambda: manager)
+        )
+        results: list[dict[str, object]] = []
+        restoring = threading.Thread(
+            target=lambda: results.append(service.restore(b"replacement database"))
+        )
+        worker.start()
+        self.assertTrue(in_job.wait(2))
+        restoring.start()
+        self.addCleanup(restoring.join, 2)
+        self.addCleanup(finish_job.set)
+        for _ in range(200):
+            if self.gate.state()["active"]:
+                break
+            threading.Event().wait(0.01)
+        # The running job is still draining: new gated work is refused and the
+        # live file is untouched.
+        self.assertTrue(self.gate.state()["active"])
+        try:
+            with self.gate.operation():
+                pass
+        except AppError as exc:
+            refused.append(exc)
+        self.assertEqual([exc.reason for exc in refused], ["maintenance"])
+        self.assertEqual(self.gate.state()["running_operations"], 1)
+        restoring.join(0.2)
+        self.assertTrue(restoring.is_alive())
+        self.assertTrue(self.database_path.read_bytes().startswith(b"SQLite format 3"))
+
+        finish_job.set()
+        restoring.join(5)
+
+        self.assertFalse(restoring.is_alive())
+        self.assertTrue(results[0]["restored"])
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        # The job's writes were committed before the swap and are in the recovery copy.
+        previous = self.data_dir / str(results[0]["previous_database_backup"])
+        with closing(sqlite3.connect(previous)) as copy:
+            values = [row[0] for row in copy.execute("SELECT value FROM records")]
+        self.assertEqual(sorted(values), ["after", "before"])
+        self.assertFalse(self.gate.state()["active"])
 
     def test_restore_returns_409_within_the_bound_and_keeps_the_database(
         self,

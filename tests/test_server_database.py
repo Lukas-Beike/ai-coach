@@ -31,7 +31,6 @@ from support import canonical_backfill_stopped
 
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
-from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.db.repositories import (
     CheckinRepository,
     CompetitionRepository,
@@ -151,8 +150,7 @@ class ServerDatabaseTests(ServerTestCase):
         )
 
     def test_shared_database_resources_have_one_backend_owner(self):
-        self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
-        self.assertIs(server.database_manager(), DATABASE_MANAGER_CACHE.manager)
+        self.assertIs(server.database_manager(), server.database_manager.manager)
 
     def test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration(
         self,
@@ -191,7 +189,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIs(server.WEATHER.service(), first_weather_service)
         first_morning_service = server.morning_body_battery_service()
         self.assertIs(server.morning_body_battery_service(), first_morning_service)
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
 
         second = server.provider_state_service()
         second_http_client = server.PROVIDER_TRANSPORT.json_http_client()
@@ -238,7 +236,7 @@ class ServerDatabaseTests(ServerTestCase):
                 ):
                     server.initialise_database()
             finally:
-                DATABASE_MANAGER_CACHE.reset()
+                server.database_manager.reset()
 
             connection = sqlite3.connect(database_path)
             try:
@@ -596,7 +594,7 @@ class ServerDatabaseTests(ServerTestCase):
                             self.assertIn("workouts", payload)
                             self.assertIs(connection.sock, keep_alive_socket)
                         finally:
-                            DATABASE_MANAGER_CACHE.reset()
+                            server.database_manager.reset()
         finally:
             connection.close()
             httpd.shutdown()
@@ -1410,7 +1408,7 @@ class ServerDatabaseTests(ServerTestCase):
             operation_id="operation-background-manager-refresh",
         )
 
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         second_manager = server.database_manager()
 
         self.assertIsNot(first_manager, second_manager)

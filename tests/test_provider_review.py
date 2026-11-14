@@ -15,7 +15,6 @@ from garmin_support import read_garmin, save_garmin
 from support import mark_tables_serving
 from test_feedback_session_identity import ingest_wahoo, wahoo_row
 
-from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api.auth import RATE_LIMITER
 from backend.http_api.rate_limit import RateLimiter
@@ -76,7 +75,7 @@ class ProviderReviewTests(unittest.TestCase):
                 handler.close()
         server.LOGGER.setLevel(self.log_level)
         server.LOGGER.propagate = self.log_propagate
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         for item in reversed(self.patches):
             item.stop()
         self.directory.cleanup()
@@ -392,7 +391,7 @@ class ProviderReviewTests(unittest.TestCase):
         "SQLCipher requires the isolated application container",
     )
     def test_fresh_sqlcipher_unicode_key_login_and_reopen(self):
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         encrypted_path = Path(self.directory.name) / "encrypted.db"
         configured = replace(
             server.CONFIG_HOLDER.value, app_password="synthetic-\u00e4-\U0001f6b4-123"
@@ -411,7 +410,7 @@ class ProviderReviewTests(unittest.TestCase):
             )
             self.assertTrue(result["authenticated"])
             rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
-            DATABASE_MANAGER_CACHE.reset()
+            server.database_manager.reset()
             self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
     def test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors(
