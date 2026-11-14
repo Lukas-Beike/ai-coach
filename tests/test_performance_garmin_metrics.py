@@ -11,35 +11,39 @@ from backend.performance.garmin_metrics import (
     garmin_performance_context,
     garmin_performance_metrics,
 )
-from backend.sync.garmin_payload_metrics import (
-    garmin_duration_seconds,
-    garmin_payload_performance_metrics,
-    garmin_profile_max_hr,
-)
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 CURRENT_DATE = date(2026, 9, 7)
 
 
+def _race_5k_seconds(value):
+    result = current_garmin_metrics({"race_predictions": {"5k": value}}, CURRENT_DATE)
+    return result["run_5k_seconds"]["value"]
+
+
 class GarminMetricHelperTests(unittest.TestCase):
     def test_duration_variants_and_bounds(self):
-        self.assertEqual(garmin_duration_seconds("01:42:30"), 6150)
-        self.assertEqual(garmin_duration_seconds("42:30"), 2550)
-        self.assertEqual(
-            garmin_duration_seconds({"racePredictionTime": "00:10:00"}), 600
+        cases = (
+            ("01:42:30", 6150),
+            ("42:30", 2550),
+            ({"racePredictionTime": "00:10:00"}, 600),
+            (131000, 131),
+            ("01:02:03:04", None),
+            ("00:00", None),
+            (float("nan"), None),
         )
-        self.assertEqual(garmin_duration_seconds(131000), 131)
-        self.assertIsNone(garmin_duration_seconds("01:02:03:04"))
-        self.assertIsNone(garmin_duration_seconds("00:00"))
-        self.assertIsNone(garmin_duration_seconds(float("nan")))
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(_race_5k_seconds(value), expected)
 
     def test_non_ascii_or_overlong_colon_text_is_absent(self):
-        self.assertEqual(garmin_duration_seconds("25:30"), 1530)
-        self.assertEqual(garmin_duration_seconds(" 42:30 "), 2550)
+        self.assertEqual(_race_5k_seconds("25:30"), 1530)
+        self.assertEqual(_race_5k_seconds(" 42:30 "), 2550)
         for text in ("²:30", "1" * 4301 + ":30"):
             with self.subTest(length=len(text)):
-                self.assertIsNone(garmin_duration_seconds(text))
+                self.assertIsNone(_race_5k_seconds(text))
                 for key in ("speed", "thresholdPace"):
-                    result = garmin_payload_performance_metrics(
+                    result = current_garmin_metrics(
                         {"running_threshold": {key: text}}, CURRENT_DATE
                     )
                     self.assertIsNone(
@@ -53,10 +57,9 @@ class GarminMetricHelperTests(unittest.TestCase):
             {"activityType": "DEFAULT", "maxHR": 186},
             {"nested": [{"sport": "cycling", "maxHeartRateUsed": 188}]},
         ]
-        self.assertEqual(
-            garmin_profile_max_hr({"heart_rate_zones": zones}),
-            {"cycling": 188, "running": 194, "generic": 186},
-        )
+        result = current_garmin_metrics({"heart_rate_zones": zones}, CURRENT_DATE)
+        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(result["running_max_hr_bpm"]["value"], 194)
 
 
 class GarminPerformanceMetricTests(unittest.TestCase):
@@ -86,10 +89,10 @@ class GarminPerformanceMetricTests(unittest.TestCase):
     def test_vo2_race_variants_and_latest_values(self):
         snapshot = {
             "max_metrics": [
-                {"generic": {"vo2MaxValue": 51}},
-                {"generic": {"vo2MaxValue": 55}},
-                {"running": {"vo2MaxPreciseValue": 57.4}},
-                {"cycling": {"vo2MaxValue": 61}},
+                {"generic": {"calendarDate": "2026-09-06", "vo2MaxValue": 51}},
+                {"generic": {"calendarDate": "2026-09-07", "vo2MaxValue": 55}},
+                {"running": {"calendarDate": "2026-09-07", "vo2MaxPreciseValue": 57.4}},
+                {"cycling": {"calendarDate": "2026-09-07", "vo2MaxValue": 61}},
             ],
             "race_predictions": {
                 "racePredictions": [
@@ -101,7 +104,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
                 "marathon": {"racePredictionTime": 2_400_000},
             },
         }
-        result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
+        result = current_garmin_metrics(snapshot, CURRENT_DATE)
 
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 61)
         self.assertEqual(
@@ -114,9 +117,9 @@ class GarminPerformanceMetricTests(unittest.TestCase):
                 "note": "Garmin Connect max metrics",
                 "freshness": "unknown",
                 "fetched_at": None,
-                "observed_at": None,
-                "measurement_status": "unknown",
-                "measurement_age_days": None,
+                "observed_at": "2026-09-07",
+                "measurement_status": "today",
+                "measurement_age_days": 0,
             },
         )
         self.assertEqual(result["run_5k_seconds"]["value"], 1310)
@@ -127,9 +130,9 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         # The latest generic reading of a range payload is the running value.
         generic = {"max_metrics": snapshot["max_metrics"][:2]}
         self.assertEqual(
-            garmin_payload_performance_metrics(generic, CURRENT_DATE)[
-                "running_vo2max_ml_kg_min"
-            ]["value"],
+            current_garmin_metrics(generic, CURRENT_DATE)["running_vo2max_ml_kg_min"][
+                "value"
+            ],
             55,
         )
 
@@ -138,9 +141,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         # newest reading of each sport wins whatever the row order.
         rows = MAX_METRICS_DAILY
         for order in (rows, list(reversed(rows))):
-            result = garmin_payload_performance_metrics(
-                {"max_metrics": order}, CURRENT_DATE
-            )
+            result = current_garmin_metrics({"max_metrics": order}, CURRENT_DATE)
             running = result["running_vo2max_ml_kg_min"]
             cycling = result["cycling_vo2max_ml_kg_min"]
             self.assertEqual(
@@ -175,20 +176,32 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         snapshot = {
             "max_metrics": [
                 {
-                    "generic": {"vo2MaxPreciseValue": 54.3, "vo2MaxValue": 54},
-                    "cycling": {"vo2MaxPreciseValue": 58.6, "VO2MaxValue": 58},
+                    "generic": {
+                        "calendarDate": "2026-09-07",
+                        "vo2MaxPreciseValue": 54.3,
+                        "vo2MaxValue": 54,
+                    },
+                    "cycling": {
+                        "calendarDate": "2026-09-07",
+                        "vo2MaxPreciseValue": 58.6,
+                        "VO2MaxValue": 58,
+                    },
                 }
             ]
         }
-        result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
+        result = current_garmin_metrics(snapshot, CURRENT_DATE)
 
         self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 54.3)
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 58.6)
         # A placeholder precise value is dropped like in the canonical mapping, not replaced.
-        placeholder = garmin_payload_performance_metrics(
+        placeholder = current_garmin_metrics(
             {
                 "max_metrics": {
-                    "generic": {"vo2MaxPreciseValue": 0.0, "vo2MaxValue": 54}
+                    "generic": {
+                        "calendarDate": "2026-09-07",
+                        "vo2MaxPreciseValue": 0.0,
+                        "vo2MaxValue": 54,
+                    }
                 }
             },
             CURRENT_DATE,
@@ -196,25 +209,19 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         self.assertIsNone(placeholder["running_vo2max_ml_kg_min"]["value"])
 
     def test_threshold_aliases_speed_scaling_and_bounds(self):
-        cases = (
-            ("speedInMetersPerSecond", 3.8, 263),
-            ("thresholdPace", "4:27", 267),
-            ("speed", 0.35833233, 279),
+        # Garmin's scaled speed below 1 is multiplied by ten. The legacy flat
+        # aliases are named deviations in test_garmin_health_parity (#2081).
+        result = current_garmin_metrics(
+            {"running_threshold": {"speed_and_heart_rate": {"speed": 0.35833233}}},
+            CURRENT_DATE,
         )
-        for key, value, expected in cases:
-            with self.subTest(key=key):
-                result = garmin_payload_performance_metrics(
-                    {"running_threshold": {key: value}}, CURRENT_DATE
-                )
-                self.assertEqual(
-                    result["run_threshold_pace_seconds_per_km"]["value"], expected
-                )
-                self.assertEqual(
-                    result["run_threshold_pace_seconds_per_km"]["source"],
-                    GARMIN_PERFORMANCE_SOURCE,
-                )
+        self.assertEqual(result["run_threshold_pace_seconds_per_km"]["value"], 279)
+        self.assertEqual(
+            result["run_threshold_pace_seconds_per_km"]["source"],
+            GARMIN_PERFORMANCE_SOURCE,
+        )
 
-        result = garmin_payload_performance_metrics(
+        result = current_garmin_metrics(
             {
                 "cycling_ftp": {"functionalThresholdPower": 302},
                 "running_threshold": {
@@ -233,14 +240,14 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         self.assertEqual(result["run_threshold_hr_bpm"]["value"], 176)
         self.assertEqual(result["bike_threshold_hr_bpm"]["value"], 169)
 
-        invalid = garmin_payload_performance_metrics(
+        invalid = current_garmin_metrics(
             {"cycling_ftp": 49, "running_threshold": {"speed": 10}}, CURRENT_DATE
         )
         self.assertIsNone(invalid["cycling_ftp_watts"]["value"])
         self.assertIsNone(invalid["run_threshold_pace_seconds_per_km"]["value"])
 
     def test_profile_max_hr_and_no_ingest_activity_maximum(self):
-        profile = garmin_payload_performance_metrics(
+        profile = current_garmin_metrics(
             {
                 "heart_rate_zones": [{"sport": "DEFAULT", "maxHeartRateUsed": 186}],
                 "sport_max_hr": {"cycling": 178, "running": 181},
@@ -271,7 +278,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
             "sport_max_hr": {"cycling": 200, "running": 205},
             "activities": [{"activityType": "cycling", "maxHR": 190}],
         }
-        activity = garmin_payload_performance_metrics(activity_snapshot, CURRENT_DATE)
+        activity = current_garmin_metrics(activity_snapshot, CURRENT_DATE)
         self.assertIsNone(activity["cycling_max_hr_bpm"]["value"])
         self.assertIsNone(activity["running_max_hr_bpm"]["value"])
 
@@ -292,7 +299,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
             },
         }
         original = copy.deepcopy(snapshot)
-        result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
+        result = current_garmin_metrics(snapshot, CURRENT_DATE)
 
         self.assertEqual(result["weight_kg"]["value"], 72.8)
         self.assertEqual(result["weight_kg"]["source"], GARMIN_PERFORMANCE_SOURCE)
@@ -302,11 +309,30 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         self.assertIn("Quelle nur teilweise aktualisiert", result["weight_kg"]["note"])
         self.assertEqual(snapshot, original)
 
+    def test_weight_metric_shape_source_note_and_empty_value(self):
+        weight = current_garmin_metrics(
+            {"weight": [{"date": "2026-08-30", "weightKg": 72}]}, CURRENT_DATE
+        )["weight_kg"]
+        self.assertEqual(
+            {key: weight[key] for key in ("value", "unit", "source", "note")},
+            {
+                "value": 72.0,
+                "unit": "kg",
+                "source": "Garmin Connect",
+                "note": "Garmin Connect Körpergewicht",
+            },
+        )
+        empty = current_garmin_metrics({}, CURRENT_DATE)["weight_kg"]
+        self.assertEqual(
+            {key: empty[key] for key in ("value", "unit", "source", "note")},
+            {"value": None, "unit": "kg", "source": None, "note": ""},
+        )
+
     def test_current_stale_and_future_freshness_states(self):
-        result = garmin_payload_performance_metrics(
+        result = current_garmin_metrics(
             {
                 "cycling_ftp": {"functionalThresholdPower": 300},
-                "running_threshold": {"power": {"power": 320}},
+                "running_threshold": {"power": {"functionalThresholdPower": 320}},
                 "source_freshness": {
                     "cycling_ftp": {
                         "freshness": "current",

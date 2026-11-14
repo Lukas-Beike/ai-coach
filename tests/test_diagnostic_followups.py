@@ -19,7 +19,7 @@ from backend.providers import garmin_morning
 from backend.providers import http as provider_http
 from backend.runtime import clock as runtime_clock
 from backend.sync import garmin as garmin_sync
-from backend.sync import garmin_payload_metrics
+from backend.sync import garmin_performance_history
 from backend.sync import observation as sync_observation
 from backend.sync.garmin_service import GarminSyncService
 
@@ -266,7 +266,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         garmin_sync.merge_sources(snapshot, {}, frozenset())
         original = json.dumps(snapshot, sort_keys=True)
         save_garmin(snapshot)
-        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
+        metric = garmin_performance_history.current_garmin_metrics(
             snapshot, server.ATHLETE_CLOCK.now().date()
         )["weight_kg"]
         self.assertEqual(metric["freshness"], "current")

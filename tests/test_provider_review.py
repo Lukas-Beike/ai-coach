@@ -28,8 +28,8 @@ from backend.providers.garmin import (
 )
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
-from backend.sync import garmin_payload_metrics, garmin_service
 from backend.sync import garmin_performance_history as performance_history
+from backend.sync import garmin_service
 from backend.sync.worker import SyncJobWorker
 
 server = fixtures.server
@@ -323,7 +323,7 @@ class ProviderReviewTests(unittest.TestCase):
         performance_history.append_garmin_performance_history(
             payload, {}, server.ATHLETE_CLOCK.now().date()
         )
-        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
+        metric = performance_history.current_garmin_metrics(
             payload, server.ATHLETE_CLOCK.now().date()
         )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")

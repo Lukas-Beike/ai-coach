@@ -39,7 +39,7 @@ from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_user,
 )
 from backend.runtime.ports import ObservationReader
-from backend.sync import garmin_payload_metrics
+from backend.sync import garmin_performance_history
 
 SYNC_DAY = date(2026, 10, 12)
 
@@ -77,9 +77,7 @@ def _case(name: str) -> Case:
 
 def _metrics(case: Case) -> dict[str, Any]:
     """Current metrics of a case: stored observations, Garmin metrics, profile."""
-    garmin = garmin_payload_metrics.garmin_payload_performance_metrics(
-        case.garmin, TODAY
-    )
+    garmin = garmin_performance_history.current_garmin_metrics(case.garmin, TODAY)
     inputs = read_current_inputs(
         ObservationStub(_observations(case)), None, as_of=TODAY
     )
@@ -130,9 +128,9 @@ class IntervalsValuesAreNotCurrentTests(unittest.TestCase):
         case = _case("complete")
         garmin_ftp = (
             case.garmin
-            and garmin_payload_metrics.garmin_payload_performance_metrics(
-                case.garmin, TODAY
-            )["cycling_ftp_watts"]
+            and garmin_performance_history.current_garmin_metrics(case.garmin, TODAY)[
+                "cycling_ftp_watts"
+            ]
         )
         metrics = _metrics(case)
 

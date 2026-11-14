@@ -45,7 +45,7 @@ from backend.performance.source_policy import (
 )
 from backend.planning.load_checks import load_thresholds
 from backend.planning.planned_unit_load import resolve_thresholds
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 AS_OF = SYNCED_AT.date()
 GARMIN = ProviderId.GARMIN
@@ -210,7 +210,7 @@ class CoachAndPlanParityTests(unittest.TestCase):
         )
 
     def _coach(self, inputs):
-        garmin = garmin_payload_performance_metrics(
+        garmin = current_garmin_metrics(
             {
                 "cycling_ftp": {"functionalThresholdPower": 280},
                 "running_threshold": {"speed_and_heart_rate": {"heartRate": 172}},
@@ -358,7 +358,7 @@ class LocalThresholdTests(unittest.TestCase):
         )
 
     def test_test_support_maps_a_garmin_dict_to_observations(self) -> None:
-        garmin = garmin_payload_performance_metrics(
+        garmin = current_garmin_metrics(
             {"cycling_ftp": {"functionalThresholdPower": 280}}, AS_OF
         )
         (ftp,) = garmin_threshold_observations(garmin)

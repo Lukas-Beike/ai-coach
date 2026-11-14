@@ -11,7 +11,6 @@ from backend.performance import (
     garmin_metrics,
 )
 from backend.planning import season_preparation
-from backend.sync import garmin_weight
 
 
 class ExportedSourceConstantTests(unittest.TestCase):
@@ -30,9 +29,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
     def test_garmin_performance_note_source_is_unchanged(self):
         self.assertEqual("Garmin Connect", garmin_metrics.GARMIN_PERFORMANCE_SOURCE)
-
-    def test_garmin_weight_body_history_source_is_unchanged(self):
-        self.assertEqual("Garmin Connect", garmin_weight.GARMIN_PERFORMANCE_SOURCE)
 
     def test_body_history_source_constants_are_unchanged(self):
         self.assertEqual("Garmin Connect", body.GARMIN_SOURCE)

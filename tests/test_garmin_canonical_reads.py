@@ -65,6 +65,28 @@ CANONICAL_SECTIONS = (
 # The running threshold section stays: its power has no canonical form and is still
 # read from the snapshot (its pace and heart rate come from the observations).
 BODY_BATTERY = {"status": "ready", "morning": {"value": 78}}
+_VO2_NOTE = "Garmin Connect max metrics; Messung ist 1 Tage alt; das Abrufdatum ist keine neue Messung."
+# (value, observed_at, measurement age in days, note) the retired payload parser
+# gave each metric of the wire-fixture payload on TODAY.
+PAYLOAD_FIXTURE_METRICS = {
+    "weight_kg": (71.5, None, None, "Garmin Connect Körpergewicht"),
+    "cycling_vo2max_ml_kg_min": (59, "2026-10-10", 1, _VO2_NOTE),
+    "running_vo2max_ml_kg_min": (57.8, "2026-10-10", 1, _VO2_NOTE),
+    "run_5k_seconds": (None, None, None, ""),
+    "run_10k_seconds": (None, None, None, ""),
+    "run_half_marathon_seconds": (None, None, None, ""),
+    "run_marathon_seconds": (None, None, None, ""),
+    "cycling_ftp_watts": (260, None, None, "Garmin Connect FTP"),
+    "run_threshold_watts": (290, None, None, "Garmin Connect Lauf-Schwellenleistung"),
+    "run_threshold_pace_seconds_per_km": (
+        278,
+        None,
+        None,
+        "Garmin Connect Lauf-Schwellenpace",
+    ),
+    "bike_threshold_hr_bpm": (160, None, None, "Garmin Connect Rad-Schwellenpuls"),
+    "run_threshold_hr_bpm": (168, None, None, "Garmin Connect Lauf-Schwellenpuls"),
+}
 
 
 class _Flag:
@@ -190,20 +212,13 @@ class GarminStateEqualityTests(GarminReadFixture):
     def test_table_observations_give_the_payload_state(self) -> None:
         populate(self)
         table = self.read(lambda db: read_garmin_state(self.table, db))
-        payload = garmin_payload_metrics.garmin_payload_performance_metrics(
-            self.garmin, TODAY
-        )
 
         self.assertTrue(table.has_sleep)
-        self.assertIsNotNone(table.metrics.weight_kg)
-        self.assertEqual(table.metrics.weight_kg, payload["weight_kg"]["value"])
+        self.assertEqual(table.metrics.weight_kg, 71.5)
 
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
         populate(self)
         state = self.read(lambda db: read_garmin_state(self.table, db))
-        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
-            self.garmin, TODAY
-        )
         overlay = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(self.garmin), TODAY, state.metrics
         )
@@ -215,18 +230,21 @@ class GarminStateEqualityTests(GarminReadFixture):
             ("readiness", state.has_readiness),
         ):
             self.assertEqual(bool(self.garmin.get(section)), flag, section)
-        # Only the canonical read derives the activity max HR (#1686); the payload
-        # parser keeps the profile value alone.
-        activity_keys = {
-            key
-            for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")
-            if legacy[key]["value"] is None
-        }
         self.assertEqual(
-            {key: value for key, value in overlay.items() if key not in activity_keys},
-            {key: value for key, value in legacy.items() if key not in activity_keys},
+            {
+                key: (
+                    overlay[key]["value"],
+                    overlay[key]["observed_at"],
+                    overlay[key]["measurement_age_days"],
+                    overlay[key]["note"],
+                )
+                for key in PAYLOAD_FIXTURE_METRICS
+            },
+            PAYLOAD_FIXTURE_METRICS,
         )
-        for key in activity_keys:
+        # Only the canonical read derives the activity max HR (#1686); the payload
+        # parser kept the profile value alone and found none in the fixture.
+        for key in ("cycling_max_hr_bpm", "running_max_hr_bpm"):
             self.assertIsNotNone(overlay[key]["observed_at"], key)
 
     def test_activity_max_hr_skips_deleted_sessions(self) -> None:
@@ -681,15 +699,8 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         metrics = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(payload), TODAY, canonical
         )
-        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
-            payload, TODAY
-        )
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
-        self.assertEqual(
-            metrics["run_threshold_pace_seconds_per_km"]["value"],
-            legacy["run_threshold_pace_seconds_per_km"]["value"],
-        )
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 161)
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 306)
 

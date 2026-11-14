@@ -15,6 +15,7 @@ import json
 import os
 import unittest
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -34,7 +35,6 @@ from backend.performance.garmin_canonical import read_garmin_recovery, read_garm
 from backend.performance.garmin_metrics import garmin_performance_context
 from backend.providers import canonical_plans
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.sync import garmin_metric_history
 from backend.sync.canonical_backfill import CanonicalBackfill
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin import GarminPayloadService
@@ -226,10 +226,11 @@ class PerformanceHistoryTests(unittest.TestCase):
             if start <= day <= TODAY and row["metrics"].get(key) is not None:
                 values[day] = row["metrics"][key]
         if key == "cycling_ftp_watts":
-            for point in garmin_metric_history.ftp_points(
-                self.snapshot.get("cycling_ftp_history"), start=start, end=TODAY
-            ):
-                values[date.fromisoformat(point["date"])] = point["value"]
+            # The fixture's range rows date by ``from``, its latest rows by ``calendarDate``.
+            for row in self.snapshot.get("cycling_ftp_history") or []:
+                day = date.fromisoformat(str(row.get("from") or row["calendarDate"]))
+                if start <= day <= TODAY:
+                    values[day] = row.get("value", row.get("functionalThresholdPower"))
         return values
 
     def test_comparison_averages_match_the_cache(self) -> None:
@@ -513,14 +514,12 @@ class HistoryReprojectionGoldenTests(unittest.TestCase):
             day = FIRST_DAY + timedelta(days=index)
             self.today = day
             synced_at = f"{day.isoformat()}T07:00:00"
-            key_values = KeyValueRepository(lambda synced_at=synced_at: synced_at)
+            key_values = KeyValueRepository(partial(str, synced_at))
             service = GarminPayloadService(
                 self.manager,
                 key_values,
-                SyncStateRepository(
-                    self.manager, key_values, lambda synced_at=synced_at: synced_at
-                ),
-                lambda day=day: day,
+                SyncStateRepository(self.manager, key_values, partial(str, synced_at)),
+                partial(date.fromordinal, day.toordinal()),
             )
             payload = service.prepare_remote(day_payload(index, day))
             charts[day.isoformat()] = _digest(payload["provider_metrics"])
@@ -660,7 +659,14 @@ def _digests(values: dict[str, Any]) -> dict[str, str]:
 
 
 class _NoActivities:
-    def activity_summaries(self, _db: Any, **_: Any) -> tuple[Any, ...]:
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[Any, ...]:
         return ()
 
 

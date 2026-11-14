@@ -1,10 +1,8 @@
-"""Shared walk over Garmin weight payloads.
+"""Walk over Garmin weight payloads.
 
-The ingest weight parser in ``backend/sync/garmin_weight`` and the health mapper in
-``backend/providers/garmin_health_mapping`` search the same nested weight payload
-with the same limits and skip rules. They differ only in how a record's day is typed
-and how its value is read, so the walk lives here and each caller supplies its own
-day resolver and value reader.
+The health mapper in ``backend/providers/garmin_health_mapping`` searches the nested
+weight payload with the limits and skip rules of the retired legacy weight reader;
+the caller supplies its day resolver and value reader.
 """
 
 from __future__ import annotations

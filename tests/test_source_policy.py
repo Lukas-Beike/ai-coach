@@ -47,7 +47,7 @@ from backend.performance.source_policy import (
     source_order,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
+from backend.sync.garmin_performance_history import current_garmin_metrics
 
 GARMIN = ProviderId.GARMIN
 
@@ -937,7 +937,7 @@ class GarminSelectionTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.observations = _mapped(WELLNESS_ROWS, ATHLETE, GARMIN_SECTIONS)
-        self.garmin_metrics = garmin_payload_performance_metrics(GARMIN_SECTIONS, TODAY)
+        self.garmin_metrics = current_garmin_metrics(GARMIN_SECTIONS, TODAY)
         self.snapshot: dict[str, Any] = {
             "athlete": LEGACY_ATHLETE,
             "recent_wellness": WELLNESS_ROWS,
@@ -972,7 +972,7 @@ class GarminSelectionTests(unittest.TestCase):
         observations = _mapped(WELLNESS_ROWS, ATHLETE, garmin)
 
         current = current_performance_metrics(
-            self.snapshot, {}, garmin_payload_performance_metrics(garmin, TODAY)
+            self.snapshot, {}, current_garmin_metrics(garmin, TODAY)
         )
         self.assertEqual(current["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(
@@ -1017,7 +1017,7 @@ class GarminSelectionTests(unittest.TestCase):
     def test_cycling_ftp_with_only_intervals_is_none(self) -> None:
         without_garmin = _mapped(WELLNESS_ROWS, ATHLETE, {})
         current = current_performance_metrics(
-            self.snapshot, {}, garmin_payload_performance_metrics({}, TODAY)
+            self.snapshot, {}, current_garmin_metrics({}, TODAY)
         )
         self.assertIsNone(current["cycling_ftp_watts"]["value"])
         self.assertIsNone(
@@ -1025,12 +1025,13 @@ class GarminSelectionTests(unittest.TestCase):
         )
 
     def test_cycling_ftp_keeps_the_last_garmin_record_whatever_its_date(self) -> None:
-        # Current FTP reads the last numeric input record and ignores dates, so the
-        # older-dated 300 wins because it comes last; same-day duplicates also keep
-        # the last record.
-        for records, expected in (
-            ((("2026-05-04", 302), ("2026-05-03", 300)), 300),
-            ((("2026-05-04", 250), ("2026-05-04", 260)), 260),
+        # The source-policy selection reads the last numeric input record and
+        # ignores dates, so the older-dated 300 wins because it comes last;
+        # same-day duplicates also keep the last record. The Garmin current FTP
+        # takes the newest day (a named deviation in test_garmin_health_parity, #2081).
+        for records, expected, current in (
+            ((("2026-05-04", 302), ("2026-05-03", 300)), 300, 302),
+            ((("2026-05-04", 250), ("2026-05-04", 260)), 260, 260),
         ):
             with self.subTest(expected=expected):
                 garmin = {
@@ -1040,8 +1041,8 @@ class GarminSelectionTests(unittest.TestCase):
                     ]
                 }
 
-                metrics = garmin_payload_performance_metrics(garmin, TODAY)
-                self.assertEqual(metrics["cycling_ftp_watts"]["value"], expected)
+                metrics = current_garmin_metrics(garmin, TODAY)
+                self.assertEqual(metrics["cycling_ftp_watts"]["value"], current)
                 self.assertEqual(
                     _values(
                         select_current(
@@ -1085,7 +1086,7 @@ class GarminSelectionTests(unittest.TestCase):
         self.assertIsNone(context["hrv"])
         self.assertIsNone(context["readiness"])
         current = current_performance_metrics(
-            self.snapshot, {}, garmin_payload_performance_metrics({}, TODAY)
+            self.snapshot, {}, current_garmin_metrics({}, TODAY)
         )
         self.assertIsNone(current["weight_kg"]["value"])
         self.assertIsNone(current["body_fat_pct"]["value"])
@@ -1178,13 +1179,17 @@ class IntentionalDeviationTests(unittest.TestCase):
         # Deviation: the legacy reader applies a generic Garmin VO2max to running.
         # The canonical observation has no sport, so a sport-specific query skips
         # it. The caller decides whether a generic value should apply.
-        garmin = {"max_metrics": {"generic": {"vo2MaxPreciseValue": 55.0}}}
+        garmin = {
+            "max_metrics": {
+                "generic": _garmin_record("2026-05-04", vo2MaxPreciseValue=55.0)
+            }
+        }
         observations = _mapped([], None, garmin)
 
         current = current_performance_metrics(
             {"athlete": {}, "recent_wellness": [], "recent_activities": []},
             {},
-            garmin_payload_performance_metrics(garmin, TODAY),
+            current_garmin_metrics(garmin, TODAY),
         )
         self.assertEqual(current["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertIsNone(
@@ -1206,7 +1211,7 @@ class IntentionalDeviationTests(unittest.TestCase):
         }
         observations = _mapped([], None, garmin)
 
-        metrics = garmin_payload_performance_metrics(garmin, TODAY)
+        metrics = current_garmin_metrics(garmin, TODAY)
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(
             _values(select_current(observations, MetricKind.FTP, sport=Sport.RIDE)),

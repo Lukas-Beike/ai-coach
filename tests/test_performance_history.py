@@ -58,7 +58,7 @@ class PerformanceHistoryTests(unittest.TestCase):
     def test_current_metrics_and_readiness_filter_by_current_freshness(self):
         payload = {
             "weight": [{"date": "2026-08-31", "weightKg": 72}],
-            "readiness": [{"date": "2026-08-31", "readiness": 85}],
+            "readiness": [{"calendarDate": "2026-08-31", "score": 85}],
             "source_freshness": {
                 "weight": current_source(),
                 "readiness": current_source(),
@@ -101,7 +101,7 @@ class PerformanceHistoryTests(unittest.TestCase):
     def test_missing_stale_and_undated_values_are_not_added(self):
         payload = {
             "weight": [{"date": "2026-08-31", "weightKg": 72}],
-            "readiness": [{"date": "2026-08-31", "readiness": 85}],
+            "readiness": [{"calendarDate": "2026-08-31", "score": 85}],
             "source_freshness": {
                 "weight": {"freshness": "stale", "observed_at": "2026-08-31"},
                 "readiness": {"freshness": "current"},
