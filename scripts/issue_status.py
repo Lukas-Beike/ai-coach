@@ -2,8 +2,9 @@
 
 Run before reporting an issue as done: `python scripts/issue_status.py 1906`.
 Exit code 1 means the issue is not done yet (open checkboxes or open PRs);
-open boxes under an acceptance-criteria heading do not count. A PR links the
-issue only with a closing keyword or `Part of #n`; a mention does not.
+open boxes under an `Acceptance criteria` or `Acceptance` heading do not count.
+A PR links the issue only with a closing keyword or `Part of #n`; a mention
+does not.
 """
 
 import json
@@ -15,11 +16,14 @@ CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 
 HEADING = re.compile(r"^(#{1,6}) +(\S.*)$")
 
+# "Acceptance criteria ..." or a plain "Acceptance" (#2799), not "Acceptance tests"
+CRITERIA = re.compile(r"acceptance(?:\s+criteria\b.*|:?)", re.IGNORECASE)
+
 
 def open_boxes(body):
     """Open box matches split into parts and acceptance criteria.
 
-    A criterion sits under a heading starting with "Acceptance criteria", down to
+    A criterion sits under a CRITERIA heading, down to
     the next heading of the same or a higher level; headings inside code fences
     do not count. The closing summary covers criteria; parts keep an issue open.
     """
@@ -30,7 +34,7 @@ def open_boxes(body):
         fenced ^= text.startswith(("```", "~~~"))
         if (heading := HEADING.match(text)) and not fenced:
             depth = len(heading[1])  # a deeper heading stays inside the section
-            starts = heading[2].lower().startswith("acceptance criteria")
+            starts = CRITERIA.fullmatch(heading[2])
             level = depth if starts else level * (depth > level)
         if box := CHECKBOX.match(body, start, end):
             (criteria if level else parts).append(box)

@@ -10,7 +10,7 @@
 
 Exit 0: done; 1: refused (ambiguous or missing checkbox, open checkboxes or an
 open PR on close); 2: bad input or a failed gh call. Close ticks the open boxes
-under an acceptance-criteria heading and accepts an issue a merge already closed.
+under an `Acceptance criteria` or `Acceptance` heading and accepts an issue a merge already closed.
 """
 
 from __future__ import annotations

@@ -205,8 +205,9 @@ class IssueUpdateTests(unittest.TestCase):
             fake.writes(), [["issue", "comment", "12"], ["issue", "edit", "12"]]
         )
         # #2691: unticked acceptance criteria do not refuse; the summary covers
-        # them and close ticks them, boxes above the criteria stay unchanged.
-        body = "- [x] done\n## Acceptance criteria\n- [ ] works\r\n* [ ] fast\n"
+        # them and close ticks them, boxes above the criteria stay unchanged;
+        # #2799: a plain "Acceptance" heading holds criteria too.
+        body = "- [x] done\n## Acceptance\n- [ ] works\r\n* [ ] fast\n"
         code, _, _, fake = self.run_script(
             "close", "12", "--body-file", str(self.file), body=body, state="CLOSED"
         )
@@ -221,7 +222,7 @@ class IssueUpdateTests(unittest.TestCase):
         )
         self.assertEqual(
             fake.edited_body,
-            "- [x] done\n## Acceptance criteria\n- [x] works\r\n* [x] fast\n",
+            "- [x] done\n## Acceptance\n- [x] works\r\n* [x] fast\n",
         )
 
     def test_failed_gh_call_exits_2(self):
