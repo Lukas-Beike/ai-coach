@@ -299,7 +299,10 @@ class GarminLoginTests(unittest.TestCase):
         self.tokenstore.write_text(BLOB, encoding="utf-8")
         self.next_client = FakeClient()
         self.service.login(self._login_body())
+        self.key_values.set(self.connection, "last_sync_error", "Garmin failed")
         result = self.service.disconnect()
+        # The Garmin operation's error ends with the connection (#2705).
+        self.assertEqual("", self._stored("last_sync_error"))
         self.assertEqual(result["status"], "disconnected")
         self.assertFalse(result["connected"])
         self.assertEqual(result["source"], "none")
