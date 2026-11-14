@@ -243,6 +243,23 @@ The system SHALL pair the executed work laps of a run or ride in order with the 
 
 Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`. Added evidence: `tests/test_planned_targets.py:test_absolute_paces_count_without_a_threshold_pace`, `tests/test_planned_targets.py:test_heart_rate_targets_use_the_second_half`, `tests/test_planned_targets.py:test_progressions_pair_every_rep_with_its_own_step`.
 
+### Requirement: Planned step adherence in the session details
+The system SHALL serve, with the detail document of a run or ride that the calendar pairs with a local planned unit on its day, every planned step's share of time inside its target, a session score and planned against actual time per zone, and the calendar's session details SHALL show them with each step's target band on its chart; nothing is shown for an unpaired session, and a failing comparison never fails the details.
+
+#### Scenario: Steps on their windows
+- **WHEN** the work laps are paired with the work steps as for the laps' comparison
+- **THEN** each work step reads its lap, the steps before, between and after the laps share the time between them by planned duration (a distance step at its target speed's middle, else the gap stays `window_unknown`), a session without work laps shares its whole span so, steps after an unrun work step are `not_executed`, a step between work steps is a recovery only below 80 % of the easiest work step's level, and a step without a resolvable target, a ramp or a heart-rate step under 120 s stays unscored.
+
+#### Scenario: Time in target and score
+- **WHEN** a step is scored
+- **THEN** `time_in_target_pct` is the share of its window's displayed samples inside the target (heart rate over the second half; speeds below 0.3 m/s left out), its band is good from 80 %, fair from 50 % and poor below, and the session score is the time in target over all scored time with the same bands.
+
+#### Scenario: Planned against actual time per zone
+- **WHEN** the plan's steps have targets
+- **THEN** zones count in the metric with the most planned time: planned as each step's duration in the zone of its target's middle, actual from the displayed stream with the same zone limits (speeds below 0.3 m/s left out); without that metric's threshold the zones are `not_covered`.
+
+Evidence: `backend/performance/planned_targets.py:planned_step_adherence`, `backend/performance/activity_read_service.py:ActivityAnalysisReadService.planned_adherence`, `backend/http_api/sync_get.py`, `public/activity-analysis.js`; `tests/test_planned_targets.py:PlannedStepAdherenceTests`, `tests/chart-golden.test.cjs`, `e2e/calendar-detail-pane.spec.js`.
+
 ### Requirement: Comparable earlier sessions
 The system SHALL set a run's or ride's execution against comparable earlier sessions of the last 84 days, read from each session's execution in the curve window, and report this session, the peers' median and the difference with peer count and temperatures; nothing is scored.
 

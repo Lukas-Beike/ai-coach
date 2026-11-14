@@ -142,7 +142,20 @@
     });
   }
 
-  function chart(streams, channel) {
+  // A planned step's target band over its window; an open bound reaches the chart's edge (#2830).
+  function appendTargets(svg, channel, scale, targets) {
+    for (const step of targets) {
+      const high = step.high == null ? null : channelValue(channel, step.high);
+      const low = channelValue(channel, step.low);
+      const top = high == null ? TOP : scale.y(high);
+      const bottom = low == null ? scale.baseline : scale.y(low);
+      const left = scale.x(Math.max(step.start_s, scale.start)); const right = scale.x(Math.min(step.end_s, scale.start + scale.span));
+      if (right <= left) continue;
+      svg.append(svgNode("rect", { x: left, width: right - left, y: Math.min(top, bottom), height: Math.max(1, Math.abs(bottom - top)), class: "activity-analysis-target" }));
+    }
+  }
+
+  function chart(streams, channel, targets = []) {
     const times = streams.time_s;
     const raw = streams.channels[channel.key].values;
     if (!Array.isArray(times) || times.length !== raw.length) return null;
@@ -166,6 +179,7 @@
 
     const svg = svgNode("svg", { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: "img", "aria-label": `${channel.label}: ${summaryText}, über ${clock(span)}` });
     appendAxes(svg, channel, scale);
+    appendTargets(svg, channel, scale, targets);
     const { line, area } = chartPaths(points, scale);
     // A flat series is a line only; a filled area would read as a solid block.
     if (!flat) svg.append(svgNode("path", { d: area, class: "activity-analysis-area" }));
@@ -276,6 +290,81 @@
     return h("section", "activity-analysis-laps", h("h4", null, "Runden"), wrap);
   }
 
+  // Planned steps against the session (#2830): score, step strip, one row per step and zone times.
+  const STEP_ROLES = { warmup: "Einlaufen", recovery: "Pause", cooldown: "Auslaufen" };
+  const ZONE_TITLES = { speed: "Zeit je Pace-Zone", heartrate: "Zeit je HF-Zone", watts: "Zeit je Leistungszone" };
+  const TARGET_CHANNELS = { speed: "speed_mps", heartrate: "heart_rate_bpm", watts: "power_w" };
+
+  function boundsText([low, high], unit, format = numberText) {
+    if (low == null && high == null) return null;
+    if (high == null) return `ab ${format(low)} ${unit}`;
+    if (low == null || low === 0) return `bis ${format(high)} ${unit}`;
+    return `${format(low)}–${format(high)} ${unit}`;
+  }
+
+  function stepTarget(step) {
+    const pace = step.target_pace_s_per_km;
+    if (pace) {
+      const [fastest, slowest] = pace;
+      if (fastest == null) return slowest == null ? null : `schneller als ${clock(slowest)}/km`;
+      return slowest == null ? `langsamer als ${clock(fastest)}/km` : `${clock(fastest)}–${clock(slowest)}/km`;
+    }
+    if (step.target_bpm) return boundsText(step.target_bpm, "bpm");
+    if (step.target_watts) return boundsText(step.target_watts, "W");
+    return step.target_kmh ? boundsText(step.target_kmh, "km/h", (value) => numberText(value, 1)) : null;
+  }
+
+  function stepActual(step) {
+    if (!finite(step.actual)) return null;
+    if (step.target_pace_s_per_km) return `Ø ${clock(step.actual)}`;
+    if (step.target_kmh) return `Ø ${numberText(step.actual, 1)} km/h`;
+    return `Ø ${numberText(step.actual)} ${step.target_watts ? "W" : "bpm"}`;
+  }
+
+  const stepSeconds = (step) => (finite(step.end_s) && finite(step.start_s) ? step.end_s - step.start_s : step.planned_duration_s);
+
+  function adherenceZones(zones) {
+    const rows = (zones?.zones || []).filter((zone) => zone.planned_s > 0 || zone.actual_s > 0);
+    if (zones?.status !== "ok" || !rows.length) return null;
+    const most = Math.max(...rows.flatMap((zone) => [zone.planned_s, zone.actual_s]));
+    const width = (seconds) => `${Math.round(seconds / most * 1000) / 10}%`;
+    const minutes = (seconds) => `${Math.round(seconds / 60)}′`;
+    const list = h("ol");
+    for (const zone of rows) {
+      const plan = h("span", "activity-adherence-plan"); plan.style.width = width(zone.planned_s);
+      if (!zone.planned_s) plan.style.visibility = "hidden";
+      const actual = h("span", "activity-adherence-actual"); actual.style.width = width(zone.actual_s);
+      list.append(h("li", { dataset: { zone: `Z${zone.zone}` } }, h("span", "activity-analysis-zone-label", `Z${zone.zone}`), h("span", "activity-adherence-pair", plan, actual),
+        h("span", { className: "activity-analysis-zone-value", "aria-label": `Soll ${minutes(zone.planned_s)}, Ist ${minutes(zone.actual_s)}` }, `${minutes(zone.planned_s)} / ${minutes(zone.actual_s)}`)));
+    }
+    return h("section", "activity-analysis-zones activity-adherence-zones", h("h4", null, ZONE_TITLES[zones.metric] || "Zeit je Zone"),
+      h("p", "activity-adherence-legend", h("span", "is-plan", "Soll"), h("span", "is-actual", "Ist")), list);
+  }
+
+  function adherence(result) {
+    if (result?.status !== "ok" || !result.steps?.length) return null;
+    const header = h("div", "activity-adherence-header", h("h4", null, "Soll/Ist"));
+    if (finite(result.score_pct)) header.append(h("span", { className: "activity-adherence-score", dataset: { band: result.score_band } }, `Zieltreue ${result.score_pct} %`));
+    const strip = h("div", { className: "activity-adherence-strip", "aria-hidden": "true" });
+    const list = h("ol", "activity-adherence-steps");
+    for (const step of result.steps) {
+      const seconds = stepSeconds(step);
+      const segment = h("i", { dataset: { band: step.band || "none" } });
+      segment.style.flexGrow = String(finite(seconds) ? Math.max(seconds, 1) : 1);
+      strip.append(segment);
+      const text = [STEP_ROLES[step.role], stepTarget(step), finite(seconds) ? clock(seconds) : null, stepActual(step)].filter(Boolean).join(" · ");
+      const share = finite(step.time_in_target_pct) ? `${step.time_in_target_pct} %` : "–";
+      list.append(h("li", { dataset: { band: step.band || "none" } }, h("span", null, String(step.step)), h("span", null, text), h("span", "activity-adherence-share", share)));
+    }
+    return h("section", "activity-adherence", header, strip, list, adherenceZones(result.zones));
+  }
+
+  // The steps whose target is measured on this chart's channel and that have a window.
+  function chartTargets(result, channel) {
+    if (result?.status !== "ok") return [];
+    return (result.steps || []).filter((step) => TARGET_CHANNELS[step.metric] === channel.key && finite(step.start_s) && finite(step.end_s) && finite(step.low));
+  }
+
   function renderPanel(panel, summary, payload, token) {
     panel.replaceChildren();
     // The document's session wins; the calendar entry stands in until it loads.
@@ -285,11 +374,14 @@
     if (payload?.metrics?.efficiency_factor?.unit) metrics.efficiency_factor_unit = payload.metrics.efficiency_factor.unit;
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
+    const planned = payload?.planned_adherence;
+    const steps = adherence(planned);
+    if (steps) panel.append(steps);
     const driftLines = ActivityDetails.formDriftLines(payload?.analysis?.form_drift);
     if (driftLines.length) panel.append(h("div", null, driftLines.map((line) => h("p", null, line))));
     // The running dynamics share the time axis of the other channels.
     const streams = payload?.streams && { ...payload.streams, channels: { ...payload.streams.channels, ...payload.running_dynamics_streams } };
-    const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
+    const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel, chartTargets(planned, channel))).filter(Boolean) : [];
     if (charts.length) panel.append(h("div", "activity-analysis-charts", charts));
     for (const section of [zones("Zeit in HF-Zonen", payload?.zones?.heart_rate), zones("Zeit in Leistungszonen", payload?.zones?.power), laps(activity, payload?.laps)]) {
       if (section) panel.append(section);

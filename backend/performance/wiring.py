@@ -294,12 +294,16 @@ def build_activity_reads(
     *,
     session_activities: Callable[..., Any],
     refreshable_providers: Callable[[], Iterable[str]],
+    planned_units: Callable[[], Any] | None = None,
+    unit_thresholds: Callable[[], Any] | None = None,
 ) -> ActivityReadServices:
     """Fresh activity read services over the canonical read state of the context.
 
     The canonical read reports its read state, so the detail's performance block
     is marked pending or carries the compact-only activity gap.
-    ``refreshable_providers`` names the providers that can load details now.
+    ``refreshable_providers`` names the providers that can load details now;
+    ``planned_units`` and ``unit_thresholds`` give the session details their
+    planned unit's step adherence.
     """
 
     def refreshable() -> frozenset[ProviderId]:
@@ -332,6 +336,8 @@ def build_activity_reads(
             ),
             session_records=session_activities,
             refreshable=refreshable,
+            planned_units=planned_units,
+            unit_thresholds=unit_thresholds,
         )
 
     return ActivityReadServices(activity_read)

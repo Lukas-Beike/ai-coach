@@ -9,7 +9,6 @@ from typing import Any, Final
 from backend.activities.hr_cap import stored_cap
 from backend.activities.session_purpose import summary_is_not_training
 from backend.activities.strength_sets import plan_comparison
-from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.canonical.activity_summary import (
@@ -29,6 +28,7 @@ from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
 from backend.performance.planned_targets import (
     heart_rate_cap_execution,
     planned_target_execution,
+    unit_steps,
 )
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
@@ -347,28 +347,19 @@ class CoachActivityReadToolService:
         if session.get("sport") not in ("run", "ride") or self._unit_thresholds is None:
             return None
         unit = _matched_unit(session, focus, around)
-        unit_id = None if unit is None else unit.get("id")
         analysis = detail.get("analysis")
         execution = analysis.get("execution") if isinstance(analysis, dict) else None
         if unit is None or not isinstance(execution, dict):
             return None
-        description = unit.get("description")
-        if not isinstance(description, str) or len(description) > 20000:
-            return None
-        try:
-            steps = structured_steps(description, str(unit.get("target") or "AUTO"))
-        except WorkoutTextError as error:
-            return {
-                "status": "not_covered",
-                "planned_unit_id": unit_id,
-                "reason": error.reason,
-            }
+        steps = unit_steps(unit)
+        if not isinstance(steps, list):
+            return steps
         return planned_target_execution(
             execution,
             steps,
             self._unit_thresholds.thresholds(unit),
             str(session.get("sport")),
-            planned_unit_id=str(unit_id),
+            planned_unit_id=str(unit.get("id")),
             streams=detail.get("streams"),
         )
 
