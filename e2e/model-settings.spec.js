@@ -75,6 +75,10 @@ test("each task block names in an info popover when its model is used @responsiv
     await page.keyboard.press("Escape");
     await expect(info).toBeHidden();
   }
-  // The info buttons do not move the model and thinking pair.
+  // Opening them moves nothing, and the "i" does not make a heading taller than its text.
   expect(await offset()).toEqual(before);
+  for (const heading of await page.locator(".task-model-heading").all()) {
+    const [row, text] = await heading.evaluate((node) => [node.offsetHeight, node.querySelector("h3").offsetHeight]);
+    expect(row).toBeLessThanOrEqual(text + 1);
+  }
 });

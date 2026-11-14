@@ -125,7 +125,7 @@ function stopSummaryToggle(event) {
 // planning key the button is off like the other planning entry points.
 function plannedCoachButton(label, prompt, className = "secondary-button planned-conflict-button", requestKind = null) {
   const button = h("button", { type: "button", className, dataset: requestKind ? { requestKind } : undefined }, label);
-  button.disabled = Boolean(requestKind) && state.data?.model?.tasks?.planning?.ready === false;
+  button.disabled = Boolean(requestKind) && !coachConfigured(null, requestKind);
   button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt, { requestKind }); });
   return button;
 }
