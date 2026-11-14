@@ -28,7 +28,10 @@ conflicts, CI failures, and review feedback through the merge.
   yet). Resolve conflicts by understanding both sides; ask the user for product
   decisions you cannot infer. Reword the invalid subjects it lists.
 - Run [run-tests-changed](../pacecraft-run-tests-changed/SKILL.md) and fix real
-  failures. Never weaken tests, security, or required checks.
+  failures. Never weaken tests, security, or required checks. Run the full local
+  suite (17-21 min) only when the selector falls back to it, to reproduce a CI
+  failure, or when asked; browser checks use `--project changed`, CI's project
+  choice ([browser-tests](../pacecraft-browser-tests/SKILL.md), #2759).
 - **OpenSpec:** list `git diff --name-only --no-renames origin/develop...HEAD --
   openspec/changes`. Each `openspec/changes/<name>/` path outside `archive/`
   names a change that must be archived on this branch: its active directory is

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import inspect
 import json
 import math
@@ -187,6 +188,8 @@ class Evidence:
                 "mode": "complete"
                 if args.project == "all" and not args.spec
                 else "focused",
+                # How --project changed chose the project (#2759), or None.
+                "chosen_by": getattr(args, "chosen_by", None),
             },
             "resources": {"jobs": args.jobs, "playwright_workers": 1, "ports": []},
             "phases": {},
@@ -1289,7 +1292,12 @@ def parser():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     result.add_argument(
-        "--project", help="exact configured project name, or all (required)"
+        "--project",
+        help="exact configured project name, all, or changed: desktop unless the "
+        "diff against --base touches the UI, as CI decides (required)",
+    )
+    result.add_argument(
+        "--base", help="ref --project changed compares with (default origin/develop)"
     )
     result.add_argument(
         "--spec",
@@ -1367,6 +1375,37 @@ def source_hashes(root, durations):
     }
 
 
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def changed_project(base, root=ROOT):
+    """CI's project choice for the local diff (#2747, #2748), or None for docs only.
+
+    Paths come from the Python test selector (committed, staged, unstaged and
+    untracked files since the merge base) and the decision from CI's single
+    classifier, so local and pull-request runs pick the same projects (#2759).
+    An empty diff, known here rather than unreadable as in CI, runs desktop.
+    """
+    paths = _load("changed_tests", "tests/changed_tests.py").changed_paths(base, root)
+    ci = _load("ci_changes", ".github/scripts/ci_changes.py")
+    if not paths:
+        return "desktop", "no changed path"
+    if ci.docs_only(paths):
+        return (
+            None,
+            f"documentation only ({len(paths)} paths); CI runs no browser project",
+        )
+    touched = [path for path in paths if ci.touches_ui(path)]
+    if touched:
+        more = f" (+{len(touched) - 5} more)" if len(touched) > 5 else ""
+        return "all", f"UI paths changed: {', '.join(touched[:5])}{more}"
+    return "desktop", f"no UI path among {len(paths)} changed paths"
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     if args.print_image:
@@ -1378,6 +1417,20 @@ def main(argv=None):
         return 0
     if not args.project:
         parser().error("--project is required")
+    if args.base and args.project != "changed":
+        parser().error("--base applies only to --project changed")
+    args.chosen_by = None
+    if args.project == "changed":
+        base = args.base or "origin/develop"
+        try:
+            project, reason = changed_project(base)
+        except (OSError, subprocess.CalledProcessError) as error:
+            parser().error(f"--project changed cannot diff against {base}: {error}")
+        print(f"--project changed: {project or 'none'} ({reason})", file=sys.stderr)
+        if project is None:
+            return 0
+        args.project = project
+        args.chosen_by = {"requested": "changed", "base": base, "reason": reason}
     run_id = uuid.uuid4().hex
     args.results_dir = args.results_dir.resolve()
     directory = args.results_dir / run_id
