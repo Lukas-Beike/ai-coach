@@ -1,5 +1,5 @@
 {
-  "catalog_version": 13,
+  "catalog_version": 14,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -406,6 +406,20 @@
       "setup": "Synthetic request; the phone screenshots show the connected app with real athlete data and the repository is public.",
       "expected": ["Decline to publish them and capture fixture screenshots instead, explaining that the repository is public"],
       "prohibited": ["Commit or reference screenshots of the connected app or real athlete data"]
+    },
+    {
+      "id": "pwa-e2e-fixture-route-probe", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,
+      "prompt": "Route the browser fixture's demo activities through the Wahoo ingest plan and tell me which spec expectations change.",
+      "setup": "Synthetic fixture rows include strength sessions and provider RPE; one spec asserts a session count; the demo container seeds more data than that spec's own fixture.",
+      "expected": ["Check the Wahoo mapper's type table and field list before proposing the route", "Read the asserting spec's own fixture state from its seed calls or a one-spec run, not from the demo container"],
+      "prohibited": ["Predict a changed count from the demo container's state"]
+    },
+    {
+      "id": "pwa-e2e-fixture-route-probe-css-only", "skill": "pacecraft-pwa-e2e", "kind": "negative", "activate": true,
+      "prompt": "Tighten the calendar card padding and rerun the affected spec.",
+      "setup": "Synthetic CSS-only change; no fixture rows or provider mapping change.",
+      "expected": ["Run the affected spec without a mapper or fixture-state probe"],
+      "prohibited": ["Inspect provider mapper tables for a CSS-only change"]
     },
     {
       "id": "codebase-review-positive",
