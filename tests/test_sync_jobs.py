@@ -1181,6 +1181,44 @@ class SyncJobStoreTests(unittest.TestCase):
             db.execute("DELETE FROM sync_job_items")
             db.execute("DELETE FROM sync_jobs")
 
+    def test_a_restart_ends_a_garmin_operation_left_running(self):
+        # A stale "running" would show as live while a later Garmin push holds
+        # the same lock (#2706); between claims the live operation stays.
+        def operation():
+            with self.manager.reader() as db:
+                return {
+                    row["key"]: row["value"]
+                    for row in db.execute("SELECT key, value FROM kv")
+                }
+
+        running = {
+            "sync_operation_status": "running",
+            "sync_operation_phase": "fetching",
+            "sync_operation_progress": "10",
+            "sync_operation_message": "Garmin-Daten werden gelesen…",
+            "sync_operation_id": "op-1",
+        }
+        with self.manager.unit_of_work() as db:
+            for key, value in running.items():
+                db.execute(
+                    "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                    (key, value, self.now),
+                )
+        self.store.requeue_unowned_running()
+        self.assertEqual(running, operation())
+        self.store.resume_interrupted()
+        # The whole running projection ends; the id names the last operation.
+        self.assertEqual(
+            {
+                "sync_operation_status": "",
+                "sync_operation_phase": "",
+                "sync_operation_progress": "0",
+                "sync_operation_message": "",
+                "sync_operation_id": "op-1",
+            },
+            operation(),
+        )
+
     def test_requeue_unowned_running_runs_a_lost_outcome_again(self):
         job, _ = self.enqueue()
         self.assertEqual(self.store.claim()["id"], job["id"])
