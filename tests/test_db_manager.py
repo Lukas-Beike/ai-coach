@@ -191,6 +191,28 @@ class DatabaseManagerTests(unittest.TestCase):
             self.assertTrue(replaced.is_set())
             holder.reset()
 
+    def test_holder_never_closes_a_manager_another_thread_just_opened(self):
+        # The opening thread assigns the manager, then its signature, under the
+        # lock. A second caller in that gap must wait and reuse the manager,
+        # not take it for a stale one and close it (#2106 review).
+        with tempfile.TemporaryDirectory() as root:
+            holder, _state = make_holder(Path(root))
+            opened = holder()
+            signature = holder._signature
+            results = []
+            with holder._lock:
+                holder._signature = None
+                caller = threading.Thread(target=lambda: results.append(holder()))
+                caller.start()
+                caller.join(0.2)
+                holder._signature = signature
+            caller.join(2)
+            self.assertFalse(caller.is_alive())
+            self.assertEqual([opened], results)
+            with opened.unit_of_work() as db:
+                db.execute("SELECT 1")
+            holder.reset()
+
     def test_unit_of_work_rolls_back_and_reader_pool_reuses_connections(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)

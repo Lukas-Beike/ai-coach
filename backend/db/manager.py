@@ -537,8 +537,14 @@ class DatabaseHolder:
                 "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
             )
         signature = (str(path.resolve()), password, available)
-        if self.manager is not None and self._signature != signature:
-            self.reset()
+        # Compare and detach under the lock, so a thread never closes a manager
+        # another thread has just opened; the close waits for leases outside it.
+        with self._lock:
+            stale = None
+            if self.manager is not None and self._signature != signature:
+                stale, self.manager, self._signature = self.manager, None, None
+        if stale is not None:
+            stale.close()
         with self._lock:
             if self.manager is None:
                 self.manager = DatabaseManager(
