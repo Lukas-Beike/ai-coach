@@ -66,17 +66,23 @@ def compose_model_instructions(
     The provider reuses the longest identical prefix, so the stable rules come
     first and the per-turn, date-dependent training context follows. Every tool
     round of a turn sends the same text; turn-specific notices stay at the end.
+    Each part sits in its own XML tag so rules, data and notices stay apart.
     """
     instructions = (
-        dialogue.INSTRUCTIONS + _ATTACHMENT_POLICY + "\n\n" + training_context
+        "<dialogue_rules>"
+        + dialogue.INSTRUCTIONS
+        + _ATTACHMENT_POLICY
+        + "\n</dialogue_rules>\n\n"
+        + training_context
     )
     instructions += playbook_for(request_kind) + nutrition_playbook(nutrition)
-    if attachment_summary:
-        instructions += LOCAL_ATTACHMENT_SUMMARY_NOTICE
-    if resumed_steps:
-        instructions += RESUMED_STEPS_NOTICE
-    if not allow_mutations:
-        instructions += _ADVISORY_RUN_NOTICE
+    notices = (
+        (LOCAL_ATTACHMENT_SUMMARY_NOTICE if attachment_summary else "")
+        + (RESUMED_STEPS_NOTICE if resumed_steps else "")
+        + ("" if allow_mutations else _ADVISORY_RUN_NOTICE)
+    )
+    if notices:
+        instructions += "\n\n<turn_notices>" + notices + "\n</turn_notices>"
     return instructions
 
 

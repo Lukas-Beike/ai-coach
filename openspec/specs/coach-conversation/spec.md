@@ -390,7 +390,7 @@ The fixed Coach instructions SHALL be the normative text of these modules, not r
 
 #### Scenario: Instruction order
 - **WHEN** a Coach turn's instructions are composed
-- **THEN** they are the dialogue rules, the attachment policy, the training context (the coaching rules, then the athlete context and library marked as untrusted external data), the playbook of the turn's kind and the nutrition playbook when nutrition is selected, then the notices for an earlier attachment summary, requeued confirmed steps and an advisory turn without writes; tool rounds reuse the current composed text (rebuilt only when a context refresh changes it), and the final request after the tool budget is exhausted appends the tool-budget notice
+- **THEN** they are the dialogue rules and the attachment policy in `<dialogue_rules>`, the training context (the coaching rules in `<coaching_rules>`, then the athlete context and library marked as untrusted external data in `<athlete_context>`), the playbook of the turn's kind in `<request_playbook>` and the nutrition playbook in `<nutrition_playbook>` when nutrition is selected, then in one `<turn_notices>` the notices for an earlier attachment summary, requeued confirmed steps and an advisory turn without writes; tool rounds reuse the current composed text (rebuilt only when a context refresh changes it), and the final request after the tool budget is exhausted appends the tool-budget notice in its own `<turn_notices>`
 
 #### Scenario: Changing a rule
 - **WHEN** a rule in one of these modules changes

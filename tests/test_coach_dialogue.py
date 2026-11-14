@@ -3036,7 +3036,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ].instructions
         # The refreshed context replaces the stale one; static rules lead for
         # prompt caching and the per-turn context follows them.
-        self.assertTrue(instructions.startswith(coach_dialogue.INSTRUCTIONS))
+        self.assertTrue(
+            instructions.startswith("<dialogue_rules>" + coach_dialogue.INSTRUCTIONS)
+        )
         self.assertIn("\n\nFresh Garmin data", instructions)
 
 

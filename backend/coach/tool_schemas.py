@@ -412,7 +412,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "read_training_state",
-            "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false BEFORE editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.",
+            "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false before editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.",
             {
                 "include_inactive": {"type": "boolean"},
                 "cursor": {"type": "string"},

@@ -492,7 +492,9 @@ class StructuredToolRoundTests(unittest.TestCase):
             "Do not change data or pending requests.", state.model_instructions
         )
         # Static rules first, per-turn context last (provider prompt caching).
-        self.assertTrue(state.model_instructions.startswith(INSTRUCTIONS))
+        self.assertTrue(
+            state.model_instructions.startswith("<dialogue_rules>" + INSTRUCTIONS)
+        )
         self.assertLess(
             state.model_instructions.index("fresh synthetic context"),
             state.model_instructions.index("Do not change data or pending requests."),

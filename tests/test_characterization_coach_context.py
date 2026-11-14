@@ -667,6 +667,11 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in workouts], ["1"])
         bounded = bounded_coach_context_value({"text": "x" * 1000}, 100)
         self.assertLessEqual(coach_context_json_size(bounded), 100)
+        # Sizes count "<" as sent, the six-character escape <: '"<<"' -> 14.
+        self.assertEqual(coach_context_json_size("<<"), 14)
+        escaped = bounded_coach_context_value({"text": "<" * 1000}, 100)
+        sent = json.dumps(escaped, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(sent) + 5 * sent.count("<"), 100)
 
     def test_future_planned_workouts_exclude_invalid_and_past_dates(self) -> None:
         planned = future_coach_planned_workouts(

@@ -1124,15 +1124,24 @@ def _compact_coach_library_workout(
 
 
 _FENCE_MARKER = re.compile(r"untrusted\s+external\s+data", re.IGNORECASE)
+# The six-character JSON escape of "<" (backslash, "u003c"), built from chr(92)
+# because tests/test_source_encoding.py rejects literal unicode escapes in source.
+ESCAPED_LT = chr(92) + "u003c"
 
 
 def _defanged(text: str) -> str:
-    """Stop serialized external text from reproducing the untrusted-data fence."""
-    return _FENCE_MARKER.sub("untrusted-external-data", text)
+    """Stop serialized external text from reproducing the untrusted-data fence.
+
+    Every ``<`` becomes ESCAPED_LT (``<`` occurs only inside JSON strings), so
+    no text can open or close an instruction section tag.
+    """
+    return _FENCE_MARKER.sub("untrusted-external-data", text).replace("<", ESCAPED_LT)
 
 
 def coach_context_json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    """Length of the compact JSON as sent: _defanged writes each "<" as 6 characters."""
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return len(text) + 5 * text.count("<")
 
 
 def _bounded_string(value: str, limit: int) -> str:
@@ -1446,8 +1455,10 @@ class CoachTrainingContextService:
             json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
         )
         context_prefix = (
-            COACH_PROMPT
-            + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
+            "<coaching_rules>\n"
+            + COACH_PROMPT
+            + "</coaching_rules>\n\n<athlete_context>\nUntrusted external data.\n"
+            + "STRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
             + "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
         )
         context_suffix = (
@@ -1458,7 +1469,7 @@ class CoachTrainingContextService:
                 if selection
                 else ""
             )
-            + "\nEND UNTRUSTED EXTERNAL DATA\n"
+            + "\n</athlete_context>\n"
         )
         context = context_prefix + structured_text + context_suffix
         LOGGER.info(
@@ -1474,7 +1485,7 @@ class CoachTrainingContextService:
                         if value is not None
                     },
                     "library_characters": len(library_text),
-                    "static_instruction_characters": len(COACH_PROMPT),
+                    "static_instruction_characters": len(context_prefix),
                 },
             },
         )

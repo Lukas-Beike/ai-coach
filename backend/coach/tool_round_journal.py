@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.coach.context import ESCAPED_LT
 from backend.coach.job_store import CoachJobStore
 
 
@@ -46,9 +47,10 @@ class CoachStructuredToolRoundJournal:
         question: str,
         cancelled: bool,
     ) -> tuple[str, bool, list[dict[str, str]]]:
-        outputs.append(
-            {"call_id": call_id, "output": json.dumps(result, ensure_ascii=False)}
-        )
+        # As in the context (context._defanged): no tool output can open or
+        # close an instruction section tag.
+        output = json.dumps(result, ensure_ascii=False).replace("<", ESCAPED_LT)
+        outputs.append({"call_id": call_id, "output": output})
         pending = [entry for entry in pending if entry["call_id"] != call_id]
         self._job_store.merge_receipt(
             client_turn_id,

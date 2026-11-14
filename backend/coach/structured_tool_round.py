@@ -63,10 +63,11 @@ _TURN_RELEASED = {
 # Sent when the model still wants tools after the last round, so the answer
 # states what is unfinished instead of implying the meal or change was saved.
 _TOOL_BUDGET_NOTICE = (
-    "\nTool step limit reached for this turn: no further tools can run. Nothing "
-    "beyond the confirmed tool results was saved or sent. Tell the athlete plainly "
-    "which parts are done and which are not, never claim an unfinished change, and "
-    'say that replying "weiter" continues the request.'
+    "\n\n<turn_notices>\nTool step limit reached for this turn: no further tools "
+    "can run. Nothing beyond the confirmed tool results was saved or sent. Tell the "
+    "athlete plainly which parts are done and which are not, never claim an "
+    'unfinished change, and say that replying "weiter" continues the request.'
+    "\n</turn_notices>"
 )
 _NOT_EXECUTED = json.dumps(
     {"ok": False, "reason": "tool_step_limit_reached", "executed": False}
