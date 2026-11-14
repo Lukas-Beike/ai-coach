@@ -10,9 +10,6 @@ from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.sync.state import (
-    GARMIN_STATUS_KEY,
-    GENERAL_ERROR_KEY,
-    OPERATION_KEYS,
     SyncStateRepository,
     last_error_key,
     last_sync_key,
@@ -216,22 +213,6 @@ class StoredKeyNameTests(unittest.TestCase):
             last_sync_key("weather")
         with self.assertRaises(KeyError):
             last_error_key("weather")
-
-    def test_operation_and_general_keys_are_the_stored_names(self):
-        self.assertEqual(
-            {
-                "id": "sync_operation_id",
-                "status": "sync_operation_status",
-                "phase": "sync_operation_phase",
-                "progress": "sync_operation_progress",
-                "message": "sync_operation_message",
-                "started_at": "sync_operation_started_at",
-                "finished_at": "sync_operation_finished_at",
-            },
-            dict(OPERATION_KEYS),
-        )
-        self.assertEqual("last_sync_error", GENERAL_ERROR_KEY)
-        self.assertEqual("garmin_sync_status", GARMIN_STATUS_KEY)
 
     def test_resync_keys_are_the_stored_names_for_resync_providers_only(self):
         self.assertEqual("garmin_full_resync_running", resync_key("garmin", "running"))

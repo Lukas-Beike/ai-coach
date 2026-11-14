@@ -51,7 +51,7 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
-from backend.sync.state import GENERAL_ERROR_KEY, last_error_key, last_sync_key
+from backend.sync.state import last_error_key, last_sync_key
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 
 FRESHNESS_AREA: Final = "activities"

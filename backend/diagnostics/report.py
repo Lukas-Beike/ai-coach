@@ -62,7 +62,7 @@ from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
-from backend.sync.state import GENERAL_ERROR_KEY, last_error_key, last_sync_key
+from backend.sync.state import last_error_key, last_sync_key
 from backend.sync.stream_backfill import fit_inventory_counts
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -218,7 +218,7 @@ class DiagnosticReportService:
             def sync() -> dict[str, Any]:
                 return {
                     "last_error": deps.redactor.redact_text(
-                        self._get_value(db, GENERAL_ERROR_KEY) or ""
+                        self._get_value(db, "last_sync_error") or ""
                     )
                     or None,
                     "providers": summarize_provider_sync(db),

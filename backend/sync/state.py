@@ -32,19 +32,6 @@ _LAST_SYNC_KEYS: Final = MappingProxyType(
         INTERVALS_ID: ("last_competition_sync_at", "last_competition_sync_error"),
     }
 )
-OPERATION_KEYS: Final = MappingProxyType(
-    {
-        "id": "sync_operation_id",
-        "status": "sync_operation_status",
-        "phase": "sync_operation_phase",
-        "progress": "sync_operation_progress",
-        "message": "sync_operation_message",
-        "started_at": "sync_operation_started_at",
-        "finished_at": "sync_operation_finished_at",
-    }
-)
-GENERAL_ERROR_KEY: Final = "last_sync_error"
-GARMIN_STATUS_KEY: Final = "garmin_sync_status"
 _RESYNC_FIELDS: Final = ("running", "status", "at", "error")
 _RESYNC_PROVIDERS: Final = tuple(
     provider for _, provider in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()

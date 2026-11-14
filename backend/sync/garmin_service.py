@@ -57,7 +57,7 @@ from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
 from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import sync_job_error_class
-from backend.sync.state import GARMIN_STATUS_KEY, OPERATION_KEYS, last_sync_key
+from backend.sync.state import last_sync_key
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
@@ -1276,13 +1276,13 @@ class GarminSyncLifecycleState:
         return self._get(last_sync_key(GARMIN_ID))
 
     def set_sync_status(self, message: str) -> None:
-        self._set(GARMIN_STATUS_KEY, message)
+        self._set("garmin_sync_status", message)
 
     def record_sync_started(self) -> None:
-        self._set(OPERATION_KEYS["started_at"], self._utc_now())
+        self._set("sync_operation_started_at", self._utc_now())
 
     def record_sync_finished(self) -> None:
-        self._set(OPERATION_KEYS["finished_at"], self._utc_now())
+        self._set("sync_operation_finished_at", self._utc_now())
 
     def record_metric_export_status(self, message: str) -> None:
         self._set(METRIC_EXPORT_STATUS_KEY, f"{self._utc_now()}: {message}")
