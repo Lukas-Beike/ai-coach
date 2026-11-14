@@ -447,7 +447,7 @@ The analysis power and running best-effort curve (`mean-max-curve` version 2, wi
 
 #### Scenario: Windows
 - **WHEN** a session curve is computed
-- **THEN** cycling has the windows 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800 and 3600 s, running 60, 180, 300, 420, 720 and 1200 s and 1000 and 5000 m.
+- **THEN** cycling has the windows 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800 and 3600 s, running 60, 180, 300, 420, 720 and 1200 s and 1000, 5000, 10000, 21097.5 and 42195 m.
 
 #### Scenario: Valid samples
 - **WHEN** samples are read
