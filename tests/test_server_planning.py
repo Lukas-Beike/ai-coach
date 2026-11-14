@@ -1407,6 +1407,77 @@ class ServerPlanningTests(ServerTestCase):
             enqueue.call_args_list[0].args[:2], ("intervals", "competition_push")
         )
 
+    def test_planned_unit_undo_rejects_a_new_date_conflict(self):
+        old = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": (
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+                ).isoformat(),
+                "starts_at_local": (
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+                ).isoformat()
+                + "T07:30:00",
+                "sport": "Ride",
+                "name": "Old",
+                "description": "- 30m 60% easy",
+            }
+        )
+        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
+        intent = {
+            "intent": "local_action",
+            "operation": "replace_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        server.COACH_TOOL_DISPATCH.service().execute(
+            "replace_training_plan",
+            {
+                "expected_revision": state["planning_revision"],
+                "payload": {
+                    "plan_name": "Conflict Replacement",
+                    "goal": "",
+                    "workouts": [
+                        {
+                            "date": old["date"],
+                            "starts_at_local": (
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+                            ).isoformat()
+                            + "T07:45:00",
+                            "sport": "Ride",
+                            "name": "New",
+                            "description": "- 40m 60% easy",
+                            "duration_minutes": 40,
+                            "target": "AUTO",
+                            "rationale": "Test",
+                        },
+                    ],
+                },
+            },
+            intent=intent,
+            conversation_id="conversation-undo-conflict",
+            client_turn_id="turn-undo-conflict",
+            session_csrf_hash="",
+            sync_job_ids=[],
+        )
+        deleted_history = next(
+            item
+            for item in server.HISTORY.change_history_service().list()
+            if item["entity_type"] == "planned_unit"
+            and item["entity_id"] == old["id"]
+            and item["action"] == "delete"
+        )
+        with self.assertRaises(AppError) as error:
+            server.HISTORY.undo_service().apply(
+                {
+                    "change_id": deleted_history["id"],
+                    "expected_current_hash": deleted_history["after_hash"],
+                }
+            )
+        self.assertEqual(error.exception.reason, "plan_date_conflict")
+
 
 if __name__ == "__main__":
     unittest.main()
