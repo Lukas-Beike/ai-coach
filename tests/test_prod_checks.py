@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import ClassVar
 from unittest import mock
 
+from backend.canonical.vocabulary import RecordingOrigin, Sport
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import prod_client
 import prod_diagnostics
@@ -236,6 +238,59 @@ class ProdChecksTests(unittest.TestCase):
                 ["--url", self.url, "--password-file", str(self.secret),
                  "--section", "decoupling_eligibility", "--expect-version", "2.1.2"]
             )  # fmt: skip
+
+    def test_post_release_sections_print_counts_and_state_words_only(self):
+        # Shapes as the report builds them, with planted text, ids and times.
+        report = {
+            "garmin_past_workout_removal": {
+                "one_time_done": True,
+                "checked": 4,
+                "removed": 2,
+                "last_run_at": RECENT,
+                "last_outcome": "ok",
+                "past_links_pending": 0,
+            },
+            "stream_backfill": {
+                "garmin": {"stored": 12, "cursor": "finished", "finished": True},
+                "wahoo": {"stored": 3, "cursor": "text never printed"},
+            },
+            "fit_inventory": {
+                "garmin": {
+                    "ride": {
+                        "files": 5,
+                        "messages": {"216": 5},
+                        "unmapped_fields": {"20.134": 4},
+                    },
+                },
+                "act_secret": {"ride": {"files": 1}},
+            },
+        }
+        expected = {
+            "garmin_past_workout_removal": [
+                "checked 4", 'last_outcome "ok"', "one_time_done true",
+                "past_links_pending 0", "removed 2",
+            ],
+            "stream_backfill": [
+                'garmin.cursor "finished"', "garmin.finished true",
+                "garmin.stored 12", "wahoo.stored 3",
+            ],
+            "fit_inventory": [
+                "garmin.ride.files 5", "garmin.ride.messages.216 5",
+                "garmin.ride.unmapped_fields.20.134 4",
+            ],
+        }  # fmt: skip
+        for name, fields in expected.items():
+            with self.subTest(section=name):
+                self.assertEqual(
+                    prod_diagnostics.section_lines(report, name),
+                    [("info", f"{name}.{field}") for field in fields],
+                )
+        # The FIT allow-list names every origin and sport of the vocabulary.
+        fit = prod_diagnostics.SECTION_FIELDS["fit_inventory"]
+        for origin in RecordingOrigin:
+            for sport in [*Sport, "unknown"]:
+                sport_name = getattr(sport, "value", sport)
+                self.assertTrue(fit.fullmatch(f"{origin.value}.{sport_name}.files"))
 
     def test_diagnostics_version_mismatch_and_wrong_password(self):
         code, text = self.run_main(

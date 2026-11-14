@@ -36,8 +36,10 @@ python scripts/prod_diagnostics.py --url <app address> --password-file <secret f
 
 Prints, instead of the checks, only the fields of that section that
 `SECTION_FIELDS` in the script allows: numbers and flags by dotted path, and
-`status` as a state word (`ready`, `pending`, `failed`, `unavailable`), sorted
-by path. Free text, ids and any field not on the allow-list are never printed.
+state words from `STATES` (such as `ready`, `pending`, `finished`), sorted by
+path; `failed` and `unavailable` print as `FAIL`. Free text, ids and any field not on the allow-list are never printed.
+Sections with an allow-list: `decoupling_eligibility` (temporary, #2779),
+`garmin_past_workout_removal`, `stream_backfill` and `fit_inventory`.
 A section without an allow-list entry is refused; add the entry and its test
 in `tests/test_prod_checks.py` together with the section.
 

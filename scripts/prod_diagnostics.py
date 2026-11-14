@@ -38,15 +38,30 @@ STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
 # What `--section` prints of a section: dotted paths of numbers and flags, and
-# `status` as one of STATES; nothing else of the section is printed (#2779).
+# state words from STATES; nothing else of the section is printed (#2779, #2781).
 SECTION_FIELDS = {
     "decoupling_eligibility": re.compile(
         r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
         r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
         r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
     ),
+    "garmin_past_workout_removal": re.compile(
+        r"status|one_time_done|checked|removed|last_outcome|past_links_pending"
+    ),
+    "stream_backfill": re.compile(
+        r"status|(garmin|wahoo)\.(candidates|with_streams|stored|no_file|no_streams"
+        r"|skipped_by_error|blocked|cursor|finished)"
+    ),
+    # Per recording origin and sport (their vocabularies, in backend/canonical):
+    # files, and files per FIT message or field number.
+    "fit_inventory": re.compile(
+        r"status|(garmin|wahoo|strava|zwift|manual|upload|unknown)\."
+        r"(ride|run|swim|walk|hike|strength|row|nordic_ski|alpine_ski|yoga|other"
+        r"|unknown)\.(files|(messages|unmapped_fields|developer_fields)\.[0-9.]+)"
+    ),
 }
-STATES = {"ready", "pending", "failed", "unavailable"}
+STATES = {"ready", "pending", "failed", "unavailable", "ok", "skipped"}
+STATES |= {"finished", "in_progress", "not_started", "blocked"}
 
 
 def hours_since(stamp: str | None, now: datetime) -> float | None:
