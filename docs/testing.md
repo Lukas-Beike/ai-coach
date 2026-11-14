@@ -284,6 +284,18 @@ comparable selections and environments before claiming an improved median;
 report failed and cold-cache runs separately. Do not dispatch extra workflows
 just to populate a benchmark.
 
+CI-speed baselines use one definition (#2816):
+`python scripts/ci_run_stats.py --since <UTC> --until <UTC> [--event pull_request] [--queue]`.
+It counts successful `publish-container.yml` runs of the event created in the
+window, measures each from `created_at` to `updated_at` in minutes, and reports
+the median and a linear-interpolated p90 (`statistics.quantiles`, inclusive).
+It splits runs into `full` (mobile or tablet browser shards ran),
+`desktop-only`, `docs-only` (neither browser shards nor container unit tests)
+and `other` (a reused run), with their job counts; `--queue` adds the job queue
+time from creation to start. A re-run counts with its whole span and is
+reported; `--first-attempts` leaves re-runs out. Quote the command with each
+baseline.
+
 The provisional goals of the archived `accelerate-test-execution` change are a
 GitHub validation median below six minutes and at least 30% less local wall time
 for each complete Python and browser selection against its own newly captured
