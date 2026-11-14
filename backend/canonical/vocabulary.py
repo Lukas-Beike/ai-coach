@@ -178,6 +178,12 @@ class MetricKind(StrEnum):
     RACE_PREDICTION_10K = "race_prediction_10k"
     RACE_PREDICTION_HALF = "race_prediction_half"
     RACE_PREDICTION_FULL = "race_prediction_full"
+    # Garmin's personal running records over the race distances (#2806).
+    PERSONAL_RECORD_1K = "personal_record_1k"
+    PERSONAL_RECORD_5K = "personal_record_5k"
+    PERSONAL_RECORD_10K = "personal_record_10k"
+    PERSONAL_RECORD_HALF = "personal_record_half"
+    PERSONAL_RECORD_FULL = "personal_record_full"
     ENDURANCE_SCORE = "endurance_score"
     # Provider-reported domains retained since schema version 15. Each kind holds
     # one statistic per source series, so related provider values (targets, group
@@ -277,6 +283,11 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.RACE_PREDICTION_10K: "s",
     MetricKind.RACE_PREDICTION_HALF: "s",
     MetricKind.RACE_PREDICTION_FULL: "s",
+    MetricKind.PERSONAL_RECORD_1K: "s",
+    MetricKind.PERSONAL_RECORD_5K: "s",
+    MetricKind.PERSONAL_RECORD_10K: "s",
+    MetricKind.PERSONAL_RECORD_HALF: "s",
+    MetricKind.PERSONAL_RECORD_FULL: "s",
     MetricKind.ENDURANCE_SCORE: "score",
     MetricKind.DAILY_ENERGY_RESTING: "kcal",
     MetricKind.BODY_BATTERY_CHARGED: "score",

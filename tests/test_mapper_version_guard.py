@@ -102,11 +102,11 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "canonical.validation": (
         (9, 10, 21, 23, 8, 2),
-        "f26499153b11db946989256391373cf1bbee3b3299a53330faf6e3cf24478772",
+        "f1b07b7ef7b107fe73184807c1cd0c729d0371fd6c8e13951aca589786dfa9d8",
     ),
     "canonical.vocabulary": (
         (9, 10, 21, 23, 8, 2),
-        "c6f09bb6b368bb15d04b923dfdd7f83e05ce0d48ac5aad5e733e9759d13824b5",
+        "fa8db208b0b0bae1fe7e6fd238ba5b5522a22b484125e4c5136da54c57577754",
     ),
     "fit_activity_detail_mapping": (
         (9, 10),
@@ -146,7 +146,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "garmin_health_mapping": (
         (23,),
-        "a7d0fdc2a154c9cac611309961922df4c6b0ac289f4c9ca057f139be69de1154",
+        "724b2bcc1dd72694b7d5c5805a985036b590a45ee93fe7bbfe2ff405d71a9544",
     ),
     "garmin_performance_fields": (
         (23,),

@@ -40,6 +40,11 @@ EVENT_DRIVEN_METRICS: Final = frozenset(
         MetricKind.RACE_PREDICTION_10K,
         MetricKind.RACE_PREDICTION_HALF,
         MetricKind.RACE_PREDICTION_FULL,
+        MetricKind.PERSONAL_RECORD_1K,
+        MetricKind.PERSONAL_RECORD_5K,
+        MetricKind.PERSONAL_RECORD_10K,
+        MetricKind.PERSONAL_RECORD_HALF,
+        MetricKind.PERSONAL_RECORD_FULL,
         MetricKind.ENDURANCE_SCORE,
     )
 )

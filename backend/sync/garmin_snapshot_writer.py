@@ -48,6 +48,7 @@ ANALYSIS_SOURCES: Final = frozenset(
         "cycling_ftp",
         "running_threshold",
         "race_predictions",
+        "personal_records",
         "max_metrics",
         "cycling_ftp_history",
         "endurance_score",

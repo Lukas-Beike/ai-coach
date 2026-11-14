@@ -65,6 +65,14 @@ Mapped sections and their canonical kinds:
   a time. A time is a number, ``mm:ss`` or ``h:mm:ss`` text, or an object with a
   time alias; numbers above 100000 are milliseconds, as the legacy reader reads
   them. Containers are searched to a bounded depth (8) and list length (100).
+* ``personal_records``: PERSONAL_RECORD_1K, _5K, _10K, _HALF and _FULL in seconds
+  for running, from ``value`` by the ``typeId`` the pinned SDK documents (1, 3, 4,
+  5, 6). Each record is dated by its own ``prStartTimeLocalFormatted`` (else the
+  ``prStartTimeLocal`` epoch); one without a day is MISSING, an unreadable day
+  INVALID_TYPE. Records without a running ``activityType`` (another sport, or none
+  for steps and goals) and the running mile (2) and longest run (7) are skipped;
+  any other or non-integer running type is UNKNOWN_VALUE. The source record id is
+  ``personal_records:<day>:<kind>``.
 * ``endurance_score``: ENDURANCE_SCORE from ``overallScore``, after unwrapping the
   ``enduranceScoreDTO`` or ``enduranceScoreDTOList`` wrappers. The per-sport
   ``groupMap`` has no score of its own and is not read.
@@ -301,6 +309,20 @@ _UNSET_WHEN_ZERO: Final = frozenset(
 _DAILY_STATS: Final = "daily_stats"
 _ENDURANCE_SCORE: Final = "endurance_score"
 _RACE_PREDICTIONS: Final = "race_predictions"
+_PERSONAL_RECORDS: Final = "personal_records"
+# Running record types as the pinned garminconnect 0.3.20 documents them in
+# ``get_personal_record``: 1 = 1 km, 2 = 1 mile, 3 = 5 km, 4 = 10 km, 5 = half
+# marathon, 6 = marathon, 7 = longest run (#2806). The mile and the longest run
+# have no canonical kind; another running type is unknown.
+_PERSONAL_RECORD_KINDS: Final[Mapping[int, MetricKind]] = {
+    1: MetricKind.PERSONAL_RECORD_1K,
+    3: MetricKind.PERSONAL_RECORD_5K,
+    4: MetricKind.PERSONAL_RECORD_10K,
+    5: MetricKind.PERSONAL_RECORD_HALF,
+    6: MetricKind.PERSONAL_RECORD_FULL,
+}
+_UNMAPPED_RUNNING_RECORDS: Final = frozenset({2, 7})
+_PERSONAL_RECORD_DAY_KEYS: Final = ("prStartTimeLocalFormatted", "prStartTimeLocal")
 _PERFORMANCE_HISTORY: Final = "performance_history"
 _HISTORY_DATE: Final = "date"
 _HISTORY_METRICS: Final = "metrics"
@@ -681,6 +703,7 @@ _SECTION_ORDER: Final = (
     _WEIGHT,
     _DAILY_STATS,
     _RACE_PREDICTIONS,
+    _PERSONAL_RECORDS,
     _ENDURANCE_SCORE,
     "body_battery",
     *TRAINING_SECTIONS,
@@ -1259,6 +1282,8 @@ class _HealthMapping:
             self._map_heart_rate_zones(payload)
         elif name == _RACE_PREDICTIONS:
             self._map_race_predictions(payload)
+        elif name == _PERSONAL_RECORDS:
+            self._map_personal_records(payload)
         elif name == _PERFORMANCE_HISTORY:
             self._map_performance_history(payload)
         elif name == _ENDURANCE_SCORE:
@@ -1444,6 +1469,49 @@ class _HealthMapping:
                 continue
             for kind, (field, value) in _race_fields(record).items():
                 self._emit_race(kind, field, value, ref, day, index)
+
+    def _map_personal_records(self, payload: object) -> None:
+        """Running records over the race distances, each on its own local day."""
+        for ref, record, _index in self._records(
+            _PERSONAL_RECORDS, _top_level_items(payload)
+        ):
+            kind = self._personal_record_kind(record, ref)
+            if kind is None:
+                continue
+            named = _named_value(record, _PERSONAL_RECORD_DAY_KEYS)
+            day = None if named is None else _raw_day(named[1])
+            if not isinstance(day, date):
+                field, reason = (
+                    (_PERSONAL_RECORD_DAY_KEYS[0], IssueReason.MISSING)
+                    if named is None
+                    else (named[0], IssueReason.INVALID_TYPE)
+                )
+                self.issue(ref, field, reason)
+                continue
+            seconds = self._number(record, ("value",), ref)
+            if seconds is not None:
+                # One current record per type: its day and kind identify it.
+                entry = _entry(_PERSONAL_RECORDS, ref, day, kind.value)
+                self.emit(entry, kind, round(seconds, 2), "value", _PROVIDER, Sport.RUN)
+
+    def _personal_record_kind(
+        self, record: Mapping[str, object], ref: str
+    ) -> MetricKind | None:
+        """The kind of a running record; a record of another sport or of none
+        (steps, goals) is skipped without an issue, an undocumented or
+        non-integer running type is UNKNOWN_VALUE."""
+        sport = record.get("activityType")
+        if not isinstance(sport, str) or _heart_rate_sport(sport) is not Sport.RUN:
+            return None
+        type_id = coerce_number(record.get("typeId"))
+        whole = type_id is not None and float(type_id).is_integer()
+        number = int(type_id) if whole and type_id is not None else None
+        if number in _UNMAPPED_RUNNING_RECORDS:
+            return None
+        kind = _PERSONAL_RECORD_KINDS.get(number) if number is not None else None
+        if kind is None:
+            self.issue(ref, "typeId", IssueReason.UNKNOWN_VALUE)
+        return kind
 
     def _emit_race(
         self,

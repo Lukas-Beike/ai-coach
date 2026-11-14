@@ -30,6 +30,10 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
             "get_daily_training_status",
         )
         self.assertEqual(sources["recovery"]["daily_stats"][0], "get_daily_summaries")
+        # A current-data request also reads Garmin's running records (#2806).
+        self.assertEqual(
+            sources["performance"]["personal_records"][0], "get_personal_record"
+        )
 
     def test_targeted_weekly_view_metrics_request_daily_readings(self) -> None:
         for key, expected in (

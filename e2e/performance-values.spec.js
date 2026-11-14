@@ -84,7 +84,15 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(best.locator("tbody th")).toHaveText(["1 km", "5 km", "10 km", "Halbmarathon", "Marathon"]);
   await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText(["19:48", "20.09.2026"]);
   await expect(best.locator('[data-running-best="distance:21097.5"] td')).toHaveText(["1:32:10", "12.04.2026"]);
-  await expect(best.locator('[data-running-best="distance:42195"] td')).toHaveText(["–", ""]);
+  await expect(best.locator('[data-running-best="distance:10000"] td')).toHaveText(["–", ""]);
+  // A missing own best takes Garmin's personal record from the fixture with a "Garmin" chip; an own best keeps its value (#2806).
+  for (const [meters, time] of [["1000", "3:41"], ["42195", "3:28:00"]]) {
+    const cells = best.locator(`[data-running-best="distance:${meters}"] td`);
+    await expect(cells.first()).toHaveText(`${time}Garmin`);
+    await expect(cells.first().locator(".source-chip")).toHaveText("Garmin");
+    await expect(cells.last()).toHaveText(/^\d{2}\.\d{2}\.\d{4}$/);
+  }
+  await expect(best.locator('[data-running-best="distance:5000"] .source-chip')).toHaveCount(0);
   await expect(best).not.toContainText("min/km");
   await expect(page.locator("#currentPerformance table[data-analysis-sport='run']")).toBeVisible();
   await expect(page.locator("#currentPerformance table[data-analysis-sport='ride']")).toBeHidden();

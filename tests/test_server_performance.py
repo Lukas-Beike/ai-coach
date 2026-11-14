@@ -95,6 +95,15 @@ class ServerPerformanceTests(ServerTestCase):
         save_garmin(
             {
                 "race_predictions": {"5k": 1500},
+                # Garmin's running records reach the context with their own day (#2806).
+                "personal_records": [
+                    {
+                        "typeId": 5,
+                        "activityType": "running",
+                        "value": 5772.0,
+                        "prStartTimeLocalFormatted": "2025-04-12T09:01:22.0",
+                    }
+                ],
                 "performance_history": [
                     {
                         "date": (today - timedelta(days=29)).isoformat(),
@@ -104,6 +113,39 @@ class ServerPerformanceTests(ServerTestCase):
             }
         )
         performance = _mapped_performance_context(snapshot, today)
+        self.assertEqual(
+            performance["personal_records"],
+            [
+                {
+                    "distance_meters": 21097.5,
+                    "seconds": 5772.0,
+                    "date": "2025-04-12",
+                    "source": "Garmin Connect",
+                    "label": "Garmin",
+                }
+            ],
+        )
+        # A later answer with a faster record replaces it; when Garmin withdraws
+        # that record again (its activity deleted), the earlier record is back,
+        # although the withdrawn one keeps its newer day as history.
+        record = {"typeId": 5, "activityType": "running"}
+        for synced_at, seconds, day in (
+            ("2026-08-31T08:00:00+00:00", 5000.0, "2026-08-20"),
+            ("2026-09-01T08:00:00+00:00", 5772.0, "2025-04-12"),
+        ):
+            save_garmin(
+                {
+                    "synced_at": synced_at,
+                    "personal_records": [
+                        {**record, "value": seconds, "prStartTimeLocalFormatted": day}
+                    ],
+                },
+                replace=False,
+            )
+            records = _mapped_performance_context(snapshot, today)["personal_records"]
+            self.assertEqual(
+                [(row["seconds"], row["date"]) for row in records], [(seconds, day)]
+            )
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])

@@ -55,6 +55,14 @@ RACE_PREDICTION_KEYS: Mapping[MetricKind, str] = {
     MetricKind.RACE_PREDICTION_HALF: "run_half_marathon_seconds",
     MetricKind.RACE_PREDICTION_FULL: "run_marathon_seconds",
 }
+# Garmin's personal running records by the distance in metres they cover (#2806).
+PERSONAL_RECORD_DISTANCES: Mapping[MetricKind, float] = {
+    MetricKind.PERSONAL_RECORD_1K: 1000,
+    MetricKind.PERSONAL_RECORD_5K: 5000,
+    MetricKind.PERSONAL_RECORD_10K: 10000,
+    MetricKind.PERSONAL_RECORD_HALF: 21097.5,
+    MetricKind.PERSONAL_RECORD_FULL: 42195,
+}
 # Garmin's daily training status and four-week load balance.
 DAILY_STATUS_KINDS: tuple[MetricKind, ...] = (
     MetricKind.ACUTE_LOAD,
@@ -128,6 +136,8 @@ class GarminCanonicalMetrics:
     bike_threshold_hr_bpm: float | None = None
     profile_max_hr: Mapping[str, float] = field(default_factory=dict)
     race_predictions: Mapping[str, float] = field(default_factory=dict)
+    # Distance in metres -> (record day, seconds) of the latest personal record.
+    personal_records: Mapping[float, tuple[date, float]] = field(default_factory=dict)
     # Latest (day, value) of each training-load and load-balance kind.
     training_load: Mapping[MetricKind, tuple[date, float]] = field(default_factory=dict)
     activity_max_hr: Mapping[str, ActivityMaxHr] = field(default_factory=dict)
@@ -364,6 +374,7 @@ _READ_KINDS = (
     MetricKind.MAX_HR,
     MetricKind.RUN_THRESHOLD_POWER,
     *RACE_PREDICTION_KEYS,
+    *PERSONAL_RECORD_DISTANCES,
     *TRAINING_LOAD_KINDS,
     *(kind for kind in HISTORY_KINDS if kind not in TRAINING_LOAD_KINDS),
 )
@@ -409,6 +420,11 @@ def _metrics(
             key: value
             for kind, key in RACE_PREDICTION_KEYS.items()
             if (value := _latest_value(by_kind[kind], Sport.RUN)) is not None
+        },
+        personal_records={
+            metres: (latest.observed_on, latest.value.value)
+            for kind, metres in PERSONAL_RECORD_DISTANCES.items()
+            if (latest := _latest(by_kind[kind], Sport.RUN)) is not None
         },
         training_load={
             kind: (latest.observed_on, latest.value.value)

@@ -46,12 +46,14 @@ class SourceView(StrEnum):
     DUPLICATE = "duplicate"  # activities/duplicates.py
     SEASON_PREPARATION = "season_preparation"  # planning/season_preparation.py basis
     SEASON_PREPARATION_ACTIVITY = "season_preparation_activity"  # activity rows
+    PERSONAL_RECORD = "personal_record"  # performance/context.py record chip (#2806)
 
 
 # The providers whose recorded sessions the canonical analysis and charts read.
 SESSION_SOURCES_LABEL: Final = f"{GARMIN_LABEL}, {WAHOO_LABEL}"
 
-_GARMIN_DUPLICATE: Final = "Garmin"
+# The short provider name of duplicate rows and of the personal-record chip.
+_GARMIN_SHORT: Final = "Garmin"
 
 _PROVIDER_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
@@ -60,7 +62,8 @@ _PROVIDER_LABELS: Final[Mapping[ProviderId, str]] = {
 }
 # Only views whose coarse label differs from the provider's base label appear here.
 _VIEW_LABELS: Final[Mapping[tuple[ProviderId, SourceView], str]] = {
-    (ProviderId.GARMIN, SourceView.DUPLICATE): _GARMIN_DUPLICATE,
+    (ProviderId.GARMIN, SourceView.DUPLICATE): _GARMIN_SHORT,
+    (ProviderId.GARMIN, SourceView.PERSONAL_RECORD): _GARMIN_SHORT,
 }
 
 

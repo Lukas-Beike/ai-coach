@@ -80,6 +80,7 @@ GARMIN_METRIC_SOURCES = (
     "heart_rate_zones",
     "readiness",
     "race_predictions",
+    "personal_records",
     "max_metrics",
     "cycling_ftp",
     "running_threshold",
