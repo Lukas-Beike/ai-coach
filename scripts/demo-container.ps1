@@ -66,6 +66,11 @@ for ($i = 0; $i -lt $probes -and -not $healthy; $i++) {
     } catch {
         Start-Sleep -Seconds 2
     }
+    # A refused seed (for example another -HeavyHistory on a -Persist volume) ends the container.
+    if (-not $healthy -and (docker inspect -f "{{.State.Running}}" $Name) -eq "false") {
+        docker logs --tail 5 $Name
+        throw "Demo container '$Name' exited during startup; see its last log lines above."
+    }
 }
 if (-not $healthy) { throw "Demo container did not become healthy on port $Port" }
 Write-Host "Demo ready: http://127.0.0.1:$Port (password: e2e-fixture-password-1234)"

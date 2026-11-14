@@ -35,6 +35,8 @@ if command in failing:
     sys.exit(1)
 if command == "ps":
     sys.stdout.write(os.environ.get("FAKE_DOCKER_PS", ""))
+elif command == "inspect":
+    sys.stdout.write(os.environ.get("FAKE_DOCKER_INSPECT", ""))
 elif command == "run":
     sys.stdout.write("fake-container-id\n")
 sys.exit(0)
@@ -127,7 +129,7 @@ class DemoContainerScriptTests(unittest.TestCase):
     def commands(self):
         return [call[0] for call in self.calls()]
 
-    def run_script(self, *arguments, fail=(), ps_output=""):
+    def run_script(self, *arguments, fail=(), ps_output="", inspect=""):
         self.log.unlink(missing_ok=True)
         path_key = next((key for key in os.environ if key.upper() == "PATH"), "PATH")
         environment = {
@@ -138,6 +140,7 @@ class DemoContainerScriptTests(unittest.TestCase):
             "FAKE_DOCKER_LOG": str(self.log),
             "FAKE_DOCKER_FAIL": ",".join(fail),
             "FAKE_DOCKER_PS": ps_output,
+            "FAKE_DOCKER_INSPECT": inspect,
         }
         result = subprocess.run(
             [
@@ -304,6 +307,19 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Demo ready", result.stdout)
         self.assertEqual(calls[-1][0], "run")
+
+    def test_exited_demo_stops_the_readiness_wait_with_its_logs(self):
+        # #2801: a refused seed ends the container; do not wait 600 probes.
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
+        port = server.server_address[1]
+        server.server_close()  # nothing answers on this port
+        result, calls = self.run_script(
+            "-Name", DEMO_NAME, "-SkipBuild", "-Port", str(port),
+            "-HeavyHistory", "900", inspect="false",
+        )  # fmt: skip
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exited during startup", result.stdout + result.stderr)
+        self.assertEqual([c[0] for c in calls], ["ps", "run", "inspect", "logs"])
 
 
 class ContainerRuntimeTests(unittest.TestCase):
