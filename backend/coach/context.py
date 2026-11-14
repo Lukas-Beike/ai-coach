@@ -1124,17 +1124,15 @@ def _compact_coach_library_workout(
 
 
 _FENCE_MARKER = re.compile(r"untrusted\s+external\s+data", re.IGNORECASE)
-# The section tags of the composed instructions (request_payload, playbooks).
-_SECTION_TAG = re.compile(
-    r"<(\s*/?\s*(?:athlete_context|coaching_rules|dialogue_rules"
-    r"|request_playbook|nutrition_playbook|turn_notices)\b)",
-    re.IGNORECASE,
-)
 
 
 def _defanged(text: str) -> str:
-    """Stop serialized external text from reproducing the untrusted-data fence."""
-    return _SECTION_TAG.sub(r"\1", _FENCE_MARKER.sub("untrusted-external-data", text))
+    """Stop serialized external text from reproducing the untrusted-data fence.
+
+    Every ``<`` becomes the JSON escape ``\\u003c`` (``<`` occurs only inside
+    JSON strings), so no text can open or close an instruction section tag.
+    """
+    return _FENCE_MARKER.sub("untrusted-external-data", text).replace("<", "\\u003c")
 
 
 def coach_context_json_size(value: Any) -> int:
@@ -1482,7 +1480,7 @@ class CoachTrainingContextService:
                         if value is not None
                     },
                     "library_characters": len(library_text),
-                    "static_instruction_characters": len(COACH_PROMPT),
+                    "static_instruction_characters": len(context_prefix),
                 },
             },
         )
