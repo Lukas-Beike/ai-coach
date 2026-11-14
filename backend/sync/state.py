@@ -3,13 +3,83 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 
-from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.canonical.vocabulary import (
+    GARMIN_ID,
+    INTERVALS_ID,
+    WAHOO_ID,
+    ProviderId,
+    RemoteEntityKind,
+)
 from backend.db.remote_links import RemoteLinkRepository
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.intervals_state import INTERVALS_OUTPUT_OK_KEY, latest_stamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import CALENDAR_ID
+
+# Owner of the stored last-sync, daily-marker and full-resync key names; they
+# are persisted, so a name never changes. Competitions are the Intervals.icu area.
+_LAST_SYNC_KEYS: Final = MappingProxyType(
+    {
+        GARMIN_ID: ("last_garmin_sync_at", "last_garmin_error"),
+        WAHOO_ID: ("last_wahoo_sync_at", "last_wahoo_sync_error"),
+        CALENDAR_ID: (
+            "last_external_calendar_sync_at",
+            "last_external_calendar_sync_error",
+        ),
+        INTERVALS_ID: ("last_competition_sync_at", "last_competition_sync_error"),
+    }
+)
+_RESYNC_FIELDS: Final = ("running", "status", "at", "error")
+_RESYNC_PROVIDERS: Final = tuple(
+    provider for _, provider in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()
+)
+
+
+def last_sync_key(provider: str) -> str:
+    """Return the key of a provider's last successful sync time."""
+    return _LAST_SYNC_KEYS[provider][0]
+
+
+def last_error_key(provider: str) -> str:
+    """Return the key of a provider's last sync error."""
+    return _LAST_SYNC_KEYS[provider][1]
+
+
+def _require_daily_source(source: str) -> None:
+    if source not in DEFAULT_PROVIDER_REGISTRY.daily_marker_ids():
+        raise ValueError(f"unknown daily sync source: {source}")
+
+
+def daily_marker_key(source: str) -> str:
+    """Return the durable last-success key for a known provider."""
+    _require_daily_source(source)
+    return f"sync_{source}_last_success_at"
+
+
+def daily_attempt_key(source: str) -> str:
+    """Return the durable last-attempt key for a known provider."""
+    _require_daily_source(source)
+    return f"sync_{source}_last_attempt_at"
+
+
+def resync_key(provider: str, field: str) -> str:
+    """Return a full-resync state key: running, status, at or error."""
+    if field not in _RESYNC_FIELDS:
+        raise ValueError(f"unknown full resync field: {field}")
+    if provider not in _RESYNC_PROVIDERS:
+        raise ValueError(f"{provider} has no full resync")
+    return f"{provider}_full_resync_{field}"
+
+
+def resync_reset_keys() -> tuple[tuple[str, str], ...]:
+    """Return each full-resync provider's (running, status) keys for the startup reset."""
+    return tuple(
+        (resync_key(provider, "running"), resync_key(provider, "status"))
+        for provider in _RESYNC_PROVIDERS
+    )
 
 
 class SyncStateRepository:

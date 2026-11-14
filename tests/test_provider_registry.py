@@ -21,7 +21,6 @@ from backend.sync.freshness import (
     PROVIDER_REFRESH_STALE_SECONDS,
     provider_freshness_state,
 )
-from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.jobs import JOB_TYPES, PROVIDERS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import (
@@ -155,22 +154,6 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                     DEFAULT_PROVIDER_REGISTRY.accepts_sync_days(provider_id, days, -1),
                 )
 
-    def test_resync_keys_match_full_resync_table(self) -> None:
-        for provider_id in ("garmin", "wahoo"):
-            with self.subTest(provider_id=provider_id):
-                keys = PROVIDER_RESYNC_KEYS[provider_id]
-                self.assertEqual(
-                    (
-                        keys["running"],
-                        keys["status"],
-                        keys["last_at"],
-                        keys["error"],
-                    ),
-                    DEFAULT_PROVIDER_REGISTRY.get(provider_id).resync_keys,
-                )
-        self.assertEqual((), DEFAULT_PROVIDER_REGISTRY.get("weather").resync_keys)
-        self.assertEqual((), DEFAULT_PROVIDER_REGISTRY.get("calendar").resync_keys)
-
     def test_capabilities_are_assigned_per_provider(self) -> None:
         registry = DEFAULT_PROVIDER_REGISTRY
         self.assertEqual(("garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES))
@@ -222,7 +205,6 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                     Capability.METRIC_EXPORT in entry.capabilities,
                 )
                 self.assertLessEqual(entry.default_sync_days or 0, entry.max_sync_days)
-                self.assertIn(len(entry.resync_keys), (0, 4))
 
 
 class RegistryLookupTests(unittest.TestCase):
@@ -359,21 +341,6 @@ class OrchestrationParityTests(unittest.TestCase):
             if descriptor.coach_waits_for_completion
         ]
         self.assertEqual(["garmin", "wahoo"], waiting)
-
-    def test_resync_key_map_matches_full_resync_table_in_order(self) -> None:
-        mapping = DEFAULT_PROVIDER_REGISTRY.resync_key_map()
-        self.assertEqual(list(PROVIDER_RESYNC_KEYS), list(mapping))
-        for provider_id, keys in PROVIDER_RESYNC_KEYS.items():
-            with self.subTest(provider_id=provider_id):
-                self.assertEqual(
-                    (
-                        keys["running"],
-                        keys["status"],
-                        keys["last_at"],
-                        keys["error"],
-                    ),
-                    mapping[provider_id],
-                )
 
     def test_manual_routes_match_sync_command_table(self) -> None:
         self.assertEqual(

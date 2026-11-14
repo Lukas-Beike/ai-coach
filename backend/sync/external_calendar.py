@@ -18,6 +18,8 @@ from backend.providers import calendar as calendar_provider
 from backend.runtime.events import StateEventBuffer
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.observation import SyncOperationObserver
+from backend.sync.provider_table import CALENDAR_ID
+from backend.sync.state import last_error_key, last_sync_key
 
 EXTERNAL_CALENDAR_SYNC_LOCK = threading.Lock()
 
@@ -176,11 +178,9 @@ class ExternalCalendarSyncService:
                     f"({','.join('?' for _ in values)})",
                     values,
                 )
-            self._key_value_repository.set(
-                db, "last_external_calendar_sync_at", synced_at
-            )
+            self._key_value_repository.set(db, last_sync_key(CALENDAR_ID), synced_at)
             self._daily_sync_marker_service.mark_in_transaction(db, "calendar")
-            self._key_value_repository.set(db, "last_external_calendar_sync_error", "")
+            self._key_value_repository.set(db, last_error_key(CALENDAR_ID), "")
             self._key_value_repository.set(
                 db,
                 "last_external_calendar_sync_skipped",
@@ -218,6 +218,4 @@ class ExternalCalendarSyncService:
 
     def _record_error(self, message: str) -> None:
         with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(
-                db, "last_external_calendar_sync_error", message
-            )
+            self._key_value_repository.set(db, last_error_key(CALENDAR_ID), message)

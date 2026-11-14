@@ -45,7 +45,7 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
     complete_activity_read_window,
 )
-from backend.sync.state import SyncStateRepository
+from backend.sync.state import SyncStateRepository, last_error_key, last_sync_key
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
@@ -764,7 +764,7 @@ class GarminSyncStateService:
             str(message or "Garmin synchronization failed.")
         )[:1000]
         self._set(
-            "last_garmin_error",
+            last_error_key(GARMIN_ID),
             json.dumps(
                 [{"source": source, "message": safe_message}], ensure_ascii=False
             ),
@@ -895,7 +895,7 @@ class GarminSyncStateService:
 
     def error_entries(self) -> list[dict[str, Any]]:
         try:
-            errors = json.loads(self._get("last_garmin_error") or "[]")
+            errors = json.loads(self._get(last_error_key(GARMIN_ID)) or "[]")
         except TypeError, ValueError:
             errors = []
         return (
@@ -914,7 +914,7 @@ class GarminSyncStateService:
 
     def set_error_entries(self, errors: list[dict[str, Any]]) -> None:
         self._set(
-            "last_garmin_error",
+            last_error_key(GARMIN_ID),
             json.dumps(errors, ensure_ascii=False, separators=(",", ":"))
             if errors
             else "",
@@ -942,11 +942,11 @@ class GarminSyncStateService:
             # Equipment reads the canonical gear just written; the payload gives
             # only the gear's sync freshness.
             self._sync_equipment(payload)
-        self._set("last_garmin_sync_at", synced_at)
+        self._set(last_sync_key(GARMIN_ID), synced_at)
         if end_date is None:
             self._daily_sync_marker_service.mark(GARMIN_ID)
         self._set(
-            "last_garmin_error",
+            last_error_key(GARMIN_ID),
             ""
             if not payload.get("errors")
             else json.dumps(payload["errors"], ensure_ascii=False),

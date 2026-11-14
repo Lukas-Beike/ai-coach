@@ -20,7 +20,6 @@ from backend.runtime import events as runtime_events
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
     FULL_RESYNC_LABEL,
-    PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncHandler,
     FullResyncOperationJournal,
@@ -195,7 +194,7 @@ def build_provider_resync(
         )
         return FullProviderResyncService(
             handlers,
-            FullResyncStateStore(ctx.database(), ctx.key_values, PROVIDER_RESYNC_KEYS),
+            FullResyncStateStore(ctx.database(), ctx.key_values),
             FullResyncOperationJournal(
                 observer,
                 ctx.logger,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -32,7 +32,7 @@ def apply_startup_invariants(
     key_values: KeyValueRepository,
     now: str,
     default_profile_json: str,
-    provider_resync_keys: Iterable[Mapping[str, str]],
+    provider_resync_keys: Iterable[tuple[str, str]],
 ) -> None:
     """Idempotent state every running database needs; shared with restore."""
     db.execute(
@@ -41,9 +41,9 @@ def apply_startup_invariants(
     )
     if key_values.get(db, "profile") is None:
         key_values.set(db, "profile", default_profile_json)
-    for provider_keys in provider_resync_keys:
-        key_values.set(db, provider_keys["running"], "0")
-        key_values.set(db, provider_keys["status"], "")
+    for running_key, status_key in provider_resync_keys:
+        key_values.set(db, running_key, "0")
+        key_values.set(db, status_key, "")
 
 
 def initialize_application_database(
@@ -53,7 +53,7 @@ def initialize_application_database(
     now: str,
     current_time: datetime,
     default_profile_json: str,
-    provider_resync_keys: Iterable[Mapping[str, str]],
+    provider_resync_keys: Iterable[tuple[str, str]],
     retention_days: int,
 ) -> None:
     """Create and validate the application schema, then apply startup state."""

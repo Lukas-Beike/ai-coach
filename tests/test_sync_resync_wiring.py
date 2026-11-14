@@ -7,8 +7,8 @@ from unittest.mock import Mock, patch
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.sync import resync_wiring as resync_module
-from backend.sync.full_resync import PROVIDER_RESYNC_KEYS, resync_field_keys
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.resync_wiring import (
     GarminFullResync,
     WahooFullResync,
@@ -39,25 +39,13 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         handlers = full_resync_handlers(
             garmin_service=Mock(), wahoo_service=Mock(), all_sync_days=-1
         )
-        self.assertEqual(set(PROVIDER_RESYNC_KEYS), set(handlers))
-
-
-class ResyncFieldKeysTests(unittest.TestCase):
-    def test_rejects_descriptor_without_four_state_keys(self):
-        with self.assertRaisesRegex(ValueError, "needs keys for"):
-            resync_field_keys({"wahoo": ("a", "b", "c")})
-
-    def test_names_keys_by_role_in_declared_order(self):
+        self.assertEqual({GARMIN_ID, WAHOO_ID}, set(handlers))
         self.assertEqual(
-            resync_field_keys({"wahoo": ("r", "s", "t", "e")}),
             {
-                "wahoo": {
-                    "running": "r",
-                    "status": "s",
-                    "last_at": "t",
-                    "error": "e",
-                }
+                provider
+                for _, provider in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()
             },
+            set(handlers),
         )
 
 

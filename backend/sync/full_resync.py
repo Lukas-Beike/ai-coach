@@ -15,32 +15,10 @@ from backend.sync import observation
 from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.observation import OPERATION_CONTEXT, SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.state import resync_key
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
 PARTIAL_RESYNC_ERROR = "Teilweise geladen. Bitte erneut starten."
-
-RESYNC_FIELDS = ("running", "status", "last_at", "error")
-
-
-def resync_field_keys(
-    key_map: Mapping[str, tuple[str, ...]],
-) -> dict[str, dict[str, str]]:
-    """Name each provider's ordered full-resync state keys by their role."""
-    for provider_id, keys in key_map.items():
-        if len(keys) != len(RESYNC_FIELDS):
-            raise ValueError(
-                f"{provider_id} full resync needs keys for "
-                f"{', '.join(RESYNC_FIELDS)}; got {len(keys)}"
-            )
-    return {
-        provider_id: dict(zip(RESYNC_FIELDS, keys, strict=True))
-        for provider_id, keys in key_map.items()
-    }
-
-
-PROVIDER_RESYNC_KEYS: dict[str, dict[str, str]] = resync_field_keys(
-    DEFAULT_PROVIDER_REGISTRY.resync_key_map()
-)
 
 
 @dataclass
@@ -49,22 +27,26 @@ class FullResyncStateStore:
 
     database_manager: DatabaseManager
     key_value_repository: KeyValueRepository
-    resync_keys: Mapping[str, Mapping[str, str]]
 
     def state(
         self, provider: str, gate: ProviderResyncGate, db: Any | None = None
     ) -> dict[str, Any]:
-        keys = self.resync_keys[provider]
         if db is None:
             with self.database_manager.reader() as owned:
                 return self.state(provider, gate, owned)
         running = (
             gate.is_resetting()
-            or self.key_value_repository.get(db, keys["running"]) == "1"
+            or self.key_value_repository.get(db, resync_key(provider, "running")) == "1"
         )
-        status = self.key_value_repository.get(db, keys["status"]) if running else None
-        last_resync_at = self.key_value_repository.get(db, keys["last_at"])
-        last_error = self.key_value_repository.get(db, keys["error"]) or None
+        status = (
+            self.key_value_repository.get(db, resync_key(provider, "status"))
+            if running
+            else None
+        )
+        last_resync_at = self.key_value_repository.get(db, resync_key(provider, "at"))
+        last_error = (
+            self.key_value_repository.get(db, resync_key(provider, "error")) or None
+        )
         return {
             "running": running,
             "status": status,
@@ -73,29 +55,28 @@ class FullResyncStateStore:
         }
 
     def start(self, provider: str, label: str) -> None:
-        keys = self.resync_keys[provider]
-        self.set_value(keys["running"], "1")
+        self.set_value(resync_key(provider, "running"), "1")
         self.set_value(
-            keys["status"],
+            resync_key(provider, "status"),
             f"{label}: bestehende Daten bleiben erhalten, Resync läuft…",
         )
-        self.set_value(keys["error"], "")
-        self.set_value(keys["status"], f"{label}: vollständiger Resync läuft…")
+        self.set_value(resync_key(provider, "error"), "")
+        self.set_value(
+            resync_key(provider, "status"), f"{label}: vollständiger Resync läuft…"
+        )
 
     def complete(self, provider: str, finished_at: str) -> None:
-        keys = self.resync_keys[provider]
-        self.set_value(keys["last_at"], finished_at)
-        self.set_value(keys["error"], "")
+        self.set_value(resync_key(provider, "at"), finished_at)
+        self.set_value(resync_key(provider, "error"), "")
 
     def record_failure(self, provider: str, redacted_error: str) -> None:
-        self.set_value(self.resync_keys[provider]["error"], redacted_error)
+        self.set_value(resync_key(provider, "error"), redacted_error)
 
     def finish(self, provider: str) -> None:
-        keys = self.resync_keys[provider]
         try:
-            self.set_value(keys["running"], "0")
+            self.set_value(resync_key(provider, "running"), "0")
         finally:
-            self.set_value(keys["status"], "")
+            self.set_value(resync_key(provider, "status"), "")
 
     def set_value(self, key: str, value: str) -> None:
         with self.database_manager.unit_of_work() as db:

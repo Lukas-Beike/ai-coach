@@ -57,10 +57,12 @@ from backend.sync.local_load import summarize_local_load
 from backend.sync.profile_weekly_plan_removal import (
     summarize_profile_weekly_plan_removal,
 )
+from backend.sync.provider_table import CALENDAR_ID
 from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
+from backend.sync.state import last_error_key, last_sync_key
 from backend.sync.stream_backfill import fit_inventory_counts
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -238,11 +240,9 @@ class DiagnosticReportService:
             def external_calendar() -> dict[str, Any]:
                 return {
                     "configured": bool(deps.config.calendar_ical_url),
-                    "last_sync_at": self._get_value(
-                        db, "last_external_calendar_sync_at"
-                    ),
+                    "last_sync_at": self._get_value(db, last_sync_key(CALENDAR_ID)),
                     "last_error": deps.redactor.redact_text(
-                        self._get_value(db, "last_external_calendar_sync_error") or ""
+                        self._get_value(db, last_error_key(CALENDAR_ID)) or ""
                     )
                     or None,
                     "running": deps.external_calendar_sync.running(),
