@@ -844,11 +844,16 @@ class SyncJobStore:
         now = self._now()
         with self._database_manager.unit_of_work() as db:
             settle_interrupted_refreshes(db, now=now)
-            db.execute(
-                "UPDATE kv SET value='', updated_at=? "
-                "WHERE key='sync_operation_status' AND value='running'",
-                (now,),
-            )
+            if db.execute(
+                "SELECT 1 FROM kv WHERE key='sync_operation_status' AND value='running'"
+            ).fetchone():
+                db.execute(
+                    "UPDATE kv SET value=CASE key WHEN 'sync_operation_progress' "
+                    "THEN '0' ELSE '' END, updated_at=? WHERE key IN "
+                    "('sync_operation_status', 'sync_operation_phase', "
+                    "'sync_operation_progress', 'sync_operation_message')",
+                    (now,),
+                )
             return self._requeue_running(db, now)
 
     def requeue_unowned_running(self) -> int:

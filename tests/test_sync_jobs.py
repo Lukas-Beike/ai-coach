@@ -1184,23 +1184,40 @@ class SyncJobStoreTests(unittest.TestCase):
     def test_a_restart_ends_a_garmin_operation_left_running(self):
         # A stale "running" would show as live while a later Garmin push holds
         # the same lock (#2706); between claims the live operation stays.
-        def status():
+        def operation():
             with self.manager.reader() as db:
-                row = db.execute(
-                    "SELECT value FROM kv WHERE key='sync_operation_status'"
-                ).fetchone()
-                return row["value"]
+                return {
+                    row["key"]: row["value"]
+                    for row in db.execute("SELECT key, value FROM kv")
+                }
 
+        running = {
+            "sync_operation_status": "running",
+            "sync_operation_phase": "fetching",
+            "sync_operation_progress": "10",
+            "sync_operation_message": "Garmin-Daten werden gelesen…",
+            "sync_operation_id": "op-1",
+        }
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) "
-                "VALUES ('sync_operation_status', 'running', ?)",
-                (self.now,),
-            )
+            for key, value in running.items():
+                db.execute(
+                    "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                    (key, value, self.now),
+                )
         self.store.requeue_unowned_running()
-        self.assertEqual("running", status())
+        self.assertEqual(running, operation())
         self.store.resume_interrupted()
-        self.assertEqual("", status())
+        # The whole running projection ends; the id names the last operation.
+        self.assertEqual(
+            {
+                "sync_operation_status": "",
+                "sync_operation_phase": "",
+                "sync_operation_progress": "0",
+                "sync_operation_message": "",
+                "sync_operation_id": "op-1",
+            },
+            operation(),
+        )
 
     def test_requeue_unowned_running_runs_a_lost_outcome_again(self):
         job, _ = self.enqueue()
