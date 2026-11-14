@@ -21,6 +21,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -113,35 +114,48 @@ class SessionCurveReader:
                 continue
             laps = _current(db, laps_by_session.get(activity_id, ()))
             fingerprint = _fingerprint(records, current, laps)
-            owned = pending = None
+            curves[activity_id] = self._memoized(
+                fingerprint,
+                partial(
+                    _session_curve, db, activity_id, records, current, laps, fingerprint
+                ),
+            )
+        return curves
+
+    def _memoized(
+        self, fingerprint: str, compute: Callable[[], SessionCurve]
+    ) -> SessionCurve:
+        """The memoized curve of ``fingerprint``, computed once across threads.
+
+        A miss while another thread computes the same curve waits for it instead
+        of computing it again, as parallel view loads did after a start (#2783).
+        """
+        owned = pending = None
+        with self._lock:
+            cached = self._memo.get(fingerprint)
+            if cached is not None:
+                self._memo.move_to_end(fingerprint)
+                return cached
+            if (pending := self._computing.get(fingerprint)) is None:
+                owned = self._computing[fingerprint] = threading.Event()
+        if pending is not None:
+            pending.wait()
             with self._lock:
                 cached = self._memo.get(fingerprint)
-                if cached is not None:
-                    self._memo.move_to_end(fingerprint)
-                elif (pending := self._computing.get(fingerprint)) is None:
-                    owned = self._computing[fingerprint] = threading.Event()
-            if pending is not None:
-                # Another thread computes this curve: wait for it instead of
-                # computing it again, as parallel view loads did after a start (#2783).
-                pending.wait()
+            if cached is not None:
+                return cached
+        try:
+            cached = compute()
+            with self._lock:
+                self._memo[fingerprint] = cached
+                while len(self._memo) > self._capacity:
+                    self._memo.popitem(last=False)
+            return cached
+        finally:
+            if owned is not None:
                 with self._lock:
-                    cached = self._memo.get(fingerprint)
-            if cached is None:
-                try:
-                    cached = _session_curve(
-                        db, activity_id, records, current, laps, fingerprint
-                    )
-                    with self._lock:
-                        self._memo[fingerprint] = cached
-                        while len(self._memo) > self._capacity:
-                            self._memo.popitem(last=False)
-                finally:
-                    if owned is not None:
-                        with self._lock:
-                            del self._computing[fingerprint]
-                        owned.set()
-            curves[activity_id] = cached
-        return curves
+                    del self._computing[fingerprint]
+                owned.set()
 
     def shared_records(
         self,
