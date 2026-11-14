@@ -153,9 +153,15 @@ every named number the code fixes. A test fails when it is out of date.
 | `WORK_SHARE` | `0.1` | `backend/performance/planned_targets.py` | Work steps are within this share of the hardest planned target. |
 | `COUNT_GAP_SHARE` | `0.1` | `backend/performance/planned_targets.py` | A step count fits the executed laps only when the next easier step is clearly easier than the easiest chosen one. |
 | `MAX_DISPLAY_GAP_S` | `15.0` | `backend/performance/planned_targets.py` | Display samples further apart than this are a pause, not part of the lap. |
+| `MAX_DESCRIPTION_CHARS` | `20000` | `backend/performance/planned_targets.py` | Longer workout texts are not parsed for the comparison. |
 | `HR_CAP_METHOD` | `'heart-rate-cap-execution-v1'` | `backend/performance/planned_targets.py` |  |
 | `CAP_ABOVE_SHARE_PCT` | `10` | `backend/performance/planned_targets.py` | More than this share of the time above the cap, or a mean above it, is above the cap. |
 | `CAP_EDGE_SHARE` | `0.05` | `backend/performance/planned_targets.py` | A mean this close below the cap (share of the cap) sits at the upper edge. |
+| `ADHERENCE_METHOD` | `'planned-step-adherence-v1'` | `backend/performance/planned_targets.py` |  |
+| `ADHERENCE_SCOPE` | `"Every planned step against its window of the session: work steps on their paired laps, the steps... (sha256 414dc16b)` | `backend/performance/planned_targets.py` |  |
+| `GOOD_SHARE_PCT` | `80` | `backend/performance/planned_targets.py` | Time in target from which a step is good, else fair; below fair it is poor (athlete 2026-11-14, #2830, after TrainingPeaks' compliance colours). |
+| `FAIR_SHARE_PCT` | `50` | `backend/performance/planned_targets.py` |  |
+| `MIN_MOVING_SPEED_MPS` | `0.3` | `backend/performance/planned_targets.py` | Speeds below this are stops, as in the calendar's pace chart. |
 | `GARMIN_SOURCE` | `'Garmin Connect'` | `backend/performance/planning_recovery.py` |  |
 | `UTC_OFFSET_SUFFIX` | `'+00:00'` | `backend/performance/planning_recovery.py` |  |
 | `POWER_DURATIONS` | `(5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)` | `backend/performance/power_profile.py` | 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols; cycling CP also fits the 1200 s effort (M4 card 4). |

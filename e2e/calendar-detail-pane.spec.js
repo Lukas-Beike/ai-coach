@@ -34,6 +34,69 @@ test("@responsive a planned unit lists its steps with zone and target range inst
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
 
+// A 55-minute interval run: 15 min warm-up on heart rate, 5 x (4 min at 4:05-4:15/km, 2 min jog), 10 min cool-down.
+function intervalRunDocument() {
+  const segments = [["warmup", 900, 2.9, 132]];
+  for (let rep = 0; rep < 5; rep += 1) segments.push(["work", 240, rep === 4 ? 3.8 : 4.0, 165], ["recovery", 120, 2.6, 145]);
+  segments.push(["cooldown", 600, 2.7, 135]);
+  const time_s = []; const speed = []; const heart = []; const steps = [];
+  let at = 0;
+  const shares = [92, 88, 95, 84, 95, 62, 100, 71, 95, 31, 90];
+  segments.forEach(([role, seconds, mps, bpm], index) => {
+    for (let second = 0; second < seconds; second += 10) { time_s.push(at + second); speed.push(mps); heart.push(bpm); }
+    const step = { step: index + 1, role, planned_duration_s: seconds, start_s: at, end_s: at + seconds };
+    if (role === "warmup") Object.assign(step, { metric: "heartrate", low: 120, high: 140, target_bpm: [120, 140], actual: bpm });
+    if (role === "work") Object.assign(step, { metric: "speed", low: 3.922, high: 4.082, target_pace_s_per_km: [245, 255], actual: Math.round(1000 / mps) });
+    if (role === "recovery") Object.assign(step, { metric: "speed", low: 0, high: 3.03, target_pace_s_per_km: [330, null], actual: Math.round(1000 / mps) });
+    if (role === "cooldown") step.unscored = "unsupported_target";
+    else Object.assign(step, { time_in_target_pct: shares[index], band: shares[index] >= 80 ? "good" : shares[index] >= 50 ? "fair" : "poor" });
+    steps.push(step);
+    at += seconds;
+  });
+  return {
+    session: { sport: "run", environment: "outdoor", activity_id: "past-run" },
+    metrics: { avg_hr: { value: 148 }, avg_speed_mps: { value: 3.1 }, distance_m: { value: 10200 }, moving_duration_s: { value: at } },
+    streams: { time_s, channels: { heart_rate_bpm: { values: heart }, speed_mps: { values: speed } } },
+    planned_adherence: {
+      status: "ok", score_pct: 76, score_band: "fair", steps,
+      zones: { status: "ok", metric: "speed", zones: [
+        { zone: 1, planned_s: 2100, actual_s: 2280 }, { zone: 2, planned_s: 0, actual_s: 0 }, { zone: 3, planned_s: 0, actual_s: 240 }, { zone: 4, planned_s: 1200, actual_s: 960 },
+      ] },
+    },
+  };
+}
+
+test("@responsive an opened completed session rates each planned step against its target", async ({ page, request }, testInfo) => {
+  await openCalendar(page, request);
+  // The server matches the session to its planned unit and scores every step (#2830).
+  await page.route("**/api/activities/*", (route) => route.fulfill({ json: intervalRunDocument() }));
+  const days = await renderSyntheticCalendar(page);
+  await showCalendarDay(page, days.past);
+  const run = page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`).filter({ hasText: "Vergangener Lauf" });
+  await run.evaluate((element) => { for (let node = element; node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true; });
+  await run.locator(".planned-activity-more > summary").click();
+  const section = run.locator(".activity-adherence");
+  await expect(section.locator(".activity-adherence-score")).toHaveText("Zieltreue 76 %");
+  await expect(section.locator(".activity-adherence-score")).toHaveAttribute("data-band", "fair");
+  await expect(section.locator(".activity-adherence-strip i")).toHaveCount(12);
+  const rows = section.locator(".activity-adherence-steps li");
+  await expect(rows).toHaveCount(12);
+  await expect(rows.nth(0)).toContainText("Einlaufen · 120–140 bpm · 15:00 · Ø 132 bpm");
+  await expect(rows.nth(1)).toContainText("4:05–4:15/km · 4:00 · Ø 4:10");
+  await expect(rows.nth(2)).toContainText("Pause · langsamer als 5:30/km · 2:00");
+  await expect(rows.nth(9).locator(".activity-adherence-share")).toHaveText("31 %");
+  await expect(rows.nth(9)).toHaveAttribute("data-band", "poor");
+  await expect(rows.nth(11).locator(".activity-adherence-share")).toHaveText("–");
+  await expect(section.locator(".activity-adherence-zones h4")).toHaveText("Zeit je Pace-Zone");
+  await expect(section.locator(".activity-adherence-zones li")).toHaveCount(3);
+  await expect(section.locator(".activity-adherence-zones li").last().locator(".activity-analysis-zone-value")).toHaveText("20′ / 16′");
+  // Each scored step draws its target band on its own channel's chart: 10 pace steps, 1 heart-rate step.
+  await expect(run.locator(".activity-analysis-chart.is-speed .activity-analysis-target")).toHaveCount(10);
+  await expect(run.locator(".activity-analysis-chart.is-heart .activity-analysis-target")).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+  await run.locator(".activity-analysis-panel").screenshot({ path: testInfo.outputPath("planned-step-adherence.png"), animations: "disabled" });
+});
+
 test("@responsive an opened completed session shows its time in zones as one bar with the source", async ({ page, request }) => {
   await openCalendar(page, request);
   // The session read of "Details" carries the zones (#2195); routed before the cards render.

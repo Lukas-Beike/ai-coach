@@ -2,7 +2,7 @@
 
 import functools
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -12,6 +12,7 @@ from backend.activities.detail_contract import measured_order
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
 from backend.activities.route_store import stored_route_block
 from backend.activities.zone_settings import ZoneSettings
+from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import timezone_name
 from backend.canonical.local_time import local_date
 from backend.canonical.records import ActivityRecord
@@ -37,6 +38,12 @@ from backend.performance.detail_envelope import (
 )
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.local_tss import THRESHOLD_KINDS
+from backend.performance.planned_targets import (
+    matched_unit,
+    planned_step_adherence,
+    unit_steps,
+    units_around,
+)
 from backend.performance.session_zones import (
     dated_thresholds,
     own_configurations,
@@ -60,6 +67,8 @@ class ActivityAnalysisReadService(ActivityReadService):
         canonical: CanonicalPerformanceSource,
         session_records: SessionRecordReader | None = None,
         refreshable: RefreshableProviders = frozenset,
+        planned_units: Callable[[], Any] | None = None,
+        unit_thresholds: Callable[[], Any] | None = None,
     ) -> None:
         super().__init__(
             database_manager,
@@ -72,6 +81,46 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._canonical = canonical
         self._session_records = session_records
         self._refreshable = refreshable
+        self._planned_units = planned_units
+        self._unit_thresholds = unit_thresholds
+
+    def planned_adherence(self, document: Mapping[str, Any]) -> dict[str, Any] | None:
+        """A run's or ride's steps against its matched local planned unit (#2830).
+
+        ``None`` without a matched unit with a workout text, so the session
+        details show nothing; the Coach reads the laps' comparison instead.
+        """
+        session = document.get("session")
+        if (
+            self._planned_units is None
+            or self._unit_thresholds is None
+            or not isinstance(session, Mapping)
+            or session.get("sport") not in ("run", "ride")
+        ):
+            return None
+        try:
+            day = date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
+        except ValueError:
+            return None
+        units = self._planned_units().list(
+            250, future_only=True, since=day - timedelta(days=2)
+        )
+        unit = matched_unit(session, None, units_around(units, day))
+        analysis = document.get("analysis")
+        execution = analysis.get("execution") if isinstance(analysis, Mapping) else None
+        if unit is None or not isinstance(execution, Mapping):
+            return None
+        steps = unit_steps(unit)
+        if not isinstance(steps, list):
+            return steps
+        return planned_step_adherence(
+            execution,
+            steps,
+            self._unit_thresholds().thresholds(unit),
+            str(session.get("sport")),
+            streams=document.get("streams"),
+            planned_unit_id=str(unit.get("id")),
+        )
 
     def _zone_settings_reader(
         self, profile: Mapping[str, Any]

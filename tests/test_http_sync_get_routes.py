@@ -35,6 +35,7 @@ class SyncGetRoutesTests(unittest.TestCase):
         self.queue = Mock()
         self.sync_state = Mock()
         self.activities = Mock()
+        self.activities.planned_adherence.return_value = None
         self.queue_factory = Mock(return_value=self.queue)
         self.sync_state_factory = Mock(return_value=self.sync_state)
         self.activity_factory = Mock(return_value=self.activities)
@@ -176,7 +177,13 @@ class SyncGetRoutesTests(unittest.TestCase):
             "laps": {"laps": [{"metrics": {"load": 12}}]},
         }
         self.activities.detail.return_value = dict(document)
+        # A matched planned unit's step adherence rides along (#2830).
+        adherence = {"status": "ok", "score_pct": 80}
+        self.activities.planned_adherence.return_value = adherence
         self.assertTrue(dispatch_route(self.routes, self.handler, "/api/activities/a1"))
+        self.activities.planned_adherence.assert_called_once_with(
+            {**document, "planned_adherence": adherence}
+        )
 
         self.assertEqual(
             [
@@ -194,7 +201,7 @@ class SyncGetRoutesTests(unittest.TestCase):
                         ]
                     },
                 ),
-                (200, document),
+                (200, {**document, "planned_adherence": adherence}),
             ],
             self.handler.responses,
         )

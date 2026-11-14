@@ -79,7 +79,8 @@ class SyncGetRoutes:
         Response: 200 with `ok`, the document (`contract`, `session`, `metrics`,
         `streams`, `laps`, `zones`, `strength_sets`, `analysis`, `detail_data`
         and more, plus `weather` and `route` when stored, and `data_scope`),
-        and `session_bundle` (the session's provider copies and merge
+        `planned_adherence` for a run or ride with a matched local planned
+        unit (each step's time in target, the score and zone times), and `session_bundle` (the session's provider copies and merge
         candidates; null when the session is not live).
 
         Errors: 400 `invalid_activity_request` "Die Aktivität konnte nicht
@@ -87,12 +88,16 @@ class SyncGetRoutes:
         characters; 404 `activity_details_not_found` "Diese Aktivität ist lokal
         nicht vorhanden." when the id is unknown, ambiguous or has no records.
         """
-        payload = self._activity_read_service().detail(
+        service = self._activity_read_service()
+        payload = service.detail(
             unquote(request.params["id"]),
             garmin_status=NO_GARMIN_SYNC_STATUS,
             profile={},
             today=self._local_today(),
         )
+        adherence = service.planned_adherence(payload)
+        if adherence is not None:
+            payload["planned_adherence"] = adherence
         # Performance validation belongs to the Coach's complete context.
         payload.pop("activity_validation", None)
         session_id = (payload.get("session") or {}).get("activity_id")

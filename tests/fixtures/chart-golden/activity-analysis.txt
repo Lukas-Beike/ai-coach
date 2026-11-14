@@ -25,6 +25,71 @@
         "Max. Herzfrequenz"
       <dd>
         "152 bpm"
+  <section class="activity-adherence">
+    <div class="activity-adherence-header">
+      <h4>
+        "Soll/Ist"
+      <span class="activity-adherence-score" data-band="good">
+        "Zieltreue 88 %"
+    <div aria-hidden="true" class="activity-adherence-strip">
+      <i data-band="fair" style.flexGrow="120">
+      <i data-band="good" style.flexGrow="120">
+      <i data-band="none" style.flexGrow="60">
+    <ol class="activity-adherence-steps">
+      <li data-band="fair">
+        <span>
+          "1"
+        <span>
+          "Einlaufen · 110–135 bpm · 2:00 · Ø 124 bpm"
+        <span class="activity-adherence-share">
+          "75 %"
+      <li data-band="good">
+        <span>
+          "2"
+        <span>
+          "4:38–5:03/km · 2:00 · Ø 4:50"
+        <span class="activity-adherence-share">
+          "100 %"
+      <li data-band="none">
+        <span>
+          "3"
+        <span>
+          "Auslaufen · 1:00"
+        <span class="activity-adherence-share">
+          "–"
+    <section class="activity-analysis-zones activity-adherence-zones">
+      <h4>
+        "Zeit je Pace-Zone"
+      <p class="activity-adherence-legend">
+        <span class="is-plan">
+          "Soll"
+        <span class="is-actual">
+          "Ist"
+      <ol>
+        <li data-zone="Z1">
+          <span class="activity-analysis-zone-label">
+            "Z1"
+          <span class="activity-adherence-pair">
+            <span class="activity-adherence-plan" style.width="50%">
+            <span class="activity-adherence-actual" style.width="75%">
+          <span aria-label="Soll 1′, Ist 2′" class="activity-analysis-zone-value">
+            "1′ / 2′"
+        <li data-zone="Z2">
+          <span class="activity-analysis-zone-label">
+            "Z2"
+          <span class="activity-adherence-pair">
+            <span class="activity-adherence-plan" style.visibility="hidden" style.width="0%">
+            <span class="activity-adherence-actual" style.width="25%">
+          <span aria-label="Soll 0′, Ist 1′" class="activity-analysis-zone-value">
+            "0′ / 1′"
+        <li data-zone="Z4">
+          <span class="activity-analysis-zone-label">
+            "Z4"
+          <span class="activity-adherence-pair">
+            <span class="activity-adherence-plan" style.width="100%">
+            <span class="activity-adherence-actual" style.width="100%">
+          <span aria-label="Soll 2′, Ist 2′" class="activity-analysis-zone-value">
+            "2′ / 2′"
   <div>
     <p>
       "Form ließ nach"
@@ -55,6 +120,7 @@
           "2:30"
         <svg:text text-anchor="end" x="332" y="144">
           "5:00"
+        <svg:rect class="activity-analysis-target" height="55.821120689655174" width="116.80000000000001" x="40" y="72.17887931034483">
         <svg:path class="activity-analysis-area" d="M40.0,128 L40.0,119.9 L98.4,94.4 L98.4,128 Z M215.2,128 L215.2,53.1 L273.6,18.1 L332.0,27.7 L332.0,128 Z ">
         <svg:path class="activity-analysis-line" d="M40.0,119.9 L98.4,94.4 M215.2,53.1 L273.6,18.1 L332.0,27.7 ">
         <svg:line class="activity-analysis-average" x1="40" x2="332" y1="56.28448275862069" y2="56.28448275862069">
@@ -84,6 +150,7 @@
           "2:30"
         <svg:text text-anchor="end" x="332" y="144">
           "5:00"
+        <svg:rect class="activity-analysis-target" height="45.12852664576808" width="116.80000000000001" x="156.8" y="10">
         <svg:path class="activity-analysis-area" d="M40.0,128 L40.0,119.9 L98.4,75.4 L98.4,128 Z M215.2,128 L215.2,36.1 L273.6,18.1 L332.0,55.1 L332.0,128 Z ">
         <svg:path class="activity-analysis-line" d="M40.0,119.9 L98.4,75.4 M215.2,36.1 L273.6,18.1 L332.0,55.1 ">
         <svg:line class="activity-analysis-average" x1="40" x2="332" y1="75.35775862068968" y2="75.35775862068968">

@@ -444,14 +444,16 @@ PERFORMANCE = build_performance(
     season_preparation=season_preparation,
 )
 APP.performance = PERFORMANCE
+PLAN_GUARD = build_plan_guard(APP)
 ACTIVITY_READS = build_activity_reads(
     APP,
     session_activities=CanonicalTableReader().session_activities,
     refreshable_providers=lambda: configured_for_job(
         PROVIDER_CONFIGURED, "activity_details"
     ),
+    planned_units=lambda: APP.planning.planned_unit(),
+    unit_thresholds=PLAN_GUARD.planned_unit_estimator,
 )
-PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
 
 

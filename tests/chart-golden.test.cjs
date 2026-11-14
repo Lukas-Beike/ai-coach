@@ -89,6 +89,16 @@ const ANALYSIS_PAYLOAD = {
   zones: { heart_rate: { source: { label: "Garmin" }, buckets: [{ label: "Z1", seconds: 600 }, { label: "Z2", seconds: 900 }] } },
   laps: { laps: [{ moving_duration_s: 300, distance_m: 1000, avg_speed_mps: 3.3, avg_hr: 140 }, { moving_duration_s: 280, distance_m: 1000, avg_speed_mps: 3.5, avg_hr: 150 }] },
   analysis: { form_drift: { status: "ok", flagged: true, label: "Form ließ nach", metrics: { contact_time: { first: 240, last: 252, change_percent: 5, unit: "ms" } } } },
+  // Planned steps against the session (#2830): a heart-rate warm-up, a pace rep and an unscored cool-down.
+  planned_adherence: {
+    status: "ok", score_pct: 88, score_band: "good",
+    steps: [
+      { step: 1, role: "warmup", metric: "heartrate", low: 110, high: 135, start_s: 0, end_s: 120, target_bpm: [110, 135], time_in_target_pct: 75, band: "fair", actual: 124 },
+      { step: 2, role: "work", metric: "speed", low: 3.3, high: 3.6, start_s: 120, end_s: 240, target_pace_s_per_km: [278, 303], time_in_target_pct: 100, band: "good", actual: 290 },
+      { step: 3, role: "cooldown", planned_duration_s: 60, start_s: 240, end_s: 300, unscored: "unsupported_target" },
+    ],
+    zones: { status: "ok", metric: "speed", zones: [{ zone: 1, planned_s: 60, actual_s: 90 }, { zone: 2, planned_s: 0, actual_s: 30 }, { zone: 3, planned_s: 0, actual_s: 0 }, { zone: 4, planned_s: 120, actual_s: 120 }] },
+  },
 };
 
 test("the activity analysis panel keeps its rendered tree: channel charts with pace, gaps and elevation", async () => {

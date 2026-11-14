@@ -7,7 +7,9 @@ plan allows it (the hardest steps, else the steps within 10 % of the hardest
 target, each as a fraction of its threshold). Targets come from the athlete's
 current thresholds as the planned-workout estimate reads them, so zone,
 percent, absolute and pace targets all count; ramps stay unscored. Time in
-target reads the session's displayed streams. Descriptive only: no score, no
+target reads the session's displayed streams. The laps' comparison is
+descriptive; ``planned_step_adherence`` scores every planned step and the
+session by their time in target for the calendar's session details (#2830). No
 threshold change. Pure: no I/O, inputs unchanged.
 """
 
@@ -16,6 +18,7 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Mapping, Sequence
+from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.activities.hr_cap import (
@@ -30,7 +33,12 @@ from backend.activities.workout_load import (
     hr_reference,
     step_target_range,
 )
+from backend.activities.workout_text import WorkoutTextError, structured_steps
+from backend.activities.zone_settings import percent_zone
+from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.stored_sports import workout_sport_from_record
 from backend.canonical.vocabulary import Sport
+from backend.performance.session_execution import SHORT_REP_S
 
 METHOD: Final = "planned-target-execution-v1"
 SCOPE: Final = (
@@ -50,6 +58,8 @@ WORK_SHARE: Final = 0.10
 COUNT_GAP_SHARE: Final = 0.10
 # Display samples further apart than this are a pause, not part of the lap.
 MAX_DISPLAY_GAP_S: Final = 15.0
+# Longer workout texts are not parsed for the comparison.
+MAX_DESCRIPTION_CHARS: Final = 20000
 _STREAM_KEYS: Final = {
     "speed": "speed_mps",
     "watts": "power_w",
@@ -68,32 +78,10 @@ def planned_target_execution(
 ) -> dict[str, Any]:
     """Compare the session's work laps with the planned unit's work steps."""
     base = {"method": METHOD, "scope": SCOPE, "planned_unit_id": planned_unit_id}
-    if execution.get("status") != "ok":
-        return {**base, "status": "not_covered", "reason": "Ausführung unbekannt."}
-    if execution.get("structure") != "interval":
-        return {
-            **base,
-            "status": "not_covered",
-            "reason": "Keine Intervalle in der Aufzeichnung erkannt.",
-        }
-    try:
-        canonical_sport = Sport(sport)
-    except ValueError:
-        return {**base, "status": "not_covered", "reason": "Sportart unbekannt."}
-    ranges = [step_target_range(step, thresholds, canonical_sport) for step in steps]
-    reps = list(execution.get("reps") or [])
-    # The real lap count, not the listed reps (at most 40).
-    counted = (execution.get("rep_summary") or {}).get("rep_count")
-    executed = counted if isinstance(counted, int) else len(reps)
-    work = _work_steps(_levels(ranges, thresholds), executed)
-    if not work:
-        reasons = sorted({r.unknown for r in ranges if r.unknown})
-        return {
-            **base,
-            "status": "not_covered",
-            "reason": "Keine auswertbaren Zielschritte im Plan.",
-            "unknown_targets": reasons,
-        }
+    paired = _paired(execution, steps, thresholds, sport)
+    if isinstance(paired, dict):
+        return {**base, **paired}
+    ranges, reps, executed, work = paired
     recoveries = {
         item.get("after_rep"): item for item in execution.get("recoveries") or []
     }
@@ -118,6 +106,40 @@ def planned_target_execution(
         "below_target": sum(value < 0 for value in deviations),
     }
     return {**base, "status": "ok", "reps": compared, "summary": summary}
+
+
+def _paired(
+    execution: Mapping[str, Any],
+    steps: Sequence[Mapping[str, Any]],
+    thresholds: ZoneSettings,
+    sport: str,
+) -> tuple[list[TargetRange], list[Any], int, list[int]] | dict[str, Any]:
+    """Step ranges, listed reps, real lap count and work steps, or why not."""
+    if execution.get("status") != "ok":
+        return {"status": "not_covered", "reason": "Ausführung unbekannt."}
+    if execution.get("structure") != "interval":
+        return {
+            "status": "not_covered",
+            "reason": "Keine Intervalle in der Aufzeichnung erkannt.",
+        }
+    try:
+        canonical_sport = Sport(sport)
+    except ValueError:
+        return {"status": "not_covered", "reason": "Sportart unbekannt."}
+    ranges = [step_target_range(step, thresholds, canonical_sport) for step in steps]
+    reps = list(execution.get("reps") or [])
+    # The real lap count, not the listed reps (at most 40).
+    counted = (execution.get("rep_summary") or {}).get("rep_count")
+    executed = counted if isinstance(counted, int) else len(reps)
+    work = _work_steps(_levels(ranges, thresholds), executed)
+    if not work:
+        reasons = sorted({r.unknown for r in ranges if r.unknown})
+        return {
+            "status": "not_covered",
+            "reason": "Keine auswertbaren Zielschritte im Plan.",
+            "unknown_targets": reasons,
+        }
+    return ranges, reps, executed, work
 
 
 HR_CAP_METHOD: Final = "heart-rate-cap-execution-v1"
@@ -333,6 +355,304 @@ def _deviation(actual: float, low: float, high: float) -> float:
     return round((actual - bound) / bound * 100, 1)
 
 
+ADHERENCE_METHOD: Final = "planned-step-adherence-v1"
+ADHERENCE_SCOPE: Final = (
+    "Every planned step against its window of the session: work steps on their "
+    "paired laps, the steps before, between and after them on the time between "
+    "those laps, split by planned duration. time_in_target_pct is the share of "
+    "the window's displayed samples inside the step's target (heart rate over "
+    "the second half, not for steps under 120 s); the score is the time in "
+    "target over all scored time. Zone times count in the metric with the most "
+    "planned time: planned as each step's duration in the zone of its target's "
+    "middle, actual from the displayed stream with the same limits."
+)
+# Time in target from which a step is good, else fair; below fair it is poor
+# (athlete 2026-11-14, #2830, after TrainingPeaks' compliance colours).
+GOOD_SHARE_PCT: Final = 80
+FAIR_SHARE_PCT: Final = 50
+# Speeds below this are stops, as in the calendar's pace chart.
+MIN_MOVING_SPEED_MPS: Final = 0.3
+
+
+def planned_step_adherence(
+    execution: Mapping[str, Any],
+    steps: Sequence[Mapping[str, Any]],
+    thresholds: ZoneSettings,
+    sport: str,
+    *,
+    streams: Mapping[str, Any] | None,
+    planned_unit_id: str | None = None,
+) -> dict[str, Any]:
+    """Each planned step's time in target, the session score and zone times."""
+    base = {
+        "method": ADHERENCE_METHOD,
+        "scope": ADHERENCE_SCOPE,
+        "planned_unit_id": planned_unit_id,
+    }
+    paired = _paired(execution, steps, thresholds, sport)
+    if isinstance(paired, dict):
+        return {**base, **paired}
+    ranges, reps, _executed, work = paired
+    timeline = _Timeline(streams)
+    span = timeline.span()
+    if span is None:
+        return {**base, "status": "not_covered", "reason": "Kein Messverlauf."}
+    windows = _step_windows(steps, work, reps, span)
+    items = [
+        _step_item(index, steps[index], ranges[index], windows.get(index), work)
+        for index in range(len(steps))
+    ]
+    seconds = [
+        _scored(item, ranges[index], windows.get(index), timeline, execution)
+        for index, item in enumerate(items)
+    ]
+    inside = sum(value[0] for value in seconds if value is not None)
+    total = sum(value[1] for value in seconds if value is not None)
+    result: dict[str, Any] = {**base, "status": "ok", "steps": items}
+    if total > 0:
+        score = round(inside / total * 100)
+        result.update(score_pct=score, score_band=adherence_band(score))
+    result["zones"] = _zone_times(items, thresholds, timeline, span)
+    return result
+
+
+def adherence_band(share_pct: float) -> str:
+    """good, fair or poor for a share of time in target."""
+    if share_pct >= GOOD_SHARE_PCT:
+        return "good"
+    return "fair" if share_pct >= FAIR_SHARE_PCT else "poor"
+
+
+def _step_windows(
+    steps: Sequence[Mapping[str, Any]],
+    work: Sequence[int],
+    reps: Sequence[Mapping[str, Any]],
+    span: tuple[float, float],
+) -> dict[int, tuple[float, float]]:
+    """Each planned step's time window; steps after an unrun work step have none."""
+    windows: dict[int, tuple[float, float]] = {}
+    gaps: list[tuple[range, float, float]] = []
+    previous, previous_end = -1, span[0]
+    paired = 0
+    for index, rep in zip(work, reps, strict=False):
+        start, duration = rep.get("start_s"), rep.get("duration_s")
+        if not isinstance(start, (int, float)) or not isinstance(
+            duration, (int, float)
+        ):
+            break
+        windows[index] = (float(start), float(start) + float(duration))
+        gaps.append((range(previous + 1, index), previous_end, float(start)))
+        previous, previous_end = index, windows[index][1]
+        paired += 1
+    if paired and paired == len(work):
+        gaps.append((range(previous + 1, len(steps)), previous_end, span[1]))
+    for indices, start, end in gaps:
+        windows.update(_split(steps, indices, start, end))
+    return windows
+
+
+def _split(
+    steps: Sequence[Mapping[str, Any]], indices: range, start: float, end: float
+) -> dict[int, tuple[float, float]]:
+    """The time between two laps shared by the planned durations of its steps."""
+    if not indices or end <= start:
+        return {}
+    if len(indices) == 1:
+        return {indices[0]: (start, end)}
+    durations = [steps[index].get("duration") for index in indices]
+    if not all(isinstance(value, (int, float)) and value > 0 for value in durations):
+        return {}
+    planned = sum(float(value) for value in durations if value is not None)
+    windows, at = {}, start
+    for index, value in zip(indices, durations, strict=True):
+        following = at + (end - start) * float(value or 0) / planned
+        windows[index] = (at, following)
+        at = following
+    return windows
+
+
+def _step_item(
+    index: int,
+    step: Mapping[str, Any],
+    target: TargetRange,
+    window: tuple[float, float] | None,
+    work: Sequence[int],
+) -> dict[str, Any]:
+    if index in work:
+        role = "work"
+    elif index < work[0]:
+        role = "warmup"
+    else:
+        role = "cooldown" if index > work[-1] else "recovery"
+    item: dict[str, Any] = {
+        "step": index + 1,
+        "role": role,
+        "planned_target": str(step.get("target") or ""),
+    }
+    for key, field in (
+        ("duration", "planned_duration_s"),
+        ("distance", "planned_distance_m"),
+    ):
+        if isinstance(step.get(key), (int, float)):
+            item[field] = round(float(step[key]))
+    if window is not None:
+        item["start_s"], item["end_s"] = round(window[0]), round(window[1])
+    if target.metric is not None and target.low is not None and target.high is not None:
+        item["metric"] = target.metric
+        item["low"] = round(target.low, 3)
+        item["high"] = None if math.isinf(target.high) else round(target.high, 3)
+    return item
+
+
+def _scored(
+    item: dict[str, Any],
+    target: TargetRange,
+    window: tuple[float, float] | None,
+    timeline: _Timeline,
+    execution: Mapping[str, Any],
+) -> tuple[float, float] | None:
+    """Score the step in place; its seconds in target and scored, if any."""
+    if target.metric is None or target.low is None or target.high is None:
+        item["unscored"] = target.unknown or "unsupported_target"
+        return None
+    item.update(_shown_range(target, execution))
+    if window is None:
+        item["unscored"] = "not_executed"
+        return None
+    start, end = window
+    if target.metric == "heartrate":
+        if end - start < SHORT_REP_S:
+            item["unscored"] = "short_step_heart_rate"
+            return None
+        start = (start + end) / 2
+    spans = timeline.spans(target.metric, start, end)
+    total = sum(span for _, span in spans)
+    if total <= 0:
+        item["unscored"] = "missing_measurement"
+        return None
+    inside = sum(span for value, span in spans if target.low <= value <= target.high)
+    share = round(inside / total * 100)
+    actual = sum(value * span for value, span in spans) / total
+    item.update(
+        time_in_target_pct=share,
+        band=adherence_band(share),
+        actual=_shown_value(target.metric, actual, execution),
+    )
+    return inside, total
+
+
+def _shown_value(metric: str, value: float, execution: Mapping[str, Any]) -> float:
+    """A measured mean in the units the athlete reads (s/km, km/h, W, bpm)."""
+    if metric == "speed" and execution.get("output") == "pace":
+        return round(1000 / value) if value > 0 else 0
+    if metric == "speed":
+        return round(value * 3.6, 1)
+    return round(value)
+
+
+def _zone_times(
+    items: Sequence[Mapping[str, Any]],
+    thresholds: ZoneSettings,
+    timeline: _Timeline,
+    span: tuple[float, float],
+) -> dict[str, Any]:
+    """Planned and actual time per zone in the plan's leading target metric.
+
+    A step without a planned duration (a distance step) counts its window.
+    """
+    planned: dict[str, list[tuple[float, float]]] = {}
+    for item in (item for item in items if "metric" in item):
+        seconds = item.get(
+            "planned_duration_s", item.get("end_s", 0) - item.get("start_s", 0)
+        )
+        low, high = item["low"], item["high"]
+        middle = low if high is None else (low + high) / 2
+        planned.setdefault(item["metric"], []).append((middle, seconds))
+    if not planned:
+        return {"status": "not_covered", "reason": "Keine Zielvorgaben im Plan."}
+    metric = max(planned, key=lambda key: sum(seconds for _, seconds in planned[key]))
+    limits, reference = {
+        "speed": (thresholds.pace_limits, thresholds.threshold_pace),
+        "watts": (thresholds.power_limits, thresholds.ftp),
+        "heartrate": (thresholds.hr_limits, hr_reference(thresholds)),
+    }[metric]
+    if not reference:
+        return {
+            "status": "not_covered",
+            "metric": metric,
+            "reason": "Schwelle unbekannt: keine Zonen.",
+        }
+    count = len(limits) + 1
+    planned_s, actual_s = [0.0] * count, [0.0] * count
+    for middle, seconds in planned[metric]:
+        planned_s[percent_zone(middle / reference * 100, limits) - 1] += seconds
+    for value, seconds in timeline.spans(metric, *span):
+        if metric == "speed" and value < MIN_MOVING_SPEED_MPS:
+            continue
+        actual_s[percent_zone(value / reference * 100, limits) - 1] += seconds
+    return {
+        "status": "ok",
+        "metric": metric,
+        "zones": [
+            {"zone": number, "planned_s": round(plan), "actual_s": round(actual)}
+            for number, (plan, actual) in enumerate(
+                zip(planned_s, actual_s, strict=True), start=1
+            )
+        ],
+    }
+
+
+def units_around(
+    units: Sequence[dict[str, Any]] | None, day: date | None
+) -> list[dict[str, Any]] | None:
+    """Planned units one day around the session's date."""
+    if units is None or day is None:
+        return None
+    first, last = day - timedelta(days=1), day + timedelta(days=1)
+    return [
+        unit
+        for unit in units
+        if first.isoformat() <= iso_date_prefix(unit.get("date")) <= last.isoformat()
+    ]
+
+
+def matched_unit(
+    session: Mapping[str, Any], focus: Any, around: Sequence[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """The focus's planned unit, else the one unit of the session's day and sport.
+
+    A unit without a session focus still has steps to compare, so the same
+    unique day-and-sport rule as the focus applies without needing a focus.
+    """
+    units = around or []
+    unit_id = focus.get("planned_unit_id") if isinstance(focus, dict) else None
+    if unit_id:
+        return next((unit for unit in units if unit.get("id") == unit_id), None)
+    day = iso_date_prefix(session.get("started_at_local"))
+    same = [
+        unit
+        for unit in units
+        if iso_date_prefix(unit.get("date")) == day
+        and workout_sport_from_record(unit).sport.value == session.get("sport")
+    ]
+    return same[0] if len(same) == 1 else None
+
+
+def unit_steps(unit: Mapping[str, Any]) -> list[dict[str, Any]] | dict[str, Any] | None:
+    """The unit's expanded steps, why they do not parse, or None without a text."""
+    description = unit.get("description")
+    if not isinstance(description, str) or len(description) > MAX_DESCRIPTION_CHARS:
+        return None
+    try:
+        return structured_steps(description, str(unit.get("target") or "AUTO"))
+    except WorkoutTextError as error:
+        return {
+            "status": "not_covered",
+            "planned_unit_id": unit.get("id"),
+            "reason": error.reason,
+        }
+
+
 class _Timeline:
     """Displayed streams of the session, for the share of time inside a target."""
 
@@ -350,6 +670,11 @@ class _Timeline:
         total = sum(span for _, span in spans)
         inside = sum(span for value, span in spans if low <= value <= high)
         return round(inside / total * 100) if total > 0 else None
+
+    def span(self) -> tuple[float, float] | None:
+        """First and last time of the displayed streams."""
+        times = [time for time in self._times if isinstance(time, (int, float))]
+        return (float(times[0]), float(times[-1])) if len(times) >= 2 else None
 
     def spans(self, metric: str, start: float, end: float) -> list[tuple[float, float]]:
         """Each displayed value with the time it covers inside the window."""

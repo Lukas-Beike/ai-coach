@@ -1828,6 +1828,29 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-analysis-zone-bar { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--zone-color, var(--training-zone-7)) var(--zone-share), var(--surface-raised) var(--zone-share)); }
 .activity-analysis-zone-value { color: var(--muted); text-align: right; }
 .activity-analysis-zones > p { margin: 0; font-size: .72rem; }
+/* Planned steps against the session (#2830): good from 80 %, fair from 50 % time in target. */
+.activity-analysis-target { fill: var(--series); fill-opacity: .14; stroke: var(--ink); stroke-opacity: .55; stroke-dasharray: 3 2; stroke-width: .8; }
+.activity-adherence { --band: var(--subtle); display: grid; gap: 10px; }
+.activity-adherence [data-band="good"] { --band: var(--accent); }
+.activity-adherence [data-band="fair"] { --band: var(--orange); }
+.activity-adherence [data-band="poor"] { --band: var(--danger); }
+.activity-adherence-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.activity-adherence-score { padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--band) 16%, transparent); color: var(--band); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.activity-adherence-strip { display: flex; gap: 2px; height: 14px; }
+.activity-adherence-strip i { flex-basis: 0; min-width: 3px; border-radius: 3px; background: var(--band); }
+.activity-adherence-strip [data-band="none"] { background: var(--surface-raised); }
+.activity-adherence-steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.activity-adherence-steps li { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: .74rem; font-variant-numeric: tabular-nums; }
+.activity-adherence-steps li > :first-child { color: var(--muted); }
+.activity-adherence-share { color: var(--band); font-weight: 700; text-align: right; }
+.activity-adherence-pair { display: grid; gap: 2px; }
+.activity-adherence-pair > span { display: block; height: 6px; border-radius: 3px; }
+.activity-adherence-plan { box-sizing: border-box; border: 1px dashed var(--muted); }
+.activity-adherence-actual { background: var(--zone-color, var(--training-zone-7)); }
+.activity-adherence-legend { display: flex; gap: 12px; color: var(--muted); }
+.activity-adherence-legend span::before { content: ""; display: inline-block; width: 12px; height: 6px; margin-right: 4px; border-radius: 3px; vertical-align: 1px; }
+.activity-adherence-legend .is-plan::before { box-sizing: border-box; border: 1px dashed var(--muted); }
+.activity-adherence-legend .is-actual::before { background: var(--muted); }
 .activity-analysis-laps { display: grid; gap: 8px; }
 .activity-analysis-laps td, .activity-analysis-laps th { font-variant-numeric: tabular-nums; }
 
