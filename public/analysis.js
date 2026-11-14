@@ -829,14 +829,20 @@ function firstThresholdSeries(lt1, start, end) {
 
 // The LT1 history waits for the server's background session read: read the values again
 // while it is pending or stale and an analysis sport view is open (#2693).
+// A failed read is tried again by the server after a pause, so it is asked again as well.
 let firstThresholdRefreshTimer = null;
+let firstThresholdRefreshGeneration = 0;
 function scheduleFirstThresholdRefresh(status) {
   clearTimeout(firstThresholdRefreshTimer);
-  if (status !== "pending" && status !== "stale") return;
+  const generation = ++firstThresholdRefreshGeneration;
+  if (!["pending", "stale", "failed"].includes(status)) return;
+  const session = state.sessionGeneration;
   firstThresholdRefreshTimer = setTimeout(async () => {
     if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) return;
     const result = await api("/api/performance").catch(() => null);
-    if (!result || !state.data || !ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) return;
+    // A newer render or another login owns the state by now.
+    if (!result || !state.data || generation !== firstThresholdRefreshGeneration || session !== state.sessionGeneration) return;
+    if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) return;
     state.data.performance = result.performance || result;
     renderAnalysisHistory(state.data.performance.history);
   }, ALL_TIME_RETRY_MS);

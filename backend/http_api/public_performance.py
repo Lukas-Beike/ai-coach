@@ -69,10 +69,11 @@ class PublicPerformanceStateService:
         self._session_feedback = session_feedback
         self._now = now
 
-    def performance_state(self) -> dict[str, Any]:
+    def performance_state(self, *, first_thresholds: bool = False) -> dict[str, Any]:
+        """The performance state; ``first_thresholds`` adds the LT1 chart history (#2693)."""
         source = self._canonical
         if source is None:
-            return self.from_inputs(None)
+            return self.from_inputs(None, first_thresholds=first_thresholds)
         today = self._today()
         # One read-only snapshot: the canonical reads, the Garmin sync status and
         # the profile/Garmin projection share one connection, so a concurrent sync
@@ -93,16 +94,26 @@ class PublicPerformanceStateService:
                     preferences=source.preferences_in(db),
                 ),
             )
-            return self._project(garmin, canonical, today, observations=reader)
+            return self._project(
+                garmin,
+                canonical,
+                today,
+                observations=reader,
+                first_thresholds=first_thresholds,
+            )
 
     def from_inputs(
-        self, canonical: CanonicalPerformanceInputs | None
+        self,
+        canonical: CanonicalPerformanceInputs | None,
+        *,
+        first_thresholds: bool = False,
     ) -> dict[str, Any]:
         """Project the inputs a larger state request read in its own transaction."""
         return self._project(
             self._garmin_payload_service.sync_status(),
             canonical,
             self._today(),
+            first_thresholds=first_thresholds,
         )
 
     def _project(
@@ -112,9 +123,11 @@ class PublicPerformanceStateService:
         today: date,
         *,
         observations: ObservationReader | None = None,
+        first_thresholds: bool = False,
     ) -> dict[str, Any]:
         """Project canonical values into the public performance state."""
         profile = self._profile_service.get()
+        zones = tuple(self._zone_configurations())
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
         if inputs.pending:
             # Nothing is served before the first completed backfill: no history,
@@ -127,7 +140,7 @@ class PublicPerformanceStateService:
             today,
             canonical=inputs,
             session_feedback=self._session_feedback,
-            zone_configurations=self._zone_configurations(),
+            zone_configurations=zones,
             lt1_session_records=self._lt1_session_records,
         )
         timezone = str(profile.get("timezone") or "UTC")
@@ -135,8 +148,16 @@ class PublicPerformanceStateService:
             **performance,
             "history": {
                 **analysis_history(garmin, today, canonical=inputs),
-                "first_thresholds": self._first_threshold_history(
-                    performance, profile, inputs, today
+                # Only the browser's analysis view draws it; the Coach and
+                # nutrition reads of this state skip the all-time session read.
+                **(
+                    {
+                        "first_thresholds": self._first_threshold_history(
+                            performance, profile, inputs, today, zones
+                        )
+                    }
+                    if first_thresholds
+                    else {}
                 ),
                 **(
                     {
@@ -177,6 +198,7 @@ class PublicPerformanceStateService:
         profile: Mapping[str, Any],
         inputs: CanonicalPerformanceInputs,
         today: date,
+        zones: Sequence[Any],
     ) -> dict[str, Any]:
         """LT1 of the threshold charts (#2693); pending until its sessions are read.
 
@@ -203,7 +225,7 @@ class PublicPerformanceStateService:
                 garmin_history=(
                     inputs.garmin or GarminCanonicalMetrics()
                 ).performance_history,
-                zone_configurations=self._zone_configurations(),
+                zone_configurations=zones,
                 records=records,
             ),
         }

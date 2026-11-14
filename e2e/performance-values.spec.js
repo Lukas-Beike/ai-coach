@@ -123,5 +123,7 @@ test("@responsive the threshold charts show the LT1 progression with gaps, heart
   const readout = page.locator(`#${await marker.getAttribute("aria-describedby")}`);
   await expect(readout).toContainText("bei 144 bpm · Schätzung aus eigenen Einheiten");
   const gapMarker = pace.locator(`.analysis-day-marker[data-date="${gap}"]`);
-  if (await gapMarker.count()) await expect(page.locator(`#${await gapMarker.getAttribute("aria-describedby")}`)).not.toContainText("LT1");
+  // The gap week keeps its LT2 reading but has no LT1 in it.
+  await expect(gapMarker).toHaveCount(1);
+  await expect(page.locator(`#${await gapMarker.getAttribute("aria-describedby")}`)).not.toContainText("LT1");
 });

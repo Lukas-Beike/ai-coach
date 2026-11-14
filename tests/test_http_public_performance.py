@@ -73,13 +73,9 @@ class PublicPerformanceStateTests(unittest.TestCase):
             {
                 "performance": {
                     **performance,
-                    "history": {
-                        **analysis_history(
-                            garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
-                        ),
-                        # No background session read is wired here (#2693).
-                        "first_thresholds": {"status": "unavailable"},
-                    },
+                    "history": analysis_history(
+                        garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
+                    ),
                     "training_focus_periods": {
                         "fortnight": training_focus(
                             garmin,
@@ -191,7 +187,13 @@ class PublicPerformanceStateTests(unittest.TestCase):
                 return_value={},
             ):
                 inputs = CanonicalPerformanceInputs()
-                return service.from_inputs(inputs)["performance"]["history"]
+                state = service.from_inputs(inputs, first_thresholds=True)
+                # Callers that draw no chart (Coach, nutrition) skip the read.
+                self.assertNotIn(
+                    "first_thresholds",
+                    service.from_inputs(inputs)["performance"]["history"],
+                )
+                return state["performance"]["history"]
 
         # The state request never reads session curves itself (#2693).
         self.assertEqual(

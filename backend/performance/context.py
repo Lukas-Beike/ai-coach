@@ -233,6 +233,11 @@ def first_threshold_history(
     2026-11-14). Each point keeps its heart rate and both origins.
     """
     configurations = list(zone_configurations)
+    first = today - timedelta(days=7 * LT1_HISTORY_WEEKS + LT1_DAYS)
+    # Only sessions the chart's weeks can use; the rule narrows each week further.
+    records = [
+        row for row in records if str(row.get("date") or "") >= first.isoformat()
+    ]
     pct = first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
     origin = first_threshold_origin(profile)
     monday = today - timedelta(days=today.weekday())

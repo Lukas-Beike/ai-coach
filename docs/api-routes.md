@@ -1035,7 +1035,8 @@ Errors: none beyond the common ones.
 Request: no query, no body.
 
 Response: 200 with `performance` (the current performance context, with
-`history` and `training_focus_periods` added; built by
+`history` (with `first_thresholds`, the LT1 chart history) and
+`training_focus_periods` added; built by
 `PublicPerformanceStateService.performance_state`) and `garmin` (the public
 Garmin projection).
 

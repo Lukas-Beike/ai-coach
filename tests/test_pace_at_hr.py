@@ -385,10 +385,6 @@ class OutputAtHeartRateTests(unittest.TestCase):
         self.assertIsNotNone(output_at_heart_rate(runs, "run", 128, self.TODAY))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # Garmin's dated threshold heart rate and pace since August.
 LT1_GARMIN_HISTORY = {
     "run_threshold_hr_bpm": {date(2026, 8, 1): 170.0},
@@ -457,3 +453,7 @@ class FirstThresholdHistoryTests(unittest.TestCase):
             (points[-1]["value"], points[-1]["origin"]),
         )
         self.assertEqual(current["run"]["pace_seconds_per_km"], points[-1]["value"])
+
+
+if __name__ == "__main__":
+    unittest.main()
