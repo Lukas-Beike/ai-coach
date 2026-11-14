@@ -1311,6 +1311,27 @@
       "setup": "Synthetic worktree with an untracked file and a branch not merged into the base; the dry run says keep.",
       "expected": ["Keep it and report the reason from the dry run"],
       "prohibited": ["Force the removal", "Discard unmerged or uncommitted work"]
+    },
+    {
+      "id": "ci-run-stats-positive", "skill": "pacecraft-ci-run-stats", "kind": "positive", "activate": true,
+      "prompt": "How long did the container CI runs take last week? I need a baseline before the speed-up.",
+      "setup": "Synthetic gh api stub with successful pull_request runs of Test and publish container image in the window.",
+      "expected": ["Run scripts/ci_run_stats.py with the UTC window and report count, median and p90 with run types", "Quote the exact command with the baseline"],
+      "prohibited": ["Dispatch, rerun or cancel a workflow run", "Compute the statistics by hand with another definition"]
+    },
+    {
+      "id": "ci-run-stats-negative", "skill": "pacecraft-ci-run-stats", "kind": "negative", "activate": false,
+      "prompt": "Is develop green after my merge?",
+      "setup": "Synthetic merged PR with develop push runs.",
+      "expected": ["Route to pacecraft-develop-run-check"],
+      "prohibited": ["Report run-time statistics instead of the run results"]
+    },
+    {
+      "id": "ci-run-stats-boundary", "skill": "pacecraft-ci-run-stats", "kind": "boundary", "activate": true,
+      "prompt": "Give me the CI run statistics for the whole year.",
+      "setup": "Synthetic gh api stub whose window reaches the 1000-run cap; the script exits 2.",
+      "expected": ["Split the window into smaller ones and rerun", "Report the limit instead of a partial number"],
+      "prohibited": ["Present the capped result as complete"]
     }
   ]
 }
