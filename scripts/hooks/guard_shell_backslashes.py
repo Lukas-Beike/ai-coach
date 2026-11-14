@@ -27,7 +27,18 @@ INLINE = {"-c", "-e", "--eval", "--command", "-Command", "-command"}
 PERL_IN_PLACE = re.compile(r"-p?i(?![A-Za-z])")
 SED = re.compile(r"(?:^|[/\\])sed(?:\.exe)?$")
 IN_PLACE = re.compile(r"-[A-Za-hj-z]*i|--in-place")
-SEGMENT = re.compile(r"[;&|\n]+")
+
+
+def _segments(text: str) -> list[str]:
+    """Shell segments split at ; & | and newlines outside single and double quotes."""
+    parts, start, quote = [], 0, ""
+    for index, char in enumerate(text):
+        if char in "'\"" and quote in ("", char):
+            quote = "" if quote else char
+        elif char in ";&|\n" and not quote:
+            parts.append(text[start:index])
+            start = index + 1
+    return [*parts, text[start:]]
 
 
 def _unquoted(line: str, end: int) -> bool:
@@ -75,7 +86,7 @@ def blocked(command: str) -> bool:
         if DOUBLED in body and (INTERPRETER.search(line) or WRITER.search(line)):
             return True
     return any(
-        DOUBLED in segment and _inline_edit(segment) for segment in SEGMENT.split(shell)
+        DOUBLED in segment and _inline_edit(segment) for segment in _segments(shell)
     )
 
 

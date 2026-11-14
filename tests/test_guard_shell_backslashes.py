@@ -36,6 +36,10 @@ class GuardShellBackslashesTests(unittest.TestCase):
             "py.exe - <<'EOF'\nprint('\\\\')\nEOF",
             # Inline programs and in-place edits with a doubled backslash.
             "python -c \"print('a\\\\b')\"",
+            # Separators inside the quoted program do not split it (Gitar P2).
+            "python -c \"import re; print(re.sub('\\\\s', '', s))\"",
+            "python -c \"import re\nprint('a\\\\b')\"",
+            "node -e 'a(); b(\"\\\\\")' | tail -1",
             "node --eval \"s.replace(/\\\\\\\\/g, '')\"",
             "perl -pi -e 's/\\\\s/x/' f.txt",
             "pwsh -Command \"'a\\\\b' -replace 'x'\"",
