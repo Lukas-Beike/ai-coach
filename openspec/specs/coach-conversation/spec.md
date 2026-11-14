@@ -269,7 +269,7 @@ Evidence:
 - `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`
 - `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`
 - `tests/test_coach_morning_completion.py:test_completed_command_gets_compact_unicode_receipt_in_two_transactions`
-- `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`
+- `tests/test_coach_background_job.py:CoachBackgroundJobRunnerTests.test_sleep_not_ready_waits_a_quarter_hour_without_starting_the_turn`
 
 ### Requirement: CC9a Analysis and planning quick actions
 The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `block_review`, `plan_week`, `plan_block` and `adjust_week`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
@@ -469,7 +469,7 @@ The system SHALL publish a `coach_quick_actions` object in the bootstrap, state 
 - **WHEN** the latest adaptive adjustment has status `preview`
 - **THEN** `plan_blockers` lists `{date, name, triggers}` for each of its changes dated today up to two days ahead whose blocking triggers include calendar, illness, injury or weather (only these four, sorted), the name cut to 200 characters; without such a preview the list is empty
 
-Evidence: `backend/coach/context.py:coach_quick_actions_state`, `backend/coach/context.py:CoachQuickActionsService.state`, `backend/planning/adaptive.py:adaptive_quick_action_blockers`, `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`, `backend/http_api/bootstrap_state.py`, `backend/http_api/public_plan.py`; `tests/test_coach_quick_actions.py:test_blockers_include_today_through_two_days_but_not_day_three`, `tests/test_server_coach.py:ServerCoachTests.test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days`.
+Evidence: `backend/coach/context.py:coach_quick_actions_state`, `backend/coach/context.py:CoachQuickActionsService.state`, `backend/planning/adaptive.py:adaptive_quick_action_blockers`, `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`, `backend/http_api/bootstrap_state.py`, `backend/http_api/public_plan.py`; `tests/test_coach_quick_actions.py:test_blockers_include_today_through_two_days_but_not_day_three`, `tests/test_coach_quick_actions.py:test_ready_checkin_is_done_only_for_today`, `tests/test_coach_quick_actions.py:test_state_projects_preview_blockers_without_provider_status`.
 
 ### Requirement: CC13 Durable Coach state
 The system SHALL keep Coach dialogue state in the tables `messages`, `coach_commands`, `coach_action_proposals` and `coach_plan_artifacts` and in the key-value entries below, with the meanings of the scenarios. Column definitions are in `docs/schema-reference.md` (generated).

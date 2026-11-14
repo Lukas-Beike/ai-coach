@@ -134,18 +134,20 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
         with self.database.unit_of_work() as db:
             self.key_values.set(db, key, value)
 
-    def test_today_ready_state_is_current(self) -> None:
-        self.set_value("morning_checkin_date", TODAY.isoformat())
-        self.set_value("morning_checkin_status", "ready")
+    def test_todays_state_is_current_and_keeps_its_status(self) -> None:
+        for status in ("ready", "failed"):
+            with self.subTest(status=status):
+                self.set_value("morning_checkin_date", TODAY.isoformat())
+                self.set_value("morning_checkin_status", status)
 
-        self.assertEqual(
-            self.service.state(),
-            {
-                "status": "ready",
-                "date": TODAY.isoformat(),
-                "current_for_today": True,
-            },
-        )
+                self.assertEqual(
+                    self.service.state(),
+                    {
+                        "status": status,
+                        "date": TODAY.isoformat(),
+                        "current_for_today": True,
+                    },
+                )
 
     def test_yesterday_ready_state_is_projected_as_waiting(self) -> None:
         yesterday = TODAY - timedelta(days=1)
@@ -168,19 +170,6 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
                 "status": "waiting",
                 "date": None,
                 "current_for_today": False,
-            },
-        )
-
-    def test_non_ready_status_is_preserved(self) -> None:
-        self.set_value("morning_checkin_date", TODAY.isoformat())
-        self.set_value("morning_checkin_status", "failed")
-
-        self.assertEqual(
-            self.service.state(),
-            {
-                "status": "failed",
-                "date": TODAY.isoformat(),
-                "current_for_today": True,
             },
         )
 

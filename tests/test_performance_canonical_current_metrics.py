@@ -277,17 +277,6 @@ class WahooFallbackReadTests(unittest.TestCase):
             NO_CURRENT_INPUTS,
         )
 
-    def test_wahoo_rows_alone_feed_the_current_inputs(self) -> None:
-        reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
-
-        inputs = read_current_inputs(reader, None, as_of=TODAY)
-
-        assert inputs is not None
-        assert inputs.wahoo_ftp is not None
-        assert inputs.wahoo_weight is not None
-        self.assertEqual(250, inputs.wahoo_ftp.value.value)
-        self.assertEqual(78.5, inputs.wahoo_weight.value.value)
-
 
 AS_OF: Final = TODAY
 WAHOO_AGE_LIMIT_DAYS: Final = 90

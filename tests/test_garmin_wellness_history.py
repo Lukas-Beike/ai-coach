@@ -219,7 +219,9 @@ class CollectorTests(unittest.TestCase):
             [row["calendarDate"] for row in payload["hrv"]], ["2021-03-01"]
         )
 
-    def test_daily_summaries_are_read_in_ranges_of_at_most_31_days(self) -> None:
+    def test_daily_summaries_and_body_battery_are_read_in_ranges_of_at_most_31_days(
+        self,
+    ) -> None:
         client = SdkClient()
         collect_wellness_history(
             client,
@@ -229,33 +231,16 @@ class CollectorTests(unittest.TestCase):
             hooks=HOOKS,
         )
 
-        self.assertEqual(
-            [args for name, args in client.calls if name == "get_daily_summaries"],
-            [
-                ("2021-01-01", "2021-01-31"),
-                ("2021-02-01", "2021-03-03"),
-                ("2021-03-04", "2021-03-31"),
-            ],
-        )
-
-    def test_body_battery_reports_are_read_in_ranges_of_at_most_31_days(self) -> None:
-        client = SdkClient()
-        collect_wellness_history(
-            client,
-            date(2021, 1, 1),
-            date(2021, 3, 31),
-            external_call=_external_call,
-            hooks=HOOKS,
-        )
-
-        self.assertEqual(
-            [args for name, args in client.calls if name == "get_body_battery"],
-            [
-                ("2021-01-01", "2021-01-31"),
-                ("2021-02-01", "2021-03-03"),
-                ("2021-03-04", "2021-03-31"),
-            ],
-        )
+        for call in ("get_daily_summaries", "get_body_battery"):
+            with self.subTest(call=call):
+                self.assertEqual(
+                    [args for name, args in client.calls if name == call],
+                    [
+                        ("2021-01-01", "2021-01-31"),
+                        ("2021-02-01", "2021-03-03"),
+                        ("2021-03-04", "2021-03-31"),
+                    ],
+                )
 
     def test_body_battery_keeps_only_reports_inside_the_window(self) -> None:
         payload = self.collect(SdkClient())

@@ -1,5 +1,11 @@
+import sqlite3
+import threading
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import Mock
+
+from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.coach.read_tools import CoachReadToolService
 from backend.errors import AppError
@@ -176,6 +182,179 @@ class CoachReadToolServiceTests(unittest.TestCase):
                 self.service.execute(tool_name, {"limit": "not-an-integer"})
             self.assertEqual(caught.exception.status, 400)
             self.assertEqual(caught.exception.reason, "invalid_list_request")
+
+    def test_explicit_text_source_bypasses_local_products(self) -> None:
+        meal_library = self.nutrition_meal_library
+        meal_library.product_catalog.list_products.return_value = []
+        meal_library.food_database.lookup.return_value = {
+            "ok": True,
+            "foods": [{"id": "bls:123"}],
+            "source": "bls",
+        }
+        result = self.service.execute(
+            "lookup_food", {"query": "Haferflocken", "source": "bls"}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["source"], "bls")
+        meal_library.food_database.lookup.assert_called_once_with(
+            {"query": "Haferflocken", "source": "bls"}
+        )
+        meal_library.product_catalog.lookup_product.assert_not_called()
+        self.assertNotIn("local_products", result)
+
+    def test_explicit_text_source_still_returns_matching_saved_products(self) -> None:
+        meal_library = self.nutrition_meal_library
+        meal_library.food_database.lookup.return_value = {
+            "ok": True,
+            "foods": [{"id": "bls:123"}],
+            "source": "bls",
+        }
+        saved = [{"id": f"local-oats-{index}"} for index in range(12)]
+        meal_library.product_catalog.list_products.return_value = saved
+        result = self.service.execute(
+            "lookup_food", {"query": "Haferflocken", "source": "bls"}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["source"], "bls")
+        # Same saved matches as a lookup without an explicit source.
+        self.assertEqual(result["local_products"], saved)
+        meal_library.product_catalog.list_products.assert_called_once_with(
+            query="Haferflocken"
+        )
+
+    def test_explicit_source_outage_still_returns_saved_products(self) -> None:
+        meal_library = self.nutrition_meal_library
+        meal_library.food_database.lookup.side_effect = AppError(
+            429, "Lebensmitteldatenbank ist vorübergehend ausgelastet."
+        )
+        meal_library.product_catalog.list_products.return_value = [{"id": "local-oats"}]
+        result = self.service.execute(
+            "lookup_food", {"query": " Skyr ", "source": " Open_Food_Facts "}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["foods"], [])
+        self.assertEqual(result["local_products"], [{"id": "local-oats"}])
+        meal_library.product_catalog.lookup_product.assert_not_called()
+        meal_library.food_database.lookup.assert_called_once_with(
+            {"query": "Skyr", "source": "open_food_facts"}
+        )
+        for status in (400, 404, 502):
+            meal_library.food_database.lookup.side_effect = AppError(status, "Fehler.")
+            with self.subTest(status=status):
+                fallback = self.service.execute(
+                    "lookup_food", {"query": "Skyr", "source": "bls"}
+                )
+                assert isinstance(fallback, dict)
+                self.assertEqual(fallback["local_products"], [{"id": "local-oats"}])
+                self.assertIn("Fehler.", fallback["notice"])
+
+        meal_library.product_catalog.list_products.return_value = []
+        with self.assertRaises(AppError):
+            self.service.execute(
+                "lookup_food", {"query": "Haferflocken", "source": "bls"}
+            )
+
+    def test_batched_queries_return_each_term_and_isolate_failures(self) -> None:
+        meal_library = self.nutrition_meal_library
+
+        def lookup(arguments):
+            if arguments["query"] == "Pfeffersoße":
+                raise AppError(
+                    429,
+                    "Lebensmitteldatenbank ist vorübergehend ausgelastet.",
+                    reason="food_database_rate_limited",
+                )
+            return {"ok": True, "foods": [{"id": f"local-{arguments['query']}"}]}
+
+        meal_library.product_catalog.lookup_product.side_effect = lookup
+        result = self.service.execute(
+            "lookup_food",
+            {"query": "Reis", "queries": [" Zucchini ", "reis", "Pfeffersoße"]},
+        )
+
+        assert isinstance(result, dict)
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            [item["query"] for item in result["results"]],
+            ["Reis", "Zucchini", "Pfeffersoße"],
+        )
+        self.assertEqual(result["results"][1]["foods"], [{"id": "local-Zucchini"}])
+        self.assertEqual(
+            result["results"][2],
+            {
+                "query": "Pfeffersoße",
+                "ok": False,
+                "error": "Lebensmitteldatenbank ist vorübergehend ausgelastet.",
+                "reason": "food_database_rate_limited",
+            },
+        )
+        # Without a source each term keeps the local-first product lookup.
+        meal_library.product_catalog.lookup_product.assert_any_call(
+            {"query": "Zucchini"}
+        )
+        meal_library.food_database.lookup.assert_not_called()
+
+        meal_library.product_catalog.lookup_product.side_effect = AppError(
+            429, "Ausgelastet."
+        )
+        with self.assertRaises(AppError):
+            self.service.execute("lookup_food", {"queries": ["Reis", "Zucchini"]})
+        for arguments in (
+            {"queries": "Reis"},
+            {"queries": ["Reis"], "barcode": "4001234567890"},
+            {"queries": [" "]},
+            {"queries": [f"Zutat {index}" for index in range(21)]},
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(AppError):
+                self.service.execute("lookup_food", arguments)
+
+    def test_barcode_source_keeps_local_first_lookup(self) -> None:
+        meal_library = self.nutrition_meal_library
+        meal_library.product_catalog.lookup_product.return_value = {
+            "ok": True,
+            "product": {"id": "local-product"},
+            "source": "local",
+        }
+        result = self.service.execute(
+            "lookup_food", {"barcode": "4006381333931", "source": "off"}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["source"], "local")
+        meal_library.product_catalog.lookup_product.assert_called_once_with(
+            {"barcode": "4006381333931", "source": "off"}
+        )
+        meal_library.food_database.lookup.assert_not_called()
+
+    def test_omitted_text_source_uses_bls_and_never_queries_open_food_facts(
+        self,
+    ) -> None:
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
+        )
+        _diary, meal_library = build_nutrition_services(
+            manager,
+            threading.Lock(),
+            lambda: "2026-10-05T12:00:00+00:00",
+            lambda: datetime(2026, 10, 5, tzinfo=UTC),
+        )
+        off_client = Mock()
+        off_client.search.return_value = [{"id": "off:1"}]
+        off_client.product.return_value = {"id": "off:1"}
+        meal_library.food_database._off = off_client
+        self.nutrition_meal_library_factory.return_value = meal_library
+
+        result = self.service.execute("lookup_food", {"query": "Haferflocken"})
+
+        assert isinstance(result, dict)
+        self.assertFalse(result["local"])
+        self.assertTrue(result["foods"])
+        self.assertTrue(all(food["id"].startswith("bls:") for food in result["foods"]))
+        off_client.search.assert_not_called()
+        off_client.product.assert_not_called()
 
     def test_unknown_name_returns_none_without_constructing_services(self):
         self.assertIsNone(self.service.execute("unknown_read_tool", {}))

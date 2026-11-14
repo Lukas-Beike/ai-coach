@@ -179,23 +179,16 @@ class GarminSourceLabelTests(unittest.TestCase):
             "Garmin Connect Körpergewicht",
         )
 
-    def test_cycling_ftp_note(self) -> None:
-        observation = _garmin(MetricKind.FTP, "cycling_ftp:2026-10-12", Sport.RIDE)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.PERFORMANCE_NOTE),
-            "Garmin Connect FTP",
-        )
-
-    def test_cycling_ftp_history_uses_the_ftp_note(self) -> None:
+    def test_cycling_ftp_and_its_history_share_the_ftp_note(self) -> None:
         # Pinned behaviour: no legacy history label is known, so history rows reuse
         # the current FTP note. The pull request description flags this.
-        observation = _garmin(
-            MetricKind.FTP, "cycling_ftp_history:2026-10-12", Sport.RIDE
-        )
-        self.assertEqual(
-            observation_source_label(observation, SourceView.PERFORMANCE_NOTE),
-            "Garmin Connect FTP",
-        )
+        for record_id in ("cycling_ftp:2026-10-12", "cycling_ftp_history:2026-10-12"):
+            with self.subTest(record_id=record_id):
+                observation = _garmin(MetricKind.FTP, record_id, Sport.RIDE)
+                self.assertEqual(
+                    observation_source_label(observation, SourceView.PERFORMANCE_NOTE),
+                    "Garmin Connect FTP",
+                )
 
     def test_running_ftp_note(self) -> None:
         observation = _garmin(

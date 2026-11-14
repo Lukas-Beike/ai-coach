@@ -491,7 +491,6 @@
  "test_nutrition_photo_extraction.NutritionPhotoExtractionTests": 0.001,
  "test_nutrition_product_http_contract.NutritionProductHttpContractTests": 0.005,
  "test_nutrition_products.NutritionProductContractTests": 0.153,
- "test_nutrition_review_regressions.NutritionReviewRegressionTests": 0.06,
  "test_nutrition_use_case_services.NutritionUseCaseServiceTests": 0.046,
  "test_observability.DiagnosticCaptureDiscardTests": 0.514,
  "test_observability.HttpAccessLogLevelTests": 0.001,

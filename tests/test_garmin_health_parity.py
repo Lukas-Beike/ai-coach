@@ -408,35 +408,26 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
 class NamedDeviationTests(unittest.TestCase):
     """Places where the mapper intentionally differs from a legacy reader."""
 
-    def test_declared_kilograms_above_the_range_are_not_reinterpreted(self) -> None:
-        snapshot: dict[str, Any] = {
-            "weight": {"calendarDate": DAY, "weight": 72100, "unitKey": "kg"}
-        }
+    def test_declared_units_outside_the_plausible_range_are_flagged_not_reinterpreted(
+        self,
+    ) -> None:
+        # Kilograms above the range stay unreinterpreted; grams below 300 are
+        # converted by the legacy reader, not kept.
+        for raw, unit, legacy_value in ((72100, "kg", 72.1), (250, "gram", 250.0)):
+            with self.subTest(unit=unit):
+                snapshot: dict[str, Any] = {
+                    "weight": {"calendarDate": DAY, "weight": raw, "unitKey": unit}
+                }
 
-        legacy = dict(garmin_weight.garmin_weight_daily_records(snapshot))
-        result = _map(snapshot)
+                legacy = dict(garmin_weight.garmin_weight_daily_records(snapshot))
+                result = _map(snapshot)
 
-        self.assertEqual(legacy, {DAY: 72.1})
-        self.assertEqual(result.records, ())
-        self.assertEqual(
-            [(i.record_ref, i.field, i.reason) for i in result.issues],
-            [("weight[0]", "weight", IssueReason.OUT_OF_RANGE)],
-        )
-
-    def test_declared_grams_below_300_are_converted_not_kept(self) -> None:
-        snapshot: dict[str, Any] = {
-            "weight": {"calendarDate": DAY, "weight": 250, "unitKey": "gram"}
-        }
-
-        legacy = dict(garmin_weight.garmin_weight_daily_records(snapshot))
-        result = _map(snapshot)
-
-        self.assertEqual(legacy, {DAY: 250.0})
-        self.assertEqual(result.records, ())
-        self.assertEqual(
-            [(i.record_ref, i.field, i.reason) for i in result.issues],
-            [("weight[0]", "weight", IssueReason.OUT_OF_RANGE)],
-        )
+                self.assertEqual(legacy, {DAY: legacy_value})
+                self.assertEqual(result.records, ())
+                self.assertEqual(
+                    [(i.record_ref, i.field, i.reason) for i in result.issues],
+                    [("weight[0]", "weight", IssueReason.OUT_OF_RANGE)],
+                )
 
     def test_unreadable_date_is_not_kept_as_a_day_key(self) -> None:
         snapshot: dict[str, Any] = {

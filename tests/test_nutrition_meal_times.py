@@ -85,31 +85,17 @@ class NutritionMealTimeTests(unittest.TestCase):
         stored = self.service.get_meal(entry["id"])
         self.assertIs(stored["logged_time_known"], False)
 
-    def test_unknown_time_requires_an_explicit_meal_type(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.log_meal(
-                {
-                    "meal_date": "2026-09-24",
-                    "description": "Ohne Typ",
-                    "kcal": 300,
-                    "logged_time_known": False,
-                }
-            )
+    def test_an_unknown_time_or_invalid_meal_type_is_rejected(self) -> None:
+        for fields in (
+            {"description": "Ohne Typ", "logged_time_known": False},
+            {"meal_type": "brunch", "description": "Frühstück"},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(AppError) as raised:
+                self.service.log_meal(
+                    {"meal_date": "2026-09-24", "kcal": 300, **fields}
+                )
 
-        self.assertEqual(raised.exception.status, 400)
-
-    def test_invalid_meal_type_is_rejected(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.log_meal(
-                {
-                    "meal_date": "2026-09-24",
-                    "meal_type": "brunch",
-                    "description": "Frühstück",
-                    "kcal": 300,
-                }
-            )
-
-        self.assertEqual(raised.exception.status, 400)
+            self.assertEqual(raised.exception.status, 400)
 
     def test_logged_time_known_must_be_a_boolean(self) -> None:
         with self.assertRaises(AppError) as raised:
