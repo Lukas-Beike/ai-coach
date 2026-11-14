@@ -22,7 +22,9 @@ the docs contract test and a diff review. Run evaluations only on request.
 - Keep canonical skills under `.agents/skills/`. Names must be unique and match
   the folder. Use YAML
   frontmatter with `name` and a description that states when to trigger and when
-  to route elsewhere. Register the skill in the index.
+  to route elsewhere. Register the skill in the index, and add a positive, a
+  nearby negative and a boundary case to [the catalogue](evals/cases.json);
+  the docs contract test requires all three for every skill.
 - Describe non-obvious decisions, project-specific pitfalls, needed evidence, and
   output expectations concisely. Add scripts or references only for reusable work
   that warrants them; resolve links inside the repository. Preserve upstream

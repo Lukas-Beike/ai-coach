@@ -104,6 +104,8 @@ class AiDocsContractTests(unittest.TestCase):
                         self.assertIsInstance(assertion, str)
                         self.assertTrue(assertion.strip(), field)
                 coverage.setdefault(case["skill"], set()).add(case["kind"])
+        skills = {path.parent.name for path in SKILL_ROOT.glob("*/SKILL.md")}
+        self.assertEqual(skills - set(coverage), set(), "Skills without cases")
         for skill, kinds in coverage.items():
             self.assertEqual(kinds, {"positive", "negative", "boundary"}, skill)
 
