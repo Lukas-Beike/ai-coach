@@ -14,6 +14,7 @@ import tomllib
 import unittest
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
+from unittest import mock
 
 from tests import run_tests
 
@@ -30,6 +31,13 @@ CHANGES_SPEC = importlib.util.spec_from_file_location(
 assert CHANGES_SPEC is not None and CHANGES_SPEC.loader is not None
 ci_changes = importlib.util.module_from_spec(CHANGES_SPEC)
 CHANGES_SPEC.loader.exec_module(ci_changes)
+REUSE_SPEC = importlib.util.spec_from_file_location(
+    "reuse_green_tree",
+    Path(__file__).resolve().parents[1] / ".github/scripts/reuse_green_tree.py",
+)
+assert REUSE_SPEC is not None and REUSE_SPEC.loader is not None
+reuse_green_tree = importlib.util.module_from_spec(REUSE_SPEC)
+REUSE_SPEC.loader.exec_module(reuse_green_tree)
 WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml"
 )
@@ -1196,18 +1204,25 @@ class ChangedFileClassifierTests(unittest.TestCase):
         classify = source.split("- name: Classify changed files\n", 1)[1]
         self.assertIn("if: github.event_name == 'pull_request'\n", classify)
         self.assertIn("python .github/scripts/ci_changes.py", classify)
+        # Container tests skip only on docs-only runs, never on a reuse (#2749).
         skip = "if: needs.source.outputs.docs_only != 'true'\n"
         self.assertIn(skip, _job(workflow, "container_tests", "test"))
-        self.assertIn(skip, _job(workflow, "e2e", "browser"))
+        reused = " && needs.source.outputs.reuse_run == ''\n"
         self.assertIn(
-            "if: needs.test.result == 'success' && needs.source.outputs.docs_only != 'true'\n",
+            "if: needs.source.outputs.docs_only != 'true'" + reused,
+            _job(workflow, "e2e", "browser"),
+        )
+        self.assertIn(
+            "if: needs.test.result == 'success' && "
+            "needs.source.outputs.docs_only != 'true'" + reused,
             _job(workflow, "quality", "e2e"),
         )
         # Required "Test shard N/4" names need the matrix job itself to run.
         shards = _job(workflow, "test_shards", "container_tests")
         self.assertNotRegex(shards.split("steps:", 1)[0], r"\n    if:")
         self.assertIn(
-            "MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' "
+            "MODE: ${{ needs.source.outputs.reuse_run != '' && 'reused' "
+            "|| needs.source.outputs.docs_only != 'true' && 'full' "
             "|| matrix.shard == 1 && 'docs' || 'idle' }}",
             shards,
         )
@@ -1238,7 +1253,7 @@ class ChangedFileClassifierTests(unittest.TestCase):
         # Image with its SBOM, the syntax check and publishing never skip.
         self.assertIn(
             "- name: Run syntax checks\n"
-            "        if: env.MODE != 'idle' && matrix.shard == 1\n",
+            "        if: (env.MODE == 'full' || env.MODE == 'docs') && matrix.shard == 1\n",
             shards,
         )
         never_skip = (
@@ -1247,6 +1262,208 @@ class ChangedFileClassifierTests(unittest.TestCase):
         )
         for job in never_skip:
             self.assertNotIn("docs_only", job.lower())
+
+
+def _reuse_run(
+    run_id,
+    sha,
+    *,
+    event="push",
+    branch="develop",
+    status="completed",
+    conclusion="success",
+    repository="owner/repo",
+):
+    return {
+        "id": run_id,
+        "head_sha": sha,
+        "event": event,
+        "head_branch": branch,
+        "status": status,
+        "conclusion": conclusion,
+        "head_repository": {"full_name": repository},
+    }
+
+
+def _complete_jobs(**overrides):
+    jobs = [
+        {
+            "name": name,
+            "conclusion": "success",
+            "steps": [{"name": step, "conclusion": "success"}] if step else [],
+        }
+        for name, step in reuse_green_tree.required_jobs(4).items()
+    ]
+    for job in jobs:
+        job.update(overrides.get(job["name"], {}))
+    return jobs
+
+
+# Commit -> tree of the fixture runs; the own tree is tree-a.
+_REUSE_TREES = {"same": "tree-a", "same-main": "tree-a", "other": "tree-b"}
+
+
+class ReuseGreenTreeTests(unittest.TestCase):
+    """Only a complete green push run of the identical tree is reused (#2749)."""
+
+    def choose(self, runs, jobs=None, own_run_id=100):
+        jobs = jobs or {}
+        return reuse_green_tree.choose(
+            "tree-a",
+            own_run_id,
+            runs,
+            _REUSE_TREES.__getitem__,
+            lambda run_id: jobs.get(run_id, _complete_jobs()),
+            "owner/repo",
+            4,
+        )
+
+    def test_a_complete_green_push_run_of_the_same_tree_is_reused(self):
+        for branch, sha in (("develop", "same"), ("main", "same-main")):
+            with self.subTest(branch=branch):
+                run_id, reason, _ = self.choose([_reuse_run(7, sha, branch=branch)])
+                self.assertEqual(run_id, 7)
+                self.assertIn("run 7", reason)
+        # The newest qualifying run wins.
+        run_id, _, _ = self.choose([_reuse_run(7, "same"), _reuse_run(9, "same")])
+        self.assertEqual(run_id, 9)
+
+    def test_anything_else_runs_the_full_suite(self):
+        incomplete = {
+            "a skipped unit-test step (a run that reused another)": {
+                "Test shard 2/4": {
+                    "steps": [{"name": "Run unit tests", "conclusion": "skipped"}]
+                }
+            },
+            "a desktop-only browser matrix": {
+                "Browser checks (mobile 1/2)": {"conclusion": "skipped"}
+            },
+            "skipped quality": {
+                "Incremental quality checks": {"conclusion": "skipped"}
+            },
+            "failed container tests": {
+                "Container unit tests": {"conclusion": "failure"}
+            },
+        }
+        for name, overrides in incomplete.items():
+            with self.subTest(case=name):
+                run_id, _, _ = self.choose(
+                    [_reuse_run(7, "same")], {7: _complete_jobs(**overrides)}
+                )
+                self.assertIsNone(run_id)
+        for name, run in {
+            "changed tree": _reuse_run(7, "other"),
+            "failed run": _reuse_run(7, "same", conclusion="failure"),
+            "cancelled run": _reuse_run(7, "same", conclusion="cancelled"),
+            "pull request event": _reuse_run(7, "same", event="pull_request"),
+            "dispatch event": _reuse_run(7, "same", event="workflow_dispatch"),
+            "release event": _reuse_run(7, "same", event="release"),
+            "feature branch push": _reuse_run(7, "same", branch="feature/x"),
+            "fork repository": _reuse_run(7, "same", repository="fork/repo"),
+            "later run": _reuse_run(101, "same"),
+            "the run itself": _reuse_run(100, "same"),
+        }.items():
+            with self.subTest(case=name):
+                run_id, _, running = self.choose([run])
+                self.assertIsNone(run_id)
+                self.assertEqual(running, [])
+
+    def test_an_earlier_running_push_of_the_same_tree_is_awaited(self):
+        states = iter(
+            [
+                [_reuse_run(7, "same", status="in_progress", conclusion=None)],
+                [_reuse_run(7, "same")],
+            ]
+        )
+        github = mock.Mock(repository="owner/repo")
+        github.runs.side_effect = lambda: next(states)
+        github.tree_of.side_effect = _REUSE_TREES.__getitem__
+        github.jobs_of.side_effect = lambda run_id: _complete_jobs()
+        sleeps = []
+        run_id, _ = reuse_green_tree.decide(
+            github, "tree-a", 100, 4, wait=60, sleep=sleeps.append
+        )
+        self.assertEqual((run_id, sleeps), (7, [reuse_green_tree.POLL_SECONDS]))
+        # A run that never finishes is waited for only until the limit.
+        github.runs.side_effect = lambda: [
+            _reuse_run(7, "same", status="queued", conclusion=None)
+        ]
+        run_id, reason = reuse_green_tree.decide(
+            github, "tree-a", 100, 4, wait=60, sleep=lambda _: None
+        )
+        self.assertIsNone(run_id)
+        self.assertIn("still running", reason)
+
+    def test_a_failed_lookup_runs_the_full_suite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            result = subprocess.run(
+                [sys.executable, Path(reuse_green_tree.__file__).resolve()],
+                env={
+                    **os.environ,
+                    "REPOSITORY": "owner/repo",
+                    "SOURCE_SHA": "0" * 40,
+                    "RUN_ID": "100",
+                    "PYTHON_TEST_SHARDS": "4",
+                    "GITHUB_OUTPUT": str(output),
+                },
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertIn("Full suite: lookup failed", result.stdout)
+            self.assertEqual(output.read_text(encoding="utf-8"), "reuse_run=\n")
+
+    def test_required_jobs_match_the_workflow(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        e2e = _job(workflow, "e2e", "browser")
+        self.assertIn(
+            json.dumps(list(reuse_green_tree.BROWSER_PROJECTS)).replace('","', '", "'),
+            e2e,
+        )
+        self.assertIn(f"shards: [{reuse_green_tree.BROWSER_SHARDS}]\n", e2e)
+        for name in reuse_green_tree.required_jobs(_native_shard_count()):
+            if name == "test" or name.startswith(("Test shard", "Browser checks (")):
+                continue
+            self.assertIn(f"name: {name}\n", workflow)
+        self.assertIn("  test:\n", workflow)
+
+    def test_workflow_reuses_only_through_the_read_only_lookup(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        source = _job(workflow, "source", "image")
+        self.assertIn("reuse_run: ${{ steps.reuse.outputs.reuse_run }}", source)
+        self.assertIn(
+            "permissions:\n      contents: read\n"
+            "      # Read-only: list earlier runs of this workflow to reuse (#2749).\n"
+            "      actions: read\n",
+            source,
+        )
+        self.assertNotIn("write", source)
+        lookup = source.split(
+            "- name: Find an earlier complete green run of this tree\n", 1
+        )[1]
+        self.assertIn("GH_TOKEN: ${{ github.token }}", lookup)
+        self.assertIn("run: python .github/scripts/reuse_green_tree.py", lookup)
+        # The aggregates accept the skipped matrix only with a reused run id.
+        browser = _job(workflow, "browser", "build-and-push")
+        self.assertIn('if [[ -n "$REUSE_RUN" && "$E2E_RESULT" == "skipped" ]]', browser)
+        # Publishing still needs source, image, container-tested aggregates.
+        publish = workflow.split("  build-and-push:\n", 1)[1]
+        for condition in (
+            "always() &&",
+            "needs.source.result == 'success' && needs.image.result == 'success' &&",
+            "needs.test.result == 'success' && needs.browser.result == 'success' &&",
+            "(needs.e2e.result == 'success' || (needs.source.outputs.reuse_run != '' && needs.e2e.result == 'skipped')) &&",
+            "(needs.quality.result == 'success' || (needs.source.outputs.reuse_run != '' && needs.quality.result == 'skipped'))",
+        ):
+            self.assertIn(condition, publish)
+        # Image, SBOM and container tests never consult the reuse.
+        for job in (
+            _job(workflow, "image", "test_shards"),
+            _job(workflow, "container_tests", "test"),
+        ):
+            self.assertNotIn("reuse_run", job)
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
