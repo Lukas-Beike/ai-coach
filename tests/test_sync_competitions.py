@@ -619,6 +619,40 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(result["skipped"], 0)
         self.assertEqual(result["skipped_items"], [])
 
+    def test_lost_local_write_after_remote_calls_recovers_on_the_next_run(self):
+        # The remote calls run before the local link is stored (#2080): a failed
+        # local write leaves the row dirty, and the next run links the pushed
+        # event by its external id instead of pushing a second one.
+        self.insert_competition(self.local_competition("local-push"))
+        external_id = planning_competitions.competition_external_id("local-push")
+        remote = self.remote_event("remote-created", external_id)
+        client = FakeCompetitionClient(pushed=[remote])
+        service = self.make_sync_service(client)
+        with (
+            patch.object(
+                self.reconciler,
+                "reconcile",
+                side_effect=sqlite3.OperationalError("disk I/O error"),
+            ),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            service.sync()
+        self.assertEqual(self.stored_competition("local-push")["sync_dirty"], 1)
+
+        client.events = [remote]
+        result = service.sync()
+
+        self.assertEqual(
+            [[event["external_id"] for event in call] for call in client.upsert_calls],
+            [[external_id]],
+        )
+        stored = self.stored_competition("local-push")
+        self.assertEqual(
+            (stored["sync_state"], stored["intervals_event_id"]),
+            ("synced", "remote-created"),
+        )
+        self.assertEqual(result["conflicts"], 0)
+
     def test_failed_remote_delete_does_not_clear_tombstones_or_upsert(self):
         self.insert_tombstone("tombstone", "remote-delete", None, "created")
         error = RuntimeError("delete failed")
@@ -811,11 +845,11 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         )
         self.assertEqual(self.stored_kv("last_competition_sync_at"), NOW)
         self.assertEqual(self.stored_kv("last_competition_sync_error"), "")
-        self.assertEqual(self.stored_kv("competition_sync_running"), "0")
-        self.assertEqual(self.stored_kv("competition_sync_status"), "")
+        self.assertIsNone(self.stored_kv("competition_sync_running"))
+        self.assertIsNone(self.stored_kv("competition_sync_status"))
         self.assertEqual(publisher.events, [("coach", {"status": "changed"})])
 
-    def test_provider_failure_redacts_error_and_releases_lock_after_cleanup(self):
+    def test_provider_failure_redacts_error_and_releases_lock(self):
         error = RuntimeError("provider failed with secret-token" + "x" * 1200)
         client = FakeCompetitionClient(fetch_error=error)
         lock = FakeLock()
@@ -829,74 +863,33 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         stored_error = self.stored_kv("last_competition_sync_error")
         self.assertEqual(len(stored_error), 1000)
         self.assertTrue(stored_error.startswith("provider failed with [REDACTED]"))
-        self.assertEqual(self.stored_kv("competition_sync_running"), "0")
-        self.assertEqual(self.stored_kv("competition_sync_status"), "")
+        self.assertIsNone(self.stored_kv("competition_sync_running"))
+        self.assertIsNone(self.stored_kv("competition_sync_status"))
         self.assertEqual(lock.release_calls, 1)
         self.assertEqual(
             logger.exceptions[0][1]["extra"]["context"], {"reason": "manual"}
         )
 
-    def test_reconcile_and_cleanup_failures_release_lock_and_cleanup_error_is_visible(
-        self,
-    ):
+    def test_reconcile_failure_is_recorded_and_releases_lock(self):
         client = FakeCompetitionClient()
         lock = FakeLock()
         logger = FakeLogger()
         service = self.make_sync_service(client, lock=lock, logger=logger)
         error = RuntimeError("reconciliation failed")
-        original_set = self.key_value_repository.set
-
-        def fail_running_reset(db, key, value):
-            if key == "competition_sync_running" and value == "0":
-                raise sqlite3.OperationalError("cleanup unavailable")
-            return original_set(db, key, value)
 
         with (
             patch.object(self.reconciler, "reconcile", side_effect=error),
-            patch.object(
-                self.key_value_repository, "set", side_effect=fail_running_reset
-            ),
-            self.assertRaises(sqlite3.OperationalError) as raised,
+            self.assertRaises(RuntimeError) as raised,
         ):
             service.sync()
 
-        self.assertEqual(str(raised.exception), "cleanup unavailable")
+        self.assertIs(raised.exception, error)
         self.assertEqual(
             self.stored_kv("last_competition_sync_error"), "reconciliation failed"
-        )
-        self.assertEqual(
-            self.stored_kv("competition_sync_status"),
-            "Zielwettkämpfe werden synchronisiert…",
         )
         self.assertEqual(logger.exceptions[0][0], "Competition synchronization failed")
         self.assertEqual(logger.exceptions[0][1]["exc_info"], True)
         self.assertEqual(lock.release_calls, 1)
-
-    def test_cleanup_error_after_success_is_visible_and_releases_lock(self):
-        lock = FakeLock()
-        service = self.make_sync_service(FakeCompetitionClient(), lock=lock)
-        original_set = self.key_value_repository.set
-
-        def fail_running_reset(db, key, value):
-            if key == "competition_sync_running" and value == "0":
-                raise sqlite3.OperationalError("cleanup unavailable")
-            return original_set(db, key, value)
-
-        with (
-            patch.object(
-                self.key_value_repository, "set", side_effect=fail_running_reset
-            ),
-            self.assertRaises(sqlite3.OperationalError) as raised,
-        ):
-            service.sync()
-
-        self.assertEqual(str(raised.exception), "cleanup unavailable")
-        self.assertEqual(lock.release_calls, 1)
-        self.assertEqual(self.stored_kv("competition_sync_running"), "1")
-        self.assertEqual(
-            self.stored_kv("competition_sync_status"),
-            "Zielwettkämpfe werden synchronisiert…",
-        )
 
 
 if __name__ == "__main__":

@@ -1139,28 +1139,6 @@ class SyncJobStoreTests(unittest.TestCase):
                 )
                 self.assertEqual(snapshot["status"], expected)
 
-    def test_resume_interrupted_resets_stale_competition_sync_markers(self):
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES "
-                "('competition_sync_running', '1', ?), "
-                "('competition_sync_status', 'Zielwettkämpfe werden synchronisiert…', ?)",
-                (self.now, self.now),
-            )
-        self.store.resume_interrupted()
-        with self.manager.unit_of_work() as db:
-            values = {
-                row["key"]: row["value"]
-                for row in db.execute("SELECT key, value FROM kv").fetchall()
-            }
-        self.assertEqual(
-            values,
-            {
-                "competition_sync_running": "0",
-                "competition_sync_status": "",
-            },
-        )
-
     def _clear_jobs(self):
         with self.manager.unit_of_work() as db:
             db.execute("DELETE FROM sync_job_items")
@@ -1169,12 +1147,6 @@ class SyncJobStoreTests(unittest.TestCase):
     def test_requeue_unowned_running_runs_a_lost_outcome_again(self):
         job, _ = self.enqueue()
         self.assertEqual(self.store.claim()["id"], job["id"])
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) "
-                "VALUES ('competition_sync_running', '1', ?)",
-                (self.now,),
-            )
 
         self.assertEqual(self.store.requeue_unowned_running(), 1)
 
@@ -1182,12 +1154,6 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(requeued["status"], "queued")
         self.assertEqual(requeued["error_class"], "process_interrupted")
         self.assertEqual(requeued["items"][0]["status"], "queued")
-        # Unlike a restart, a running competition sync of another thread is kept.
-        with self.manager.reader() as db:
-            marker = db.execute(
-                "SELECT value FROM kv WHERE key='competition_sync_running'"
-            ).fetchone()
-        self.assertEqual(marker["value"], "1")
         self.assertEqual(self.store.claim()["attempts"], 2)
 
     def test_requeue_unowned_running_never_replays_a_job_with_remote_effects(self):
