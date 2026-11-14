@@ -50,6 +50,8 @@ class PerformanceServices:
     # Every stored session with its curve, read in the background (#2694, #2693):
     # the records and whether they are current, None before the first read.
     all_time_records: Callable[[], tuple[tuple[Mapping[str, Any], ...], bool] | None]
+    # That background build as a state word, count and last duration (#2852).
+    curve_build_state: Callable[[], dict[str, Any]]
 
 
 def build_performance(
@@ -159,7 +161,10 @@ def build_performance(
         return profiles().curve_records(days, shared=True)
 
     return PerformanceServices(
-        training_reports, curve_records, lambda: profiles().all_time_records()
+        training_reports,
+        curve_records,
+        lambda: profiles().all_time_records(),
+        power_curves.background_state,
     )
 
 

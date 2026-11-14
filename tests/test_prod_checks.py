@@ -291,6 +291,7 @@ class ProdChecksTests(unittest.TestCase):
                 "newest_age_hours": 2.0,
                 "total_bytes": 2048,
             },
+            "curve_build": {"status": "building", "builds": 3, "last_build_s": 41.5},
             "garmin_past_workout_removal": {
                 "one_time_done": True,
                 "checked": 4,
@@ -340,6 +341,7 @@ class ProdChecksTests(unittest.TestCase):
             "recovery_copies": [
                 "count 1", "newest_age_hours 2.0", "total_bytes 2048",
             ],
+            "curve_build": ["builds 3", "last_build_s 41.5", 'status "building"'],
         }  # fmt: skip
         now = datetime.fromisoformat(RECENT) + timedelta(hours=2)
         for name, fields in expected.items():

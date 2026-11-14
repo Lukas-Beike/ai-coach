@@ -43,7 +43,7 @@ words from `STATES`, and a `*_at` time as its age `*_hours`, sorted by path. A
 state word in `FAIL_STATES` (`failed`, `unavailable`, `blocked`) and a missing
 section print as `FAIL`; an empty section is `info`. Free text, ids and any
 field not on the allow-list are never printed. Sections with an allow-list:
-`decoupling_eligibility` (temporary, #2779), `database`, `runtime`,
+`decoupling_eligibility` (temporary, #2779), `curve_build`, `database`, `runtime`,
 `recovery_copies`, `garmin_past_workout_removal`, `stream_backfill` and
 `fit_inventory`. A section without an allow-list entry is
 refused; add the entry and its test in `tests/test_prod_checks.py` together

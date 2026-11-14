@@ -62,6 +62,8 @@ SECTION_FIELDS = {
     "recovery_copies": re.compile(
         r"status|available|count|newest_age_hours|total_bytes"
     ),
+    # The all-time curve build (#2852).
+    "curve_build": re.compile(r"status|available|builds|last_build_s"),
     "garmin_past_workout_removal": re.compile(
         r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
         r"|past_links_pending"
@@ -80,6 +82,7 @@ SECTION_FIELDS = {
 }
 STATES = {
     "ready",
+    "building",
     "pending",
     "ok",
     "skipped",

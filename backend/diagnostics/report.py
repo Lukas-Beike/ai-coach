@@ -104,6 +104,8 @@ class DiagnosticReportDependencies:
     garmin_change_check: Callable[[], dict[str, Any]] | None = None
     # Rides with a steady power band per variation limit, counts only (#2535).
     lt1_ride_coverage: Callable[[], dict[str, Any]] | None = None
+    # The all-time curve build: state word, count and last duration (#2852).
+    curve_build: Callable[[], dict[str, Any]] | None = None
     # The database file: its sizes, free space and recovery copies (#2848).
     database_path: Callable[[], Path] | None = None
     # Decoupling eligibility counts for the M8 rule decision, until #2780 (#2779).
@@ -357,6 +359,9 @@ class DiagnosticReportService:
                 "lt1_ride_coverage": section(
                     "lt1_ride_coverage",
                     deps.lt1_ride_coverage or (lambda: {"available": False}),
+                ),
+                "curve_build": section(
+                    "curve_build", deps.curve_build or (lambda: {"available": False})
                 ),
                 "decoupling_eligibility": section(
                     "decoupling_eligibility",

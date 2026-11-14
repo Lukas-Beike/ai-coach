@@ -779,10 +779,18 @@ class ProfileSelectionTests(unittest.TestCase):
         def broken():
             raise ValueError("unreadable stream")
 
+        def state():
+            current = reader.background_state()
+            return current["status"], current["builds"]
+
+        self.assertEqual(state(), ("pending", 0))
         self.assertIsNone(
             reader.background_records(self.db, ["act_1"], "a", lambda: [{"n": 1}])
         )
+        self.assertEqual(state(), ("building", 0))  # the diagnostics state (#2852)
         builds.pop()()
+        self.assertEqual(state(), ("ready", 1))
+        self.assertGreaterEqual(reader.background_state()["last_build_s"], 0)
         (first,), current = reader.background_records(self.db, ["act_1"], "a", list)
         self.assertTrue(current)
         # Changed inputs build again in the background; the last records show
@@ -793,6 +801,7 @@ class ProfileSelectionTests(unittest.TestCase):
         )
         with self.assertLogs("intervals_coach", "ERROR"):
             builds.pop()()
+        self.assertEqual(state(), ("failed", 2))
         with self.assertRaises(RuntimeError):
             reader.background_records(self.db, ["act_1"], "b", broken)
         self.assertEqual([], builds)

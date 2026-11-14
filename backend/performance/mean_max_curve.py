@@ -99,6 +99,9 @@ class SessionCurveReader:
         self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._building = False
         self._failed: tuple[str, float] | None = None
+        # Finished background builds and the last one's duration (#2852).
+        self._builds = 0
+        self._last_build_s: float | None = None
         self._spawn = spawn or _daemon_thread
         self._lock = threading.Lock()
 
@@ -231,6 +234,7 @@ class SessionCurveReader:
         self, stamp: str, build: Callable[[], Iterable[Mapping[str, Any]]]
     ) -> None:
         built = None
+        started = time.monotonic()
         try:
             built = tuple(MappingProxyType(record) for record in build())
         except Exception:
@@ -244,6 +248,28 @@ class SessionCurveReader:
             else:
                 self._background, self._failed = (stamp, built), None
             self._building = False
+            self._builds += 1
+            self._last_build_s = time.monotonic() - started
+
+    def background_state(self) -> dict[str, Any]:
+        """The background build as a state word, its count and last duration (#2852).
+
+        ``building`` while one runs, else ``failed`` after a failed one,
+        ``ready`` once records exist, ``pending`` before the first build.
+        """
+        with self._lock:
+            if self._building:
+                status = "building"
+            elif self._failed:
+                status = "failed"
+            else:
+                status = "ready" if self._background else "pending"
+            last = self._last_build_s
+            return {
+                "status": status,
+                "builds": self._builds,
+                "last_build_s": None if last is None else round(last, 1),
+            }
 
 
 def _daemon_thread(run: Callable[[], None]) -> None:

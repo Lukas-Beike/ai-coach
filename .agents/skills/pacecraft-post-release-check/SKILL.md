@@ -69,6 +69,9 @@ stop, report it, and do not try to repair production.
    deploy the service-worker cache name must differ from the previous walk
    (new asset versions served). Keep the load times per view in the session
    notes for the next comparison.
+   When the Analyse all-time cards still load, `--section curve_build` tells a
+   running build (`building`, with `builds` and the last `last_build_s`) from a
+   stall or a failure.
 
 ## Allowed actions
 
