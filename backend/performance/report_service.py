@@ -56,6 +56,8 @@ from backend.performance.training_report import training_report
 
 # Analysis windows of the power and running profiles, shortest first.
 PROFILE_WINDOW_DAYS = (28, 90)
+# Sessions per read snapshot of the background all-time build (#2694).
+_BACKGROUND_CHUNK = 25
 PROGRESS_DAYS = frozenset({7, 28, 42, 56, 84})
 
 
@@ -166,18 +168,18 @@ class TrainingProfileSelectionService:
 
     @overload
     def curve_records(
-        self, days: int | None = ..., *, shared: Literal[False] = False
+        self, days: int = ..., *, shared: Literal[False] = False
     ) -> list[dict[str, Any]]: ...
 
     @overload
     def curve_records(
-        self, days: int | None = ..., *, shared: Literal[True]
+        self, days: int = ..., *, shared: Literal[True]
     ) -> tuple[Mapping[str, Any], ...]: ...
 
     def curve_records(
-        self, days: int | None = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
+        self, days: int = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
     ) -> list[dict[str, Any]] | tuple[Mapping[str, Any], ...]:
-        """Ride and run sessions of the last ``days`` (default the longest window, None all) with their session curves.
+        """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
@@ -188,30 +190,11 @@ class TrainingProfileSelectionService:
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
-        curve_reader = self._curves
-        if self._canonical is None or curve_reader is None:
-            raise RuntimeError("power profiles need the canonical source and curves")
-        reader = self._canonical.activity_summary_reader()
-        if reader is None:
-            raise RuntimeError("power profiles need the canonical activity summaries")
+        curve_reader = self._curve_reader()
         today = self._today()
-        start = None if days is None else today - timedelta(days=days - 1)
-        # One spare day on each side; the local date below decides membership.
-        first = None if start is None else start - timedelta(days=1)
-        last = today + timedelta(days=1)
-        earliest = "" if start is None else start.isoformat()
-        with self._canonical.database_manager().read_snapshot() as db:
-            sessions = [
-                summary
-                for summary in reader.activity_summaries(db, start=first, end=last)
-                if summary.get("sport") in ("ride", "run")
-                # Motor assistance inflates speed and power: e-bike rides stay
-                # out of the best values, CP/CS fits and curve trends.
-                and not summary_is_electric(summary)
-                # A commute, warm-up or cool-down is never a maximal effort.
-                and not summary_is_not_training(summary)
-                and earliest <= summary_local_date(summary) <= today.isoformat()
-            ]
+        start = today - timedelta(days=days - 1)
+        with self._canonical_source().database_manager().read_snapshot() as db:
+            sessions = self._curve_sessions(db, start, today)
             session_ids = [str(summary.get("id") or "") for summary in sessions]
 
             def build() -> list[dict[str, Any]]:
@@ -231,25 +214,85 @@ class TrainingProfileSelectionService:
                 db, session_ids, (today.isoformat(), days, shown), build
             )
 
+    def all_time_records(self) -> tuple[Mapping[str, Any], ...] | None:
+        """Every stored ride and run session with its curve, built off the request path.
+
+        The sessions of ``curve_records`` without a start day (#2694). Their
+        curves are read in a background build of its own in short read
+        snapshots (``SessionCurveReader.background_records``), so no request
+        waits for a cold read of the whole history; None while it builds.
+        """
+        curve_reader = self._curve_reader()
+        today = self._today()
+        manager = self._canonical_source().database_manager()
+        with manager.read_snapshot() as db:
+            sessions = self._curve_sessions(db, None, today)
+            session_ids = [str(summary.get("id") or "") for summary in sessions]
+
+            def build() -> list[dict[str, Any]]:
+                curves: dict[str, SessionCurve] = {}
+                for index in range(0, len(session_ids), _BACKGROUND_CHUNK):
+                    with manager.read_snapshot() as chunk:
+                        curves.update(
+                            curve_reader.curves(
+                                chunk, session_ids[index : index + _BACKGROUND_CHUNK]
+                            )
+                        )
+                return [
+                    _curve_record(summary, curves.get(str(summary.get("id") or "")))
+                    for summary in sessions
+                ]
+
+            shown = [_curve_record(summary, None) for summary in sessions]
+            return curve_reader.background_records(
+                db, session_ids, (today.isoformat(), None, shown), build
+            )
+
+    def _curve_reader(self) -> SessionCurveReader:
+        if self._canonical is None or self._curves is None:
+            raise RuntimeError("power profiles need the canonical source and curves")
+        return self._curves
+
+    def _canonical_source(self) -> CanonicalPerformanceSource:
+        if self._canonical is None:
+            raise RuntimeError("power profiles need the canonical source and curves")
+        return self._canonical
+
+    def _curve_sessions(self, db: Any, start: date | None, today: date) -> list[Any]:
+        """Ride and run summaries from ``start`` (None: all) to today that can hold a best."""
+        reader = self._canonical_source().activity_summary_reader()
+        if reader is None:
+            raise RuntimeError("power profiles need the canonical activity summaries")
+        earliest = "" if start is None else start.isoformat()
+        # One spare day on each side; the local date below decides membership.
+        first = None if start is None else start - timedelta(days=1)
+        last = today + timedelta(days=1)
+        return [
+            summary
+            for summary in reader.activity_summaries(db, start=first, end=last)
+            if summary.get("sport") in ("ride", "run")
+            # Motor assistance inflates speed and power: e-bike rides stay
+            # out of the best values, CP/CS fits and curve trends.
+            and not summary_is_electric(summary)
+            # A commute, warm-up or cool-down is never a maximal effort.
+            and not summary_is_not_training(summary)
+            and earliest <= summary_local_date(summary) <= today.isoformat()
+        ]
+
     def power_profiles(
         self, records: list[dict[str, Any]] | None = None, *, all_time: bool = False
     ) -> dict[str, Any]:
         """Best values, CP/CS and coverage of the last 90 days.
 
-        ``all_time`` (the analysis cards, #2694) reads every session once and adds
-        ``all_time``, the best values of all stored sessions; everything else,
-        the Coach's copy included, stays on the 90-day window.
+        ``all_time`` (the analysis cards, #2694) adds ``all_time``: the best values
+        of every stored session, or ``{"status": "pending"}`` while their
+        background read runs. The Coach's copy and the CP/CS input stay on 90 days.
         """
         if records is None:
-            records = self.curve_records(None if all_time else PROFILE_WINDOW_DAYS[-1])
+            records = self.curve_records()
         today = self._today()
-        start = (today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)).isoformat()
-        every = [
-            row for row in records if str(row.get("date") or "") <= today.isoformat()
-        ]
-        records = [row for row in records if start <= str(row.get("date") or "")]
         eligible_records = [
-            row for row in every if start <= str(row.get("date") or "")
+            row for row in records if str(row.get("date") or "") <= today.isoformat()
         ]
         valid = [
             row
@@ -299,7 +342,12 @@ class TrainingProfileSelectionService:
             "scope": "Beobachtete Bestwerte der letzten 90 Tage aus lokal gespeicherten Messreihen in voller Auflösung; heruntergerechnete Reihen zählen nicht. Fehlende oder ungültige Fenster bleiben unbekannt. Bestwerte mit gleicher effort_group stammen aus derselben Belastung und sind voneinander abhängig. Keine FTP- oder Tempo-Schätzung; CP/CS nur als experimentelle Modellschätzung unter critical_power.",
         }
         if all_time:
-            result["all_time"] = self._profile_window(every, today, None)
+            every = self.all_time_records()
+            result["all_time"] = (
+                {"status": "pending"}
+                if every is None
+                else self._profile_window(list(every), today, None)
+            )
         return result
 
     def _power_meter_changes(self) -> list[dict[str, Any]]:
@@ -347,7 +395,7 @@ class TrainingProfileSelectionService:
 
     @staticmethod
     def _profile_window(
-        records: list[dict[str, Any]], today: date, days: int | None
+        records: Sequence[Mapping[str, Any]], today: date, days: int | None
     ) -> dict[str, Any]:
         """The window's best values and coverage; ``days`` None takes every record."""
         start = "" if days is None else (today - timedelta(days=days - 1)).isoformat()

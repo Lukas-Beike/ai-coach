@@ -12,8 +12,10 @@ Nothing is persisted; reads never touch a provider.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
+import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -51,7 +53,10 @@ from backend.performance.session_execution import (
 )
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
-_DEFAULT_CAPACITY: Final = 1024
+# About 9 KB per session; room for a long all-time history (#2694).
+_LOGGER = logging.getLogger("intervals_coach")
+# About 9 KB per session; room for a long all-time history (#2694).
+_DEFAULT_CAPACITY: Final = 2048
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +81,15 @@ class SessionCurveReader:
         session_records: SessionRecordReader,
         *,
         capacity: int = _DEFAULT_CAPACITY,
+        spawn: Callable[[Callable[[], None]], None] | None = None,
     ) -> None:
         self._session_records = session_records
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
         self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
+        self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
+        self._building = False
+        self._spawn = spawn or _daemon_thread
         self._lock = threading.Lock()
 
     def curves(self, db: Any, activity_ids: Iterable[str]) -> dict[str, SessionCurve]:
@@ -130,14 +139,7 @@ class SessionCurveReader:
         rebuilds if that result is no longer current. Concurrent misses each build
         once; the per-session memo makes the repeat cheap.
         """
-        stamp = _sha256(
-            [
-                key,
-                activity_detail_store.session_curve_inputs(
-                    db, activity_ids, ACTIVITY_RECORD_KIND
-                ),
-            ]
-        )
+        stamp = _stamp(db, activity_ids, key)
         with self._lock:
             held = self._shared[0] if self._shared else None
             if self._shared and held == stamp:
@@ -147,6 +149,71 @@ class SessionCurveReader:
             if (self._shared[0] if self._shared else None) == held:
                 self._shared = (stamp, records)
         return records
+
+    def background_records(
+        self,
+        db: Any,
+        activity_ids: Sequence[str],
+        key: object,
+        build: Callable[[], Iterable[Mapping[str, Any]]],
+    ) -> tuple[Mapping[str, Any], ...] | None:
+        """Return records built off the caller's path; None while they build (#2694).
+
+        Stamped like ``shared_records``, in a slot of its own. A miss never
+        builds in the caller: it starts ``build`` once in the background (it opens
+        its own reads; the per-session memo makes a rebuild after a new session
+        cheap) and returns None. A build that ends after the inputs changed keeps
+        its result under its own stamp, so the next call starts the next build.
+        A failed build is logged and tried again on the next call.
+        """
+        stamp = _stamp(db, activity_ids, key)
+        with self._lock:
+            if self._background and self._background[0] == stamp:
+                return self._background[1]
+            if self._building:
+                return None
+            self._building = True
+
+        def run() -> None:
+            built = None
+            try:
+                built = tuple(MappingProxyType(record) for record in build())
+            except Exception:
+                _LOGGER.exception(
+                    "Background session curves failed",
+                    extra={"event": "background_session_curves_failed"},
+                )
+            with self._lock:
+                if built is not None:
+                    self._background = (stamp, built)
+                self._building = False
+
+        self._spawn(run)
+        with self._lock:
+            ready = self._background
+        return ready[1] if ready and ready[0] == stamp else None
+
+
+def _daemon_thread(run: Callable[[], None]) -> None:
+    """Run ``run`` in a daemon thread with a fresh context (no request state)."""
+    threading.Thread(
+        target=contextvars.Context().run,
+        args=(run,),
+        name="session-curves",
+        daemon=True,
+    ).start()
+
+
+def _stamp(db: Any, activity_ids: Sequence[str], key: object) -> str:
+    """``key`` with the stored records and detail sets the curves of the sessions read."""
+    return _sha256(
+        [
+            key,
+            activity_detail_store.session_curve_inputs(
+                db, activity_ids, ACTIVITY_RECORD_KIND
+            ),
+        ]
+    )
 
 
 def input_fingerprint(parts: Iterable[object]) -> str:

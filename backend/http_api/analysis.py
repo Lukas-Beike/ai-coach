@@ -39,7 +39,8 @@ class AnalysisRoutes:
         `best`, `critical_power`, `power_meter_changes`, `activities`, `windows`
         (keys `28` and `90`), `running`, `method`, `method_version`,
         `input_fingerprint`, `scope` and `all_time` (the window of every stored
-        session, for the analysis cards only). `training-records`: `{"equipment": object}`
+        session, for the analysis cards only; `{"status": "pending"}` while it is
+        read in the background). `training-records`: `{"equipment": object}`
         without query, `{"record_type": "equipment", "record": object}` for one
         record.
 

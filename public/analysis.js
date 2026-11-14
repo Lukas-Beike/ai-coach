@@ -653,6 +653,7 @@ function clearAnalysisReportCache() {
 }
 
 let cyclingPowerProfileGeneration = 0;
+const ALL_TIME_RETRY_MS = 3000;
 // One power-profile read fills the cycling profile and the running best efforts (#2265).
 const PROFILE_CARDS = [["cyclingPowerProfile", "Leistungsprofil"], ["runningBestEfforts", "Bestwerte"]];
 const ANALYSIS_PERFORMANCE_ROUTES = new Set(["analysis", "analysis/running", "analysis/cycling"]);
@@ -725,6 +726,12 @@ async function renderCyclingPowerProfile() {
   try {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
+    // The server reads the all-time bests in the background; the cards keep loading until then (#2694).
+    if (result?.all_time?.status === "pending") {
+      invalidateAnalysisReport("/api/analysis/power-profiles");
+      setTimeout(() => { if (generation === cyclingPowerProfileGeneration) void renderCyclingPowerProfile(); }, ALL_TIME_RETRY_MS);
+      return;
+    }
     renderPowerProfile(result);
     renderRunningBestEfforts(result);
     renderAnalysisSegmentsIfActive();

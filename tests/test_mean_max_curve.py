@@ -395,7 +395,7 @@ class ProfileSelectionTests(unittest.TestCase):
         self.session_records = Mock(wraps=CanonicalTableReader().session_activities)
         self.day = date(2026, 10, 18)
 
-    def service(self, summaries):
+    def service(self, summaries, spawn=None):
         @contextmanager
         def read_snapshot():
             yield self.db
@@ -409,7 +409,7 @@ class ProfileSelectionTests(unittest.TestCase):
         return TrainingProfileSelectionService(
             lambda: self.day,
             canonical=canonical,
-            curves=SessionCurveReader(self.session_records),
+            curves=SessionCurveReader(self.session_records, spawn=spawn),
         )
 
     def add_ride(self, summaries, activity_id, day="2026-10-10", peak=350.0):
@@ -667,7 +667,8 @@ class ProfileSelectionTests(unittest.TestCase):
         summaries = []
         self.add_ride(summaries, "act_old", day="2025-03-14", peak=450.0)
         self.add_ride(summaries, "act_recent", day="2026-10-10", peak=350.0)
-        service = self.service(summaries)
+        builds = []
+        service = self.service(summaries, spawn=builds.append)
 
         def best(window):
             return next(
@@ -677,13 +678,30 @@ class ProfileSelectionTests(unittest.TestCase):
                 and point["environment"] == "outdoor"
             )
 
+        # The request never reads the whole history cold: it starts one
+        # background build and answers pending until that build is done.
+        self.assertEqual(
+            {"status": "pending"}, service.power_profiles(all_time=True)["all_time"]
+        )
+        self.assertEqual(
+            {"status": "pending"}, service.power_profiles(all_time=True)["all_time"]
+        )
+        self.assertEqual(1, len(builds))
+        read = {call.args[1] for call in self.session_records.call_args_list}
+        self.assertNotIn("act_old", read)
+        builds.pop()()
         cards = service.power_profiles(all_time=True)
+        self.assertEqual([], builds)
         self.assertEqual((450.0, "act_old", "2025-03-14"), best(cards["all_time"]))
         self.assertEqual("2025-03-14", cards["all_time"]["date_start"])
         self.assertEqual(2, cards["all_time"]["cache_coverage"]["power_records"])
         # The 90-day window, the CP/CS input and the Coach's copy stay recent.
-        self.assertEqual((350.0, "act_recent", "2026-10-10"), best(cards["windows"]["90"]))
-        self.assertEqual(["act_recent"], [row["activity_id"] for row in cards["activities"]])
+        self.assertEqual(
+            (350.0, "act_recent", "2026-10-10"), best(cards["windows"]["90"])
+        )
+        self.assertEqual(
+            ["act_recent"], [row["activity_id"] for row in cards["activities"]]
+        )
         self.assertNotIn("act_old", str(cards["critical_power"]))
         coach = service.power_profiles()
         self.assertNotIn("all_time", coach)
