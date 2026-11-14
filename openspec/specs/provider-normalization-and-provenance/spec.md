@@ -247,7 +247,7 @@ The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed
 
 #### Scenario: Garmin performance values at ingest
 - **WHEN** the Garmin sync merges a fetched payload into the performance history
-- **THEN** it keeps cycling FTP and running threshold power within 50 to 700 W, threshold heart rate within 80 to 230 bpm, the profile maximum heart rate within 80 to 260 bpm and VO2max within 20 to 100, and drops other values; a race prediction counts within 60 to 100,000 s (a larger number is read as milliseconds), a threshold pace within 120 to 900 s/km (a value below 1 is read as 100 / value, below 20 as metres per second) and a weight within 30 to 300 kg (pounds x 0.45359237, an undeclared value above 300 as grams).
+- **THEN** it reads the latest-value sections through the Garmin health mapper and keeps cycling FTP and running threshold power within 50 to 700 W, threshold heart rate within 80 to 230 bpm, the profile maximum heart rate within 80 to 250 bpm and VO2max within 20 to 100, and drops other values; a race prediction counts within 60 to 100,000 s (a larger number is read as milliseconds), a threshold pace within 120 to 900 s/km (a value below 1 is read as 100 / value, below 20 as metres per second) and a weight within 30 to 300 kg (pounds x 0.45359237, an undeclared value above 300 as grams).
 
 #### Scenario: Performance history retention
 - **WHEN** the merge stores the performance history
@@ -259,13 +259,16 @@ Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backe
 
 Added evidence:
 - `backend/performance/activity_validation.py:bounded_performance_metric`
-- `backend/sync/garmin_metric_history.py:ftp_points`
-- `backend/sync/garmin_payload_metrics.py:_garmin_pace_seconds`
-- `backend/sync/garmin_payload_metrics.py:garmin_duration_seconds`
-- `backend/sync/garmin_payload_metrics.py:garmin_profile_max_hr`
+- `backend/performance/garmin_canonical.py:_pace_seconds_per_km`
+- `backend/performance/garmin_canonical.py:_profile_max_hr`
+- `backend/providers/garmin_health_mapping.py:_race_seconds`
+- `backend/providers/garmin_health_mapping.py:_weight_kg`
+- `backend/sync/garmin_performance_history.py:_ftp_history`
 - `backend/sync/garmin_performance_history.py:_provider_metric_state`
 - `backend/sync/garmin_performance_history.py:append_garmin_performance_history`
-- `backend/sync/garmin_weight.py:_garmin_weight_kg`
+- `backend/sync/garmin_performance_history.py:current_garmin_metrics`
+- `tests/test_garmin_health_parity.py:test_legacy_ingest_shapes_the_mapper_does_not_read`
+- `tests/test_garmin_performance_history_canonical.py:test_the_history_reprojects_to_the_pinned_observations_and_context`
 - `tests/test_garmin_health_parity.py:test_race_predictions_match_legacy_seconds`
 - `tests/test_garmin_health_parity.py:test_threshold_pace_converts_to_legacy_seconds_per_kilometre`
 - `tests/test_performance_history.py:test_historical_ftp_rows_are_added_without_backfilling_current_ftp`
@@ -530,7 +533,7 @@ Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, 
 
 Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (a gear-listed Garmin activity links the rows of its canonical session; the sync no longer computes or reads `activity_matches`), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
 
-Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.
+Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_performance_history.py:current_garmin_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.
 
 ### Requirement: Athlete-preferred source per metric group
 The system SHALL let the athlete choose Garmin or the default (the newest measurement) as preferred source for weight and body fat, as a local profile setting with receipt and undo (also through the Coach's profile update); a stored `intervals` value is ignored. Every consumer SHALL apply it in the same read. The settings SHALL show only source controls that change an outcome (#2084).

@@ -592,7 +592,7 @@ Evidence:
 - `backend/performance/garmin_metrics.py:garmin_performance_metrics`
 - `backend/providers/garmin.py:_dated_max_metrics`
 - `backend/providers/garmin_health_mapping.py:_map_max_metrics`
-- `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`
+- `backend/sync/garmin_performance_history.py:current_garmin_metrics`
 - `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_read_from_the_same_source`
 - `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_only_the_sport_without_a_profile_value_is_labelled_activities`
 - `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`
