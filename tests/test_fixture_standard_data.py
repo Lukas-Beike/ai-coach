@@ -80,8 +80,9 @@ def _canonical_details(db, snapshot):
     activities = {row["id"]: row for row in snapshot["recent_activities"]}
     details = []
     for activity_id, activity in activities.items():
-        sets = detail_sets_for(db, "wahoo", activity_id)
-        analysis = analysis_row_for_record(db, "wahoo", activity_id)
+        wahoo_id = fixture_runtime.fixture_wahoo_id(activity_id)
+        sets = detail_sets_for(db, "wahoo", wahoo_id)
+        analysis = analysis_row_for_record(db, "wahoo", wahoo_id)
         streams = {
             _LEGACY_STREAM_NAMES.get(channel, channel.value): list(values)
             for item in sets

@@ -24,7 +24,7 @@ test("@responsive activity feedback save shows a receipt whose undo restores it"
   await status.getByRole("button", { name: "Rückgängig" }).click();
   await expect(status).toHaveText("Zurückgenommen.");
   await expect(dialog.getByLabel("Notizen")).toHaveValue("");
-  const payload = await (await request.get("/api/activities/FixtureCase-1")).json();
+  const payload = await (await request.get("/api/activities/9000001")).json();
   expect(payload.activity_feedback ?? null).toBeNull();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

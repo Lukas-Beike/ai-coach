@@ -10,9 +10,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "8"
+FIXTURE_DEMO_SEED_VERSION = "9"
 FIXTURE_RATIONALE = "Synthetische Vorschau"
-FIXTURE_TRAINING_FEATURES_SEED_VERSION = "2"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "3"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
@@ -49,11 +49,9 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
-from backend.canonical.local_time import parse_provider_datetime
-from backend.canonical.records import ActivityRecord, Provenance, activity_duration_s
+from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
     Environment,
-    LoadModel,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -64,9 +62,11 @@ from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
 from backend.providers import http as provider_http
-from backend.providers.canonical_plans import ActivityItem, IngestPlan
+from backend.providers.canonical_plans import garmin_ingest_plan, wahoo_ingest_plan
+from backend.providers.garmin_activity_mapping import GARMIN_ACTIVITY_TYPES
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.wahoo_activity_mapping import WAHOO_WORKOUT_TYPES
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -525,20 +525,25 @@ def demo_performance_history(today):
 
 
 # The demo history is stored as Wahoo records: Intervals.icu is output-only and no
-# reader serves its stored activity copies. The fixture builds those canonical rows
-# itself from Intervals.icu-shaped summary rows; the Garmin copies of
+# reader serves its stored activity copies. Each summary row becomes a Wahoo Cloud
+# workout that goes through the real ``wahoo_ingest_plan``; the Garmin copies of
 # ``_save_garmin_copy`` stay the stream source of the detailed sessions. The records
-# carry no zone times, like a Wahoo workout.
+# carry no zone times, like a Wahoo workout. Wahoo has no strength type, so a
+# strength session goes through the Garmin ingest plan as a Garmin
+# strength_training activity instead (#2649).
 FIXTURE_ACTIVITY_MAPPER_VERSION = 1
 FIXTURE_ACTIVITY_PROVIDER = ProviderId.WAHOO
 FIXTURE_ACTIVITY_LABEL = "Wahoo"
-_FIXTURE_SPORTS = {
-    "Ride": (Sport.RIDE, Environment.UNKNOWN),
-    "VirtualRide": (Sport.RIDE, Environment.VIRTUAL),
-    "Run": (Sport.RUN, Environment.UNKNOWN),
-    "Swim": (Sport.SWIM, Environment.UNKNOWN),
-    "WeightTraining": (Sport.STRENGTH, Environment.UNKNOWN),
+FIXTURE_CASE_ACTIVITY_ID = "9000001"
+# Ride 14 is a Wahoo cycling type that names no environment, like the
+# Intervals.icu "Ride" the rows are written as.
+_FIXTURE_WAHOO_TYPES = {
+    "Ride": 14,
+    "VirtualRide": 68,
+    "Run": 1,
+    "Swim": 25,
 }
+_FIXTURE_GARMIN_TYPES = {"WeightTraining": "strength_training"}
 _FIXTURE_STREAM_CHANNELS = {
     "time": StreamChannel.TIME_S,
     "distance": StreamChannel.DISTANCE_M,
@@ -555,9 +560,14 @@ _FIXTURE_STREAM_CHANNELS = {
 
 def fixture_analysis_sport(row):
     """The canonical sport, environment and trail flag of a fixture activity row."""
-    sport, environment = _FIXTURE_SPORTS.get(
-        str(row.get("type")), (Sport.OTHER, Environment.UNKNOWN)
-    )
+    # The same type tables the ingest route maps, so analysis and record agree.
+    type_name = str(row.get("type"))
+    if type_name in _FIXTURE_GARMIN_TYPES:
+        sport, environment = GARMIN_ACTIVITY_TYPES[_FIXTURE_GARMIN_TYPES[type_name]]
+    else:
+        sport, environment = WAHOO_WORKOUT_TYPES.get(
+            _FIXTURE_WAHOO_TYPES.get(type_name, 255), (Sport.OTHER, Environment.UNKNOWN)
+        )
     return {"sport": sport.value, "environment": environment.value, "trail": False}
 
 
@@ -571,107 +581,47 @@ def fixture_summary_hash(row):
     ).hexdigest()
 
 
-def _fixture_origin(row):
-    folded = " ".join(str(row.get(key) or "") for key in ("source", "device_name"))
-    folded = folded.casefold()
-    if "garmin" in folded:
-        return RecordingOrigin.GARMIN
-    if "wahoo" in folded or "elemnt" in folded:
-        return RecordingOrigin.WAHOO
-    if "zwift" in folded:
-        return RecordingOrigin.ZWIFT
-    return RecordingOrigin.UNKNOWN
+def fixture_wahoo_id(row_id):
+    """The positive Wahoo workout id of a fixture row id; digit ids stay as they are."""
+    if row_id is None:
+        raise ValueError("a fixture activity row needs an id")
+    text = str(row_id)
+    if text.isascii() and text.isdigit():
+        return str(int(text))  # the mapper's own normalisation
+    return str(int(hashlib.sha256(text.encode()).hexdigest()[:12], 16))
 
 
-def _fixture_number(row, *keys, low=0.0):
-    """The first numeric value among ``keys`` at or above ``low``."""
-    for key in keys:
-        value = row.get(key)
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            continue
-        return float(value) if value >= low else None
-    return None
+def _fixture_wahoo_workout(row):
+    """The Wahoo Cloud workout a fixture activity row stands for."""
+    summary = {
+        "duration_active_accum": row.get("moving_time"),
+        "duration_total_accum": row.get("elapsed_time"),
+        "distance_accum": row.get("distance"),
+        "power_bike_np_last": row.get("icu_weighted_avg_watts"),
+        "power_bike_tss_last": row.get("icu_training_load"),
+    }
+    return {
+        "id": fixture_wahoo_id(row.get("id")),
+        "starts": row.get("start_date_local"),
+        "workout_type_id": _FIXTURE_WAHOO_TYPES.get(row.get("type"), 255),
+        "name": row.get("name"),
+        "workout_summary": {k: v for k, v in summary.items() if v is not None},
+    }
 
 
-def _fixture_activity_record(row, retrieved_at):
-    """Map one fixture activity row to the Wahoo-provider record it stands for."""
-    started_at = parse_provider_datetime(row.get("start_date_local"), UTC)
-    activity_id = row.get("id")
-    if started_at is None or not isinstance(activity_id, str):
-        return None
-    type_name = str(row.get("type") or "")
-    sport, environment = _FIXTURE_SPORTS.get(
-        type_name, (Sport.OTHER, Environment.UNKNOWN)
-    )
-    moving = _fixture_number(row, "moving_time", low=1.0)
-    elapsed = _fixture_number(row, "elapsed_time", low=1.0)
-    load = _fixture_number(row, "icu_training_load")
-    device = row.get("device_name")
-    return ActivityRecord(
-        activity_id=activity_id,
-        provenance=Provenance(
-            provider=FIXTURE_ACTIVITY_PROVIDER,
-            source_kind=SourceKind.PROVIDER_REPORTED,
-            source_record_id=activity_id,
-            recorded_by=_fixture_origin(row),
-            retrieved_at=retrieved_at,
-            label=FIXTURE_ACTIVITY_LABEL,
-        ),
-        sport=sport,
-        environment=environment,
-        started_at=started_at,
-        duration_s=activity_duration_s(
-            sport, moving=moving, timer=None, elapsed=elapsed
-        ),
-        distance_m=_fixture_number(row, "distance"),
-        load=load,
-        load_model=LoadModel.TSS if load is not None else LoadModel.UNKNOWN,
-        avg_hr=_fixture_number(row, "average_heartrate"),
-        avg_power=_fixture_number(row, "average_watts", "average_power"),
-        max_hr=_fixture_number(row, "max_heartrate", "maxHR"),
-        max_speed_mps=_fixture_number(row, "max_speed"),
-        max_power_w=_fixture_number(row, "max_watts"),
-        elevation_gain_m=_fixture_number(row, "total_elevation_gain"),
-        normalized_power=_fixture_number(
-            row, "icu_weighted_avg_watts", "weighted_average_watts", "normalized_power"
-        ),
-        avg_cadence=_fixture_number(row, "average_cadence"),
-        intensity=_fixture_number(row, "icu_intensity"),
-        feel=_fixture_number(row, "feel"),
-        avg_speed_mps=_fixture_number(row, "average_speed"),
-        weighted_avg_speed_mps=_fixture_number(row, "icu_weighted_avg_speed"),
-        pace_mps=_fixture_number(row, "icu_pace"),
-        ftp_w=_fixture_number(row, "icu_ftp"),
-        eftp_w=_fixture_number(row, "icu_eftp", "eftp", "eFTP"),
-        avg_temp_c=_fixture_number(row, "average_temp", low=-60.0),
-        name=str(row["name"])[:200] if row.get("name") else None,
-        elapsed_duration_s=elapsed,
-        moving_duration_s=moving,
-        rpe=_fixture_number(row, "icu_rpe", "rpe"),
-        device_name=str(device)[:200] if isinstance(device, str) and device else None,
-        native_type=type_name[:64] or None,
-    )
-
-
-def _fixture_activity_plan(raw, retrieved_at):
-    """Plan the stored activity rows of a fixture snapshot.
-
-    The plan carries no raw provider record: a re-projection would map an
-    Intervals.icu-shaped row through the Wahoo mapper and retire the activity.
-    """
-    items = []
-    for row in (raw or {}).get("activities") or []:
-        record = _fixture_activity_record(row, retrieved_at)
-        if record is None:
-            continue
-        items.append(
-            ActivityItem(
-                record=record,
-                local_date=record.started_at.date(),
-                mapper_version=FIXTURE_ACTIVITY_MAPPER_VERSION,
-            )
-        )
-    return IngestPlan(provider=FIXTURE_ACTIVITY_PROVIDER, activities=tuple(items))
+def _fixture_garmin_activity(row):
+    """The Garmin Connect list row of a fixture strength session."""
+    activity = {
+        "activityId": row.get("id"),
+        "activityName": row.get("name"),
+        "startTimeLocal": row.get("start_date_local"),
+        "activityType": {"typeKey": _FIXTURE_GARMIN_TYPES[row.get("type")]},
+        "duration": row.get("moving_time"),
+        "movingDuration": row.get("moving_time"),
+        "elapsedDuration": row.get("elapsed_time"),
+        "distance": row.get("distance"),
+    }
+    return {key: value for key, value in activity.items() if value is not None}
 
 
 def _store_snapshot(db, snapshot):
@@ -711,11 +661,33 @@ def _save_activity_snapshot(db, snapshot):
     _store_snapshot(db, snapshot)
     retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
     if retrieved_at is not None:
-        plan = _fixture_activity_plan(snapshot.get("raw_provider_data"), retrieved_at)
-        ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
-    if stored_retrieved_at(
-        snapshot, zone=UTC
-    ) is None or server.CANONICAL_READ.serves_tables(db):
+        rows = (snapshot.get("raw_provider_data") or {}).get("activities") or []
+        strength = [row for row in rows if row.get("type") in _FIXTURE_GARMIN_TYPES]
+        synced = snapshot["synced_at"]
+        for plan in (
+            wahoo_ingest_plan(
+                {
+                    "synced_at": synced,
+                    "workouts": [
+                        _fixture_wahoo_workout(row)
+                        for row in rows
+                        if row.get("type") not in _FIXTURE_GARMIN_TYPES
+                    ],
+                },
+                zone=UTC,
+            ),
+            garmin_ingest_plan(
+                {
+                    "synced_at": synced,
+                    "activities": [_fixture_garmin_activity(row) for row in strength],
+                },
+                zone=UTC,
+            ),
+        ):
+            ingest_plan(
+                db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC
+            )
+    if retrieved_at is None or server.CANONICAL_READ.serves_tables(db):
         return
     backfill = server.CANONICAL_BACKFILL.status_reader
     for _ in range(1000):
@@ -816,6 +788,7 @@ def _save_activity_detail(activity_id, record, *, garmin_copy=False):
     from backend.db.canonical_store import activity_record_link
 
     now = server.runtime_clock.utc_now()
+    activity_id = fixture_wahoo_id(activity_id)
     activity = record["activity"]
     streams = {} if garmin_copy else activity.get("streams") or {}
     channels = {
@@ -922,6 +895,7 @@ def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
     from backend.db.activity_detail_store import replace_detail_set
 
     now = server.runtime_clock.utc_now()
+    activity_id = fixture_wahoo_id(activity_id)
     garmin_id = f"garmin-{activity_id}"
     with server.database_manager().unit_of_work() as db:
         row = db.execute(
@@ -1212,7 +1186,10 @@ def seed_training_features():
         }
     )["equipment"]
     server.ATHLETE_DATA.equipment().assign(
-        {"activity_id": "feature-ride-1", "equipment_id": equipment["id"]}
+        {
+            "activity_id": fixture_wahoo_id("feature-ride-1"),
+            "equipment_id": equipment["id"],
+        }
     )
     _fixture_cycling_target(now.date() + timedelta(days=30))
     planned = _fixture_seed_fueling_ride(now.date())
@@ -1525,11 +1502,16 @@ def _fixture_seed_equipment(today, garmin_snapshot):
                 (json.dumps(item, ensure_ascii=False), now, "equipment:" + item_id),
             )
     if not any(
-        item.get("activity_id") == "feature-ride-1"
+        item.get("activity_id") == fixture_wahoo_id("feature-ride-1")
         and item.get("equipment_id") == road_id
         for item in service.read().get("assignments", [])
     ):
-        service.assign({"activity_id": "feature-ride-1", "equipment_id": road_id})
+        service.assign(
+            {
+                "activity_id": fixture_wahoo_id("feature-ride-1"),
+                "equipment_id": road_id,
+            }
+        )
     return saved
 
 
@@ -2067,7 +2049,7 @@ def _fixture_wave2_feedback(by_id):
         # also works in the lightweight upgrade unit test with a mocked manager.
         with server.database_manager().unit_of_work() as db:
             server.ACTIVITY_FEEDBACK_REPOSITORY.upsert(
-                db, {"activity_id": activity["id"], **payload}
+                db, {"activity_id": fixture_wahoo_id(activity["id"]), **payload}
             )
 
 
@@ -2558,7 +2540,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
 
             today = server.ATHLETE_CLOCK.now().date().isoformat()
             activity = {
-                "id": "FixtureCase-1",
+                "id": FIXTURE_CASE_ACTIVITY_ID,
                 "name": "Synthetic ride <img src=x>",
                 "type": "Ride",
                 "start_date_local": f"{today}T08:00:00",
@@ -2566,8 +2548,6 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "elapsed_time": 3720,
                 "distance": 25000,
                 "icu_training_load": 50,
-                # Intervals.icu reports a fractional intensity and its own NP key.
-                "icu_intensity": 0.78,
                 "icu_weighted_avg_watts": 205,
                 "icu_hr_zone_times": [600, 1800, 600, 450, 150],
             }
