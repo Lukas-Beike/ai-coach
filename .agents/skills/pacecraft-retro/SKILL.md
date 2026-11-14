@@ -1,6 +1,6 @@
 ---
 name: pacecraft-retro
-description: Use when the user asks for a retrospective or lessons learned, and briefly at the end of a deliver-issue run. Find process friction, skill improvements, and application defects from evidence.
+description: Use when the user asks for a retrospective or lessons learned, and after every issue a deliver-issue run delivers. Find process friction, skill improvements, and application defects from evidence.
 ---
 
 # Development retrospective
@@ -12,10 +12,13 @@ worked. The outcome is an evidence-backed, prioritized improvement plan.
 
 ## When to run
 
-Run when the user asks, briefly at the end of a `deliver-issue` run, and once
-over the whole run at the end of a lane that delivered a queue of issues. Scale
-depth to the work; a short run needs only a few evidence-backed lines, or "no
-actionable findings". Do not review the retro itself.
+Run when the user asks, after every issue a `deliver-issue` run delivers (in a
+lane too: one retro per issue, right after its merge and close), and once more
+over the whole run at the end of a lane for patterns across its issues. Report
+every actionable finding; there is no limit per issue or per thread. Whether a
+finding becomes an issue follows "Decide each finding" below.
+Scale depth to the work; a short run needs only a few evidence-backed lines, or
+"no actionable findings". Do not review the retro itself.
 
 Prefer removing or shortening an instruction over adding one. Propose a new
 rule only for a failure that actually happened and that a shorter existing rule,
@@ -145,13 +148,21 @@ a one-line observation, impact, and proposed action, and offers exactly:
 1. **New issue (default, recommended, listed first)**: create one GitHub issue.
 2. **Fix in this session**: implement it now.
 
-Use the host's structured question tool when available, batching within its
-limits; otherwise ask in plain text with numbered findings. One answer such as
+In a lane coordinated by an orchestrator thread, a technical finding (process,
+skills, tooling, tests, code defects) takes the default without a question: file
+it as a new issue and report the URL to the orchestrator; only content or visual
+findings go to the athlete. Elsewhere, use the host's structured question tool
+when available, batching within its limits; otherwise ask in plain text with numbered findings. One answer such as
 "default" or "ok" applies the default to all unanswered findings. An explicit
 choice authorizes only that action for that finding. Without an answer, or on a
 noninteractive host, create nothing: report the findings with issue drafts as
 pending decisions.
 
+- **Before filing**, check each finding: it still holds on the current
+  `origin/develop` (re-read the code or rerun the check; drop it if already
+  fixed), and no open or closed issue already covers it (the duplicate search of
+  issue-create plus a `gh issue list --state all --search` on its key terms);
+  comment on a found issue instead of filing a new one.
 - **New issue**: file it with [issue-create](../pacecraft-issue-create/SKILL.md)
   (duplicate search, title rule) and `--label retro`, as every issue a retro
   opens, including one for a fix in this session; link a found duplicate
