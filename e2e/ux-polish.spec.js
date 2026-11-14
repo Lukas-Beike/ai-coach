@@ -124,7 +124,10 @@ test("charts name weeks and space their ticks evenly; a single series does not r
 });
 
 test("a meal shows its source only when it differs from the default @responsive", async ({ page }) => {
+  // #2709: the fixture seeds meals once per run, up to the day it ran; read after local midnight,
+  // the server's today is empty. The day before today always holds seeded meals.
   await page.goto("/#nutrition/diary");
+  await page.getByRole("button", { name: "Vorheriger Tag" }).click();
   await expect(page.locator("#nutritionEntries .nutrition-card").first()).toBeVisible();
   await expect(page.locator("#nutritionEntries")).not.toContainText("Manuelle Angabe");
 });
