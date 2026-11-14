@@ -273,8 +273,13 @@ def _fastest_distance_window(
 ) -> tuple[float, Any] | None:
     """The shortest time over ``target`` metres and its start, among flat windows."""
     best = None
+    # No window of ``target`` metres starts beyond this; skipping those starts
+    # keeps the half marathon and marathon cheap on shorter runs (#2786).
+    last_start = max((d for d in distances if d is not None), default=0.0) - target
     for start in range(len(times) - 1):
         if not rates[start][2] or distances[start] is None:
+            continue
+        if distances[start] > last_start:
             continue
         candidate = _running_distance_candidate(
             times, distances, start, run_end[start], target
