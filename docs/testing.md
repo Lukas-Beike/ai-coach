@@ -66,10 +66,23 @@ selected) and the Node unit tests, the other shards report without tests, and
 the container, browser and quality jobs are skipped; the image with its SBOM
 and the syntax check (shard 1) still run. The `test` and `Browser checks`
 aggregates print "docs-only: suites skipped". Push, release and dispatch runs
-never classify and always run everything. Before this, a docs-only PR ran all 17 jobs like any other PR
+never classify and run everything, unless a tested tree is reused (below). Before this, a docs-only PR ran all 17 jobs like any other PR
 (median PR run 11.9 min, p90 18.1 min over 31 runs on 2026-11-13). The first
 docs-only run (#2760, run 43569747387) took 1.3 min: 10 of 14 jobs ran, shard 1
 ran 144 affected Python tests and 594 Node tests.
+
+A run whose git tree already passed every suite reuses that result (#2749).
+`.github/scripts/reuse_green_tree.py` looks for an earlier run of this workflow
+started by a push to `develop` or `main`, on a commit with the identical tree,
+that succeeded and ran every suite itself: the four `Run unit tests` steps, all
+six browser shards, container tests, quality and both aggregates. It waits up to
+45 minutes for an earlier same-tree push run still in progress. On a match the
+native shards report without running, the browser matrix and quality are
+skipped, and the aggregates name the reused run; source resolution, the image
+with its SBOM, container tests and publishing still run. In a release chain the
+version commit's develop push runs the suites once; the promotion PR, the main
+push and the release event reuse it. Anything else, including a failed lookup,
+runs the full suite.
 
 Refresh the recording when shard times drift apart, with a full unsharded run in
 the image. The Windows runner uses the same read-only mounts and writes the file
@@ -230,7 +243,8 @@ A pull request that changes no UI path runs only the `desktop` project (#2748);
 there stops merges like any red `develop` run. `UI_PATHS` in
 `.github/scripts/ci_changes.py` is the one list of UI paths: the client and its
 browser tests and tooling, the server modules that serve the shell and assets,
-and the test workflow. Push, release and dispatch runs always run every project.
+and the test workflow. Push, release and dispatch runs run every project unless
+they reuse a tested tree.
 
 Configured viewports in `playwright.config.cjs`:
 - `mobile`: 390x844 (Standard mobile)

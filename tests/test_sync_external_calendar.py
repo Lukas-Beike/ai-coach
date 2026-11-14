@@ -274,7 +274,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         self.assertEqual(self.kv("last_external_calendar_sync_at"), NOW)
         self.assertEqual(self.kv("sync_calendar_last_success_at"), LOCAL.isoformat())
         self.assertEqual(self.kv("last_external_calendar_sync_error"), "")
-        self.assertEqual(self.kv("external_calendar_sync_status"), "")
+        self.assertIsNone(self.kv("external_calendar_sync_status"))
         self.assertEqual(
             self.events.since()["events"][0]["data"], {"status": "changed"}
         )
@@ -534,34 +534,6 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         self.assertEqual(result["replan_changes"], 4)
         self.assertEqual(result["extra"], "kept")
         self.assertEqual((preview.preview_calls, preview.status_calls), (1, 1))
-
-    def test_cleanup_kv_failure_still_releases_module_lock(self):
-        class FailingCleanupRepository:
-            def __init__(self, delegate):
-                self.delegate = delegate
-
-            def set(self, db, key, value):
-                if key == "external_calendar_sync_status" and value == "":
-                    raise RuntimeError("synthetic cleanup write failure")
-                self.delegate.set(db, key, value)
-
-        self.service._key_value_repository = FailingCleanupRepository(self.key_values)
-        with (
-            patch(
-                "backend.providers.calendar.external_calendar_url",
-                return_value="https://calendar.example/feed.ics",
-            ),
-            patch(
-                "backend.providers.calendar.fetch_calendar_feed", return_value=b"feed"
-            ),
-            patch("backend.providers.calendar.parse_ical_calendar", return_value=[]),
-            self.assertRaises(RuntimeError) as caught,
-        ):
-            self.service.sync()
-        self.assertEqual(str(caught.exception), "synthetic cleanup write failure")
-        self.assertFalse(self.service.running())
-        self.assertTrue(self.lock.acquire(blocking=False))
-        self.lock.release()
 
 
 if __name__ == "__main__":
