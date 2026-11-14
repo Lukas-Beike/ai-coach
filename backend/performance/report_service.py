@@ -214,14 +214,17 @@ class TrainingProfileSelectionService:
                 db, session_ids, (today.isoformat(), days, shown), build
             )
 
-    def all_time_records(self) -> tuple[Mapping[str, Any], ...] | None:
+    def all_time_records(
+        self,
+    ) -> tuple[tuple[Mapping[str, Any], ...], bool] | None:
         """Every stored ride and run session with its curve, built off the request path.
 
         The sessions of ``curve_records`` without a start day (#2694). Their
         curves are read in a background build of its own in short read
         snapshots (``SessionCurveReader.background_records``), so no request
-        waits for a cold read of the whole history; None before the first
-        build finished, RuntimeError after a failed one.
+        waits for a cold read of the whole history: the records with whether
+        they are current, None before the first build finished, RuntimeError
+        after a failed one.
         """
         canonical, curve_reader = self._sources()
         manager = canonical.database_manager()
@@ -262,13 +265,15 @@ class TrainingProfileSelectionService:
             return {"status": "failed"}
         if every is None:
             return {"status": "pending"}
-        rows = [dict(row) for row in every]
+        rows = [dict(row) for row in every[0]]
         # The window starts on the day of the oldest stored session.
         first = min((str(row["date"]) for row in rows), default=today.isoformat())
         days = (today - date.fromisoformat(first)).days + 1
         window = self._profile_window(rows, today, max(days, 1))
         # The cards read no id list; it would grow with the whole history.
         window["cache_coverage"].pop("eligible_activities")
+        # Values of an earlier read while a newer one runs; the cards ask again.
+        window["stale"] = not every[1]
         return window
 
     def power_profiles(

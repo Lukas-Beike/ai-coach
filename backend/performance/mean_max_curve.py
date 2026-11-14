@@ -159,21 +159,22 @@ class SessionCurveReader:
         activity_ids: Sequence[str],
         key: object,
         build: Callable[[], Iterable[Mapping[str, Any]]],
-    ) -> tuple[Mapping[str, Any], ...] | None:
-        """Return records built off the caller's path (#2694).
+    ) -> tuple[tuple[Mapping[str, Any], ...], bool] | None:
+        """Return records built off the caller's path and whether they are current (#2694).
 
         Stamped like ``shared_records``, in a slot of its own. A changed stamp
         never builds in the caller: it starts ``build`` once in the background
         (it opens its own reads; the per-session memo keeps a rebuild after a new
-        session cheap) and returns the last finished records meanwhile, None
-        before the first. A failed build is logged; for ``_RETRY_AFTER_S`` the
-        same stamp raises RuntimeError instead of building again.
+        session cheap) and returns the last finished records meanwhile, marked
+        not current, None before the first. A failed build is logged; for
+        ``_RETRY_AFTER_S`` the same stamp raises RuntimeError instead of building
+        again.
         """
         stamp = _stamp(db, activity_ids, key)
         with self._lock:
             ready = self._background
             if ready and ready[0] == stamp:
-                return ready[1]
+                return ready[1], True
             failed = self._failed
             if (
                 failed
@@ -192,7 +193,7 @@ class SessionCurveReader:
                 raise
         with self._lock:
             ready = self._background
-        return None if ready is None else ready[1]
+        return None if ready is None else (ready[1], ready[0] == stamp)
 
     def _build_in_background(
         self, stamp: str, build: Callable[[], Iterable[Mapping[str, Any]]]

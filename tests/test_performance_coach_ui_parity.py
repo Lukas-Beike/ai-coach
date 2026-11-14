@@ -159,7 +159,7 @@ class CoachUiParityTests(unittest.TestCase):
         # read is replaced (`tests/test_mean_max_curve.py` covers it).
         profiles = TrainingProfileSelectionService(lambda: TODAY)
         profiles.curve_records = _curve_records  # type: ignore[assignment]
-        profiles.all_time_records = lambda: tuple(_curve_records())  # type: ignore[assignment]
+        profiles.all_time_records = lambda: (tuple(_curve_records()), True)  # type: ignore[assignment]
         # Wired as `backend/performance/wiring.py` does: the Coach report sections
         # read the services the analysis routes and the public state use.
         self.reports = TrainingReportServices(

@@ -727,13 +727,12 @@ async function renderCyclingPowerProfile() {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
     // The server reads the all-time bests in the background; the cards keep loading until then (#2694).
-    const allTime = result?.all_time?.status;
-    if (allTime === "pending" || allTime === "failed") invalidateAnalysisReport("/api/analysis/power-profiles");
-    if (allTime === "failed") throw new Error("Konnte nicht geladen werden.");
-    if (allTime === "pending") {
-      setTimeout(() => { if (generation === cyclingPowerProfileGeneration) void renderCyclingPowerProfile(); }, ALL_TIME_RETRY_MS);
-      return;
-    }
+    const allTime = result?.all_time;
+    const again = allTime?.status === "pending" || allTime?.stale === true;
+    if (again || allTime?.status === "failed") invalidateAnalysisReport("/api/analysis/power-profiles");
+    if (allTime?.status === "failed") throw new Error("Konnte nicht geladen werden.");
+    if (again) setTimeout(() => { if (generation === cyclingPowerProfileGeneration) void renderCyclingPowerProfile(); }, ALL_TIME_RETRY_MS);
+    if (allTime?.status === "pending") return;
     renderPowerProfile(result);
     renderRunningBestEfforts(result);
     renderAnalysisSegmentsIfActive();

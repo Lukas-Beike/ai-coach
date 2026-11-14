@@ -694,6 +694,7 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertEqual([], builds)
         self.assertEqual((450.0, "act_old", "2025-03-14"), best(cards["all_time"]))
         self.assertEqual("2025-03-14", cards["all_time"]["date_start"])
+        self.assertFalse(cards["all_time"]["stale"])
         self.assertEqual(2, cards["all_time"]["cache_coverage"]["power_records"])
         # The 90-day window, the CP/CS input and the Coach's copy stay recent.
         self.assertEqual(
@@ -719,10 +720,13 @@ class ProfileSelectionTests(unittest.TestCase):
             reader.background_records(self.db, ["act_1"], "a", lambda: [{"n": 1}])
         )
         builds.pop()()
-        (first,) = reader.background_records(self.db, ["act_1"], "a", list)
-        # Changed inputs build again in the background; the last records show meanwhile.
+        (first,), current = reader.background_records(self.db, ["act_1"], "a", list)
+        self.assertTrue(current)
+        # Changed inputs build again in the background; the last records show
+        # meanwhile, marked as not current.
         self.assertEqual(
-            (first,), reader.background_records(self.db, ["act_1"], "b", broken)
+            ((first,), False),
+            reader.background_records(self.db, ["act_1"], "b", broken),
         )
         with self.assertLogs("intervals_coach", "ERROR"):
             builds.pop()()
