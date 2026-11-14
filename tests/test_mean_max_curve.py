@@ -394,11 +394,16 @@ class ProfileSelectionTests(unittest.TestCase):
         initialize_schema(self.db)
         self.session_records = Mock(wraps=CanonicalTableReader().session_activities)
         self.day = date(2026, 10, 18)
+        self.snapshots_open = 0
 
-    def service(self, summaries, spawn=None):
+    def service(self, summaries, spawn=None, **pacing):
         @contextmanager
         def read_snapshot():
-            yield self.db
+            self.snapshots_open += 1
+            try:
+                yield self.db
+            finally:
+                self.snapshots_open -= 1
 
         canonical = SimpleNamespace(
             activity_summary_reader=lambda: SimpleNamespace(
@@ -410,6 +415,7 @@ class ProfileSelectionTests(unittest.TestCase):
             lambda: self.day,
             canonical=canonical,
             curves=SessionCurveReader(self.session_records, spawn=spawn),
+            **pacing,
         )
 
     def add_ride(self, summaries, activity_id, day="2026-10-10", peak=350.0):
@@ -668,7 +674,14 @@ class ProfileSelectionTests(unittest.TestCase):
         self.add_ride(summaries, "act_old", day="2025-03-14", peak=450.0)
         self.add_ride(summaries, "act_recent", day="2026-10-10", peak=350.0)
         builds = []
-        service = self.service(summaries, spawn=builds.append)
+        pauses = []
+        ticks = iter((0.0, 0.25, 1.0, 1.5))
+        service = self.service(
+            summaries,
+            spawn=builds.append,
+            pause=lambda seconds: pauses.append((seconds, self.snapshots_open)),
+            clock=lambda: next(ticks),
+        )
 
         def best(window):
             return next(
@@ -690,6 +703,14 @@ class ProfileSelectionTests(unittest.TestCase):
         read = {call.args[1] for call in self.session_records.call_args_list}
         self.assertNotIn("act_old", read)
         builds.pop()()
+        # One session per read snapshot, then a pause as long as that session
+        # took, outside the snapshot, so request threads get the interpreter
+        # (#2757); the records equal those of one read over the same days.
+        self.assertEqual([(0.25, 0), (0.5, 0)], pauses)
+        every, current = service.all_time_records()
+        self.assertTrue(current)
+        one_read = service.curve_records((self.day - date(2025, 3, 14)).days + 1)
+        self.assertCountEqual(one_read, [dict(record) for record in every])
         cards = service.power_profiles(all_time=True)
         self.assertEqual([], builds)
         self.assertEqual((450.0, "act_old", "2025-03-14"), best(cards["all_time"]))

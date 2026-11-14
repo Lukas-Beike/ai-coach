@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -56,8 +57,6 @@ from backend.performance.training_report import training_report
 
 # Analysis windows of the power and running profiles, shortest first.
 PROFILE_WINDOW_DAYS = (28, 90)
-# Sessions per read snapshot of the background all-time build (#2694).
-_BACKGROUND_CHUNK = 25
 PROGRESS_DAYS = frozenset({7, 28, 42, 56, 84})
 
 
@@ -161,10 +160,14 @@ class TrainingProfileSelectionService:
         *,
         canonical: CanonicalPerformanceSource | None = None,
         curves: SessionCurveReader | None = None,
+        pause: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._today = today
         self._canonical = canonical
         self._curves = curves
+        self._pause = pause
+        self._clock = clock
 
     @overload
     def curve_records(
@@ -220,11 +223,13 @@ class TrainingProfileSelectionService:
         """Every stored ride and run session with its curve, built off the request path.
 
         The sessions of ``curve_records`` without a start day (#2694). Their
-        curves are read in a background build of its own in short read
-        snapshots (``SessionCurveReader.background_records``), so no request
+        curves are read in a background build of its own, one session per read
+        snapshot (``SessionCurveReader.background_records``), so no request
         waits for a cold read of the whole history: the records with whether
         they are current, None before the first build finished, RuntimeError
-        after a failed one.
+        after a failed one. After each session, outside its snapshot, the build
+        pauses as long as that session took: its pure-Python work would
+        otherwise hold the interpreter and stall every request thread (#2757).
         """
         canonical, curve_reader = self._sources()
         manager = canonical.database_manager()
@@ -234,13 +239,11 @@ class TrainingProfileSelectionService:
 
             def build() -> list[dict[str, Any]]:
                 curves: dict[str, SessionCurve] = {}
-                for index in range(0, len(session_ids), _BACKGROUND_CHUNK):
-                    with manager.read_snapshot() as chunk:
-                        curves.update(
-                            curve_reader.curves(
-                                chunk, session_ids[index : index + _BACKGROUND_CHUNK]
-                            )
-                        )
+                for session_id in session_ids:
+                    started = self._clock()
+                    with manager.read_snapshot() as one:
+                        curves.update(curve_reader.curves(one, [session_id]))
+                    self._pause(self._clock() - started)
                 return [
                     _curve_record(summary, curves.get(str(summary.get("id") or "")))
                     for summary in sessions
