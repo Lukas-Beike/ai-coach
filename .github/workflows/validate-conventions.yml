@@ -58,18 +58,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # A conflict resolution once reverted the released version (#2733). Both
+          # A conflict resolution once reverted the released version (#2733). The
           # files are read through the API, so no pull-request code runs here.
           version() {
             gh api -H "Accept: application/vnd.github.raw" \
               "repos/$REPOSITORY/contents/server.py?ref=$1" \
               | sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p'
           }
+          merge_base="$(gh api "repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA" \
+            --jq '.merge_base_commit.sha')"
           base="$(version "$BASE_SHA")"
           head="$(version "$HEAD_SHA")"
-          if [[ -z "$base" || -z "$head" ]]; then
-            echo "APP_VERSION not found in server.py (base '${base}', head '${head}')."
+          forked="$(version "$merge_base")"
+          if [[ -z "$base" || -z "$head" || -z "$forked" ]]; then
+            echo "APP_VERSION not found in server.py (base '${base}', head '${head}', merge base '${forked}')."
             exit 1
+          fi
+          # A branch that never touched the version is only older than its base.
+          if [[ "$head" == "$forked" ]]; then
+            echo "APP_VERSION unchanged by this PR ($head)."
+            exit 0
           fi
           lowest="$(printf '%s\n%s\n' "$base" "$head" | sort -V | head -n 1)"
           if [[ "$head" != "$base" && "$lowest" == "$head" ]]; then
