@@ -14,7 +14,8 @@ from backend.providers.source_labels import SESSION_SOURCES_LABEL
 POWER_DURATIONS = (5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)
 LEGACY_POWER_DURATIONS = (5, 60, 300, 1200)
 RUNNING_DURATIONS = (60, 180, 300, 420, 720, 1200)
-RUNNING_DISTANCES = (1000, 5000)
+# 1 km, 5 km, 10 km, half marathon and marathon (#2786).
+RUNNING_DISTANCES = (1000, 5000, 10000, 21097.5, 42195)
 METHOD_ID: Final = "mean-max-curve"
 # Version 1: time-weighted windows that must be fully covered by valid samples.
 # Version 2 (card M4 v4, #1773): an outdoor running window counts only when its
@@ -236,7 +237,7 @@ def _best_running_speed(
 
 
 def _best_running_distance(
-    times: list, rates: list, distances: list, target: int, flat: WindowCheck
+    times: list, rates: list, distances: list, target: float, flat: WindowCheck
 ) -> dict[str, Any]:
     if len(distances) != len(times):
         return {
@@ -267,13 +268,18 @@ def _fastest_distance_window(
     rates: list,
     distances: list,
     run_end: list[int],
-    target: int,
+    target: float,
     flat: WindowCheck,
 ) -> tuple[float, Any] | None:
     """The shortest time over ``target`` metres and its start, among flat windows."""
     best = None
+    # No window of ``target`` metres starts beyond this; skipping those starts
+    # keeps the half marathon and marathon cheap on shorter runs (#2786).
+    last_start = max((d for d in distances if d is not None), default=0.0) - target
     for start in range(len(times) - 1):
         if not rates[start][2] or distances[start] is None:
+            continue
+        if distances[start] > last_start:
             continue
         candidate = _running_distance_candidate(
             times, distances, start, run_end[start], target
@@ -376,7 +382,7 @@ def _running_speed_candidate(
 
 
 def _running_distance_candidate(
-    times: list, distances: list, start: int, end: int, target: int
+    times: list, distances: list, start: int, end: int, target: float
 ) -> tuple[float, int] | None:
     """Time to cover ``target`` metres from ``start`` within one valid run, and
     the sample index the window ends at."""

@@ -57,6 +57,17 @@ class PowerProfileTests(unittest.TestCase):
         running = running_profile({"sport": "run", "streams": streams})
         self.assertEqual("unknown", running["distance"][1]["status"])
 
+    def test_distance_bests_reach_the_marathon_only_on_a_long_enough_run(self):
+        targets = [1000, 5000, 10000, 21097.5, 42195]
+        for kilometres, timed in ((43, targets), (15, targets[:3])):
+            distance = running_profile(steady_run(kilometres))["distance"]
+            self.assertEqual(targets, [p["distance_meters"] for p in distance])
+            self.assertEqual(
+                timed, [p["distance_meters"] for p in distance if p["seconds"]]
+            )
+        marathon = running_profile(steady_run(43))["distance"][-1]
+        self.assertAlmostEqual(42195 / 3.5, marathon["seconds"], places=1)
+
     def test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses(self):
         times = list(range(2401))
         watts = [100.0] * len(times)
@@ -133,6 +144,17 @@ class PowerProfileTests(unittest.TestCase):
             "Garmin original speed/distance streams",
             running_profile(run, source_label="Garmin")["source"],
         )
+
+
+def steady_run(kilometres, speed=3.5, day="2026-10-01"):
+    """An indoor run at an even ``speed`` m/s, sampled every second."""
+    times = list(range(int(kilometres * 1000 / speed) + 1))
+    return {
+        "sport": "run",
+        "environment": "indoor",
+        "date": day,
+        "streams": {"time": times, "distance": [t * speed for t in times]},
+    }
 
 
 def _hill_run(environment="outdoor", *, altitude=True):

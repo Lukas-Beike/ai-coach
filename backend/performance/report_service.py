@@ -469,7 +469,7 @@ class TrainingProfileSelectionService:
     def _winner(
         candidates: list[tuple[dict[str, Any], dict[str, Any]]],
         sport: tuple[str, str | None],
-        value: int,
+        value: float,
         field: str,
         label: str,
         minimum: bool = False,
@@ -940,7 +940,7 @@ def _power_candidates(
 
 
 def _running_candidates(
-    eligible: list[dict[str, Any]], key: str, field: str, value: int
+    eligible: list[dict[str, Any]], key: str, field: str, value: float
 ) -> list:
     return [
         (point, row)

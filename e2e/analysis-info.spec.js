@@ -82,6 +82,8 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await expect(running).not.toContainText("Keine Daten");
   await expect(running.locator("#performancePredictions")).toHaveCount(1);
   await expect(running.locator("#runningBestEfforts")).toHaveCount(1);
+  // The race predictions stand directly above the running bests (#2786).
+  expect(await page.locator("#runningBestEfforts").evaluate((element) => element.previousElementSibling?.id)).toBe("performancePredictions");
   // Laufen shows no cycling part (#2265).
   await expect(cycling).toBeHidden();
   await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toBeHidden();

@@ -161,7 +161,7 @@ every named number the code fixes. A test fails when it is out of date.
 | `POWER_DURATIONS` | `(5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)` | `backend/performance/power_profile.py` | 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols; cycling CP also fits the 1200 s effort (M4 card 4). |
 | `LEGACY_POWER_DURATIONS` | `(5, 60, 300, 1200)` | `backend/performance/power_profile.py` |  |
 | `RUNNING_DURATIONS` | `(60, 180, 300, 420, 720, 1200)` | `backend/performance/power_profile.py` |  |
-| `RUNNING_DISTANCES` | `(1000, 5000)` | `backend/performance/power_profile.py` |  |
+| `RUNNING_DISTANCES` | `(1000, 5000, 10000, 21097.5, 42195)` | `backend/performance/power_profile.py` | 1 km, 5 km, 10 km, half marathon and marathon (#2786). |
 | `METHOD_ID` | `'mean-max-curve'` | `backend/performance/power_profile.py` |  |
 | `METHOD_VERSION` | `2` | `backend/performance/power_profile.py` | Version 1: time-weighted windows that must be fully covered by valid samples. Version 2 (card M4 v4, #1773): an outdoor running window counts only when its net altitude change is at most 1 % of its distance; without altitude it does not count. |
 | `MAX_RUNNING_NET_GRADE` | `0.01` | `backend/performance/power_profile.py` |  |
