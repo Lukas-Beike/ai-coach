@@ -66,7 +66,10 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
         { sport: "run", duration_seconds: 60, speed_mps: 5, status: "ok", date: "2026-10-01", source: "Garmin Connect" },
         { sport: "run", duration_seconds: 1200, speed_mps: null, status: "unknown" },
       ],
-      distance: [{ sport: "run", distance_meters: 5000, seconds: 1188, status: "ok", date: "2026-09-20", source: "Garmin Connect" }],
+      distance: [
+        { sport: "run", distance_meters: 5000, seconds: 1188, status: "ok", date: "2026-09-20", source: "Garmin Connect" },
+        { sport: "run", distance_meters: 21097.5, seconds: 5530, status: "ok", date: "2026-04-12", source: "Garmin Connect" },
+      ],
     },
     cache_coverage: { records: 4, unknown_records: 0, power_records: 1, power_unknown_records: 0 },
   } } }));
@@ -80,6 +83,7 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   // Running bests are the five race distances only; a missing best keeps its row with a dash (#2786).
   await expect(best.locator("tbody th")).toHaveText(["1 km", "5 km", "10 km", "Halbmarathon", "Marathon"]);
   await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText(["19:48", "20.09.2026"]);
+  await expect(best.locator('[data-running-best="distance:21097.5"] td')).toHaveText(["1:32:10", "12.04.2026"]);
   await expect(best.locator('[data-running-best="distance:42195"] td')).toHaveText(["–", ""]);
   await expect(best).not.toContainText("min/km");
   await expect(page.locator("#currentPerformance table[data-analysis-sport='run']")).toBeVisible();
