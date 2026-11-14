@@ -189,3 +189,47 @@ test("@responsive the Monat switch shows the month grid and the calendar returns
   await expect(page.locator(".planned-month")).toHaveCount(0);
   await expect(page.locator(".planned-day.is-today")).toHaveCount(1);
 });
+
+test("@responsive the sport filter hides other sports and their figures, keeps appointments and the week sync, and is remembered", async ({ page, request }, testInfo) => {
+  await openCalendar(page, request);
+  const days = await renderSyntheticCalendar(page);
+  const filter = page.locator(".planned-week .planned-sport-filter");
+  await expect(filter.getByRole("radio")).toHaveCount(4);
+  await expect(filter.getByRole("radio", { name: "Alle" })).toBeChecked();
+  // The week sync is built from every unit of the week, whatever the filter shows (#2810).
+  await page.evaluate(() => {
+    const original = plannedWeekSyncButton;
+    globalThis.syncedWeekUnits = [];
+    globalThis.plannedWeekSyncButton = (weekKey, entries, ...rest) => { syncedWeekUnits.push(entries.length); return original(weekKey, entries, ...rest); };
+  });
+  await filter.getByRole("radio", { name: "Lauf" }).check();
+  await expect(page.locator(".planned-week .planned-sport-filter").getByRole("radio", { name: "Lauf" })).toBeChecked();
+  await expect(page.locator(".planned-day.is-today .planned-entry")).toHaveCount(0);
+  await expect(page.locator(".planned-week-totals")).toHaveCount(0);
+  const synced = await page.evaluate(() => syncedWeekUnits.at(-1));
+  await showCalendarDay(page, days.next);
+  const next = page.locator(`.planned-day[data-date="${days.next}"]`);
+  await expect(next.locator(".planned-entry")).toHaveCount(1);
+  await expect(next.locator(".planned-day-calendar")).toHaveText("📅 Kalender: Arzt · 09:00 · Kein Training");
+  await showCalendarDay(page, days.past);
+  await expect(page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`)).toHaveCount(1);
+  await expect(page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`)).toContainText("Vergangener Lauf");
+  expect(synced).toBe(await page.evaluate(() => {
+    const start = planWeekStart(timezoneDateKey(state.data?.profile?.timezone, new Date()));
+    return state.data.training_calendar.filter((item) => plannedEventDate(item) >= start && plannedEventDate(item) <= addDateKey(start, 6)).length;
+  }));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // The month view filters its marks with the same chips.
+  await page.locator(".planned-view-switch [data-view='month']").click();
+  await waitForOlderSessions(page);
+  const month = page.locator(".planned-month");
+  await expect(month.locator(".planned-sport-filter").getByRole("radio", { name: "Lauf" })).toBeChecked();
+  await expect(month.locator(`.planned-month-day[data-date="${days.today}"] .planned-month-mark`)).toHaveCount(0);
+  await month.locator(".planned-sport-filter").getByRole("radio", { name: "Rad" }).check();
+  await expect(page.locator(`.planned-month-day[data-date="${days.today}"] .planned-month-mark`)).toHaveCount(1);
+  // The choice stays on this device after a reload.
+  await page.reload();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
+  await expect(page.locator(".planned-week .planned-sport-filter").getByRole("radio", { name: "Rad" })).toBeChecked();
+});
