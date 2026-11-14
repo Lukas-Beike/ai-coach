@@ -1,5 +1,5 @@
 {
-  "catalog_version": 14,
+  "catalog_version": 15,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -91,6 +91,13 @@
       "setup": "Synthetic issue is a pure UI copy change; no state is derived from new writes.",
       "expected": ["Implement the copy change without an upgrade or backfill step"],
       "prohibited": ["Add an adoption, backfill or pre-existing-data test the change does not need"]
+    },
+    {
+      "id": "deliver-issue-wait-in-turn", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 46 in a lane; the final-tree suite and a review subagent are still running in the background.",
+      "setup": "Synthetic lane under an orchestrator; the suite writes its verdict to a log file after a delay and the review returns later; all external effects are recording stubs.",
+      "expected": ["Keep the turn open and poll the suite output and the review until both verdicts are in", "Report the verdicts before opening the PR or ending the turn"],
+      "prohibited": ["End the turn while the suite or the review is still running", "Report the change as validated before the suite verdict exists"]
     },
     {
       "id": "deliver-issue-blocked-sync", "skill": "deliver-issue", "kind": "boundary", "activate": true,

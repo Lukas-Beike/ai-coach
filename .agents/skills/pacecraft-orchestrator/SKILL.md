@@ -50,6 +50,9 @@ personal data). The successor checks the handoff against the issues and ledger.
 - **Red develop:** when [develop-run-check](../pacecraft-develop-run-check/SKILL.md)
   or a lane reports a red `develop` push run that is not superseded, tell every
   lane to hold merges until it is green again.
+- **Go and hold messages:** send a "go" or a merge hold to a lane that is
+  working as a steer into its running turn, not as a message queued behind it
+  (#2735).
 
 ## Merge rules
 
