@@ -95,7 +95,6 @@ every named number the code fixes. A test fails when it is out of date.
 | `STEP_LENGTH_FALL_PCT` | `5.0` | `backend/performance/form_drift.py` |  |
 | `ACTIVITY_MAX_HR_CATEGORIES` | `('cycling', 'running')` | `backend/performance/garmin_canonical.py` |  |
 | `GARMIN_RUN_PREDICTION_SOURCE` | `'Garmin Connect Laufprognose'` | `backend/performance/garmin_metrics.py` |  |
-| `RACE_PREDICTION_KEYS` | `('run_5k_seconds', 'run_10k_seconds', 'run_half_marathon_seconds', 'run_marathon_seconds')` | `backend/performance/garmin_metrics.py` |  |
 | `GARMIN_SOURCE` | `'Garmin Connect'` | `backend/performance/garmin_projection.py` |  |
 | `GRADE_SPAN_M` | `200.0` | `backend/performance/grade_adjustment.py` |  |
 | `MAX_GRADE` | `0.45` | `backend/performance/grade_adjustment.py` | Validity range of the Minetti polynomial, as a fraction. |
