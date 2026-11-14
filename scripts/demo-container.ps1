@@ -15,7 +15,7 @@ param(
     [switch]$Persist,
     [switch]$SkipBuild,
     [switch]$Stop,
-    [ValidateRange(0, 5000)][int]$HeavyHistory = 0
+    [ValidateRange(0, 1000)][int]$HeavyHistory = 0
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)

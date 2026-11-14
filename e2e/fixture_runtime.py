@@ -485,8 +485,9 @@ def initialise_fixture():
     # and seeds the training features once, so restarts leave the data as-is.
     if os.environ.get("FIXTURE_AUTO_SEED") == "1":
         seed_preview_demo()
-    if heavy := (os.environ.get("FIXTURE_HEAVY_HISTORY") or "").strip():
-        seed_heavy_history(int(heavy))
+    heavy = (os.environ.get("FIXTURE_HEAVY_HISTORY") or "0").strip()
+    if heavy != "0":  # 0 is off, like demo-container.ps1
+        seed_heavy_history(int(heavy) if heavy.isdigit() else -1)
 
 
 FIXTURE_ACTIVITY_TIME = "T08:00:00"
@@ -969,17 +970,17 @@ def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
             )
 
 
-def _run_session_analysis():
+def _run_session_analysis(batches=100):
     """Store the canonical session analyses of the seeded sessions."""
     stage = server.CANONICAL_BACKFILL.session_analysis
     with server.database_manager().unit_of_work() as db:
-        for _ in range(100):
+        for _ in range(batches):
             if stage.run_batch(db).done:
                 return
     raise RuntimeError("fixture session analysis did not finish")
 
 
-FIXTURE_HEAVY_HISTORY_MAX = 5000
+FIXTURE_HEAVY_HISTORY_MAX = 1000
 
 
 def seed_heavy_history(count, seconds=5400):
@@ -987,17 +988,24 @@ def seed_heavy_history(count, seconds=5400):
 
     ``count`` alternating rides and runs of ``seconds`` each, about every 1.5
     days back over several years, with full-resolution heart rate plus power or
-    speed streams on their Garmin copies. It goes through the same canonical
-    stores as the standard seed, runs once per count, and computes the session
-    analyses, so a restart measures the steady state, not a first sync.
+    speed streams on their Garmin copies. The rows go straight into the
+    canonical tables, not into the stored snapshot a real sync keeps small.
+    It runs once and computes the session analyses, so a restart measures the
+    steady state, not a first sync.
     """
     if not 0 < count <= FIXTURE_HEAVY_HISTORY_MAX:
         raise ValueError(
             f"FIXTURE_HEAVY_HISTORY must be 1 to {FIXTURE_HEAVY_HISTORY_MAX}"
         )
     with server.database_manager().unit_of_work() as db:
-        if server.KEY_VALUE_REPOSITORY.get(db, "fixture_heavy_history") == str(count):
-            return
+        seeded = server.KEY_VALUE_REPOSITORY.get(db, "fixture_heavy_history")
+    if seeded == str(count):
+        return
+    if seeded:
+        raise ValueError(
+            f"FIXTURE_HEAVY_HISTORY was seeded with {seeded}; recreate the demo "
+            "without -Persist to use another count"
+        )
     today = server.ATHLETE_CLOCK.now().date()
     rows = []
     for index in range(count):
@@ -1017,25 +1025,32 @@ def seed_heavy_history(count, seconds=5400):
                 "icu_training_load": 60 + index % 5 * 15,
             }
         )
-    _merge_snapshot_activities(rows)
+    now = server.runtime_clock.utc_now()
+    workouts = [_fixture_wahoo_workout(row) for row in rows]
+    with server.database_manager().unit_of_work() as db:
+        plan = wahoo_ingest_plan({"synced_at": now, "workouts": workouts}, zone=UTC)
+        retrieved_at = datetime.fromisoformat(now)
+        ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
+        serves_tables = server.CANONICAL_READ.serves_tables(db)
+    if not serves_tables:
+        _merge_snapshot_activities([])  # a fresh fixture completes its backfill
     time_s = list(range(seconds))
     heart = [round(135 + 15 * math.sin(t / 300) + t / seconds * 8, 1) for t in time_s]
+    ride = {
+        "time": time_s,
+        "heartrate": heart,
+        "watts": [round(210 + 45 * math.sin(t / 90)) for t in time_s],
+    }
+    run = {
+        "time": time_s,
+        "heartrate": heart,
+        "velocity_smooth": [round(3.1 + 0.3 * math.sin(t / 60), 2) for t in time_s],
+    }
     for index, row in enumerate(rows):
-        streams = {"time": time_s, "heartrate": heart}
-        if index % 2 == 0:
-            streams["watts"] = [round(210 + 45 * math.sin(t / 90)) for t in time_s]
-        else:
-            streams["velocity_smooth"] = [
-                round(3.1 + 0.3 * math.sin(t / 60), 2) for t in time_s
-            ]
-        _save_garmin_copy(row["id"], streams)
-    stage = server.CANONICAL_BACKFILL.session_analysis
+        _save_garmin_copy(row["id"], ride if index % 2 == 0 else run)
+    # Each batch re-reads every session, so the bound grows with the history.
+    _run_session_analysis(batches=10 * count + 100)
     with server.database_manager().unit_of_work() as db:
-        for _ in range(count + 100):
-            if stage.run_batch(db).done:
-                break
-        else:
-            raise RuntimeError("fixture heavy session analysis did not finish")
         server.KEY_VALUE_REPOSITORY.set(db, "fixture_heavy_history", str(count))
 
 

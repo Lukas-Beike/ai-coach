@@ -408,7 +408,7 @@ The fixture runtime SHALL start only when `AI_COACH_DISPOSABLE_FIXTURE` is exact
 - **THEN** it is published only on `127.0.0.1:<port>` (default 8091), seeds synthetic data itself (`FIXTURE_AUTO_SEED=1`), keeps data in a named volume only with `-Persist`, and is reported ready after at most 60 health probes
 
 #### Scenario: Heavy history for performance checks
-- **WHEN** the demo starts with `-HeavyHistory <n>` (1 to 5000)
+- **WHEN** the demo starts with `-HeavyHistory <n>` (1 to 1000)
 - **THEN** the fixture also seeds `n` synthetic long rides and runs with full streams and their session analyses once per count (`FIXTURE_HEAVY_HISTORY`), and readiness waits at most 600 health probes; without it nothing else changes
 
 Evidence: `scripts/demo-container.ps1`; `e2e/fixture_runtime.py::require_disposable_fixture_marker`; `e2e/fixture_runtime.py::seed_heavy_history`; `tests/test_fixture_standard_data.py::StandardFixtureSeedLifecycleTests::test_heavy_history_seeds_count_and_full_streams_once`. Tests: `tests/test_container_delivery.py::test_fixture_refuses_any_marker_value_other_than_exact_one`; `tests/test_container_delivery.py::test_refused_names_stop_before_any_docker_call`; `tests/test_container_delivery.py::test_existing_container_is_stopped_then_removed_without_volumes`; `tests/test_container_delivery.py::test_run_arguments_keep_the_demo_on_loopback_and_disposable`.
