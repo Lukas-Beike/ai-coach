@@ -1,8 +1,10 @@
 """scripts/spec_validate.py with a fake npm; nothing real runs."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import spec_validate
@@ -46,6 +48,40 @@ class SpecValidateTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("FAILED specs", out)
         self.assertIn("line 29", out)
+
+    def test_evidence_must_name_a_test_the_file_defines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_x.py").write_text(
+                "LIMIT = 3\nclass XTests:\n    def test_kept(self):\n        pass\n",
+                encoding="utf-8",
+            )
+            spec = root / "openspec" / "specs" / "x" / "spec.md"
+            spec.parent.mkdir(parents=True)
+            spec.write_text(
+                "Evidence: `tests/test_x.py:test_kept`, `tests/test_x.py::XTests.test_kept`,"
+                " `tests/test_x.py:LIMIT`, `tests/test_x.py::XTests::test_kept`.\n"
+                "Evidence: `tests/test_x.py::XTests.test_gone`, `tests/test_y.py:test_kept`,"
+                " `tests/test_x.py:test_kep`, `tests/test_x.py::XTests::test_gone`.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                spec_validate.stale_evidence(root),
+                [
+                    "openspec/specs/x/spec.md:2: tests/test_x.py:XTests.test_gone",
+                    "openspec/specs/x/spec.md:2: tests/test_y.py:test_kept",
+                    "openspec/specs/x/spec.md:2: tests/test_x.py:test_kep",
+                    "openspec/specs/x/spec.md:2: tests/test_x.py:XTests::test_gone",
+                ],
+            )
+        with mock.patch.object(
+            spec_validate, "stale_evidence", return_value=["a:1: b"]
+        ):
+            runner = FakeRun()
+            code, out, _ = run_main(spec_validate, [], runner)
+        self.assertEqual((code, runner.calls), (1, []))
+        self.assertIn("stale evidence a:1: b", out)
 
     def test_rejects_option_like_change_names_and_reports_missing_npm(self):
         code, _, err = run_main(spec_validate, ["--change=-x"], FakeRun())
