@@ -380,12 +380,15 @@ class SessionExecutionCurveTests(unittest.TestCase):
             )
             first.start()
             self.assertTrue(entered.wait(5))
+            # The first computation's marker: note when the second miss waits on it.
+            (marker,) = self.reader._computing.values()
+            waiting, wait = threading.Event(), marker.wait
+            marker.wait = lambda *args: (waiting.set(), wait(*args))[1]
             second = threading.Thread(
                 target=lambda: results.update(b=self.reader.curves(shared, ["act_1"]))
             )
             second.start()
-            second.join(0.2)
-            self.assertTrue(second.is_alive(), "the second miss waits")
+            self.assertTrue(waiting.wait(5), "the second miss waits")
             release.set()
             first.join(5)
             second.join(5)
@@ -739,13 +742,7 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertEqual(1, len(builds))
         read = {call.args[1] for call in self.session_records.call_args_list}
         self.assertNotIn("act_old", read)
-        self.session_records.reset_mock()
         builds.pop()()
-        # Newest first, so the recent windows requests read warm first (#2783).
-        self.assertEqual(
-            ["act_recent", "act_old"],
-            [call.args[1] for call in self.session_records.call_args_list],
-        )
         # One session per read snapshot, then a pause as long as that session
         # took, outside the snapshot, so request threads get the interpreter
         # (#2757); the records equal those of one read over the same days.

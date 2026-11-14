@@ -92,7 +92,8 @@ class SessionCurveReader:
         self._background_name = background_name
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
-        # Fingerprints being computed, each set once its curve is in the memo.
+        # Fingerprints being computed; each is set when its computation ends,
+        # stored or failed, and waiters then look again.
         self._computing: dict[str, threading.Event] = {}
         self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
@@ -128,22 +129,20 @@ class SessionCurveReader:
         """The memoized curve of ``fingerprint``, computed once across threads.
 
         A miss while another thread computes the same curve waits for it instead
-        of computing it again, as parallel view loads did after a start (#2783).
+        of computing it again, as parallel view loads did after a start (#2783);
+        after a failed computation one waiter takes it over.
         """
-        owned = pending = None
-        with self._lock:
-            cached = self._memo.get(fingerprint)
-            if cached is not None:
-                self._memo.move_to_end(fingerprint)
-                return cached
-            if (pending := self._computing.get(fingerprint)) is None:
-                owned = self._computing[fingerprint] = threading.Event()
-        if pending is not None:
-            pending.wait()
+        while True:
             with self._lock:
                 cached = self._memo.get(fingerprint)
-            if cached is not None:
-                return cached
+                if cached is not None:
+                    self._memo.move_to_end(fingerprint)
+                    return cached
+                pending = self._computing.get(fingerprint)
+                if pending is None:
+                    owned = self._computing[fingerprint] = threading.Event()
+                    break
+            pending.wait()
         try:
             cached = compute()
             with self._lock:
@@ -152,10 +151,9 @@ class SessionCurveReader:
                     self._memo.popitem(last=False)
             return cached
         finally:
-            if owned is not None:
-                with self._lock:
-                    del self._computing[fingerprint]
-                owned.set()
+            with self._lock:
+                del self._computing[fingerprint]
+            owned.set()
 
     def shared_records(
         self,

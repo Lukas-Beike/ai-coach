@@ -239,15 +239,9 @@ class TrainingProfileSelectionService:
             sessions = _curve_sessions(canonical, db, None, self._today())
             session_ids = [str(summary.get("id") or "") for summary in sessions]
 
-            # Newest first: the recent windows that requests read warm first (#2783).
-            newest_first = [
-                str(summary.get("id") or "")
-                for summary in sorted(sessions, key=summary_local_date, reverse=True)
-            ]
-
             def build() -> list[dict[str, Any]]:
                 curves: dict[str, SessionCurve] = {}
-                for session_id in newest_first:
+                for session_id in session_ids:
                     started = self._clock()
                     with manager.read_snapshot() as one:
                         curves.update(curve_reader.curves(one, [session_id]))
