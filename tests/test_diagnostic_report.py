@@ -10,7 +10,7 @@ import time
 import unittest
 from contextlib import closing, contextmanager
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -262,6 +262,10 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     "garmin_snapshot_legacy": 0,
                     "diagnostic_capture_entries": 12,
                 },
+                # No database path in this fake: storage is unknown (#2848).
+                "file_bytes": None,
+                "wal_bytes": None,
+                "data_dir_free_bytes": None,
                 "workout_library_state": {"local": 2},
                 "external_calendar_events": 400,
             },
@@ -344,11 +348,14 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             database = Path(directory) / "intervals-coach.db"
             database.write_bytes(b"x" * 4096)
             database.with_name("intervals-coach.db-wal").write_bytes(b"x" * 512)
+            # The age is the name's UTC time (2 h), not the kept mtime (30 days).
+            made = (datetime.now(UTC) - timedelta(hours=2)).strftime("%Y%m%d%H%M%S")
             copy = database.with_name(
-                "intervals-coach.db.pre-restore-20261101120000-" + "a" * 32
+                f"intervals-coach.db.pre-restore-{made}-" + "a" * 32
             )
             copy.write_bytes(b"x" * 2048)
-            os.utime(copy, (time.time() - 7200, time.time() - 7200))
+            old = time.time() - 30 * 86400
+            os.utime(copy, (old, old))
             database.with_name("intervals-purge-v1.done").write_text("")
             service = DiagnosticReportService(
                 replace(self.service._deps, database_path=lambda: database)
@@ -359,7 +366,10 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertGreater(storage["data_dir_free_bytes"], 0)
         self.assertEqual((copies["count"], copies["total_bytes"]), (1, 2048))
         self.assertAlmostEqual(copies["newest_age_hours"], 2.0, places=1)
-        self.assertEqual(self.service._storage(), {})  # no path: no fields
+        self.assertEqual(  # no path: the fields say unknown
+            self.service._storage(),
+            {"file_bytes": None, "wal_bytes": None, "data_dir_free_bytes": None},
+        )
         self.assertEqual(self.service._recovery_copies(), {"available": False})
 
     def test_payload_sizes_count_utf8_bytes_without_fetching_the_payload(self):

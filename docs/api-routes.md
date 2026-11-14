@@ -525,7 +525,7 @@ Response: 200 with the redacted report of `DiagnosticReportService.report`,
 read from one database snapshot. Top-level keys include `generated_at`,
 `app`, `runtime`, `configuration`, `openai`, `coach_commands`, `sync`,
 `garmin`, `wahoo`, `provider_freshness`, `external_calendar`, `database`,
-`plan_sync`, the `canonical_*` sections, `logs` (recent warnings, errors
+`recovery_copies`, `plan_sync`, the `canonical_*` sections, `logs` (recent warnings, errors
 and INFO entries), `debug_capture` (status and captured request and
 response shapes) and `note`. A section that cannot be built is
 `{"status": "unavailable"}`.

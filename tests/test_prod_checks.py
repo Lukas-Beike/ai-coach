@@ -43,7 +43,9 @@ def report(messages=40):
             "messages": messages,
             "competitions": 3,
             "workout_library_state": {"pending": 1, "note": "text never printed"},
+            "file_bytes": 4096,
         },
+        "recovery_copies": {"count": 1, "newest_age_hours": 2.0},
         "plan_sync": {
             "unsynced_total": 2,
             "unsynced_units": [{"has_error": True}, {"has_error": False}],
@@ -181,6 +183,9 @@ class ProdChecksTests(unittest.TestCase):
             "--compare", str(result),
         )  # fmt: skip
         self.assertIn("FAIL count messages 40 -> 39", text)
+        # Storage is shown with the previous release's value (#2848).
+        self.assertIn("info storage file_bytes 4096 (was 4096)", text)
+        self.assertIn("info storage recovery_count 1 (was 1)", text)
         self.assertIn("ok count competitions 3 -> 3", text)
         self.assertEqual(
             prod_diagnostics.comparison_lines(

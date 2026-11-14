@@ -4,7 +4,8 @@ import os
 import time
 from pathlib import Path
 
-# The process start as the runtime sees it: this module loads at startup.
+# Uptime counts from this module's import, early in startup (the diagnostics
+# report imports it); interpreter start before it is not included.
 _STARTED = time.monotonic()
 
 _STATUS_BYTES = {

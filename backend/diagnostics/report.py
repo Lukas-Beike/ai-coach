@@ -142,9 +142,12 @@ class DiagnosticReportService:
         return counts | self._storage()
 
     def _storage(self) -> dict[str, int | None]:
-        """Database and write-ahead log sizes and free space beside them (stat only)."""
+        """Database and write-ahead log sizes and free space beside them (stat only).
+
+        Unknown (``None``) without a database path, so a reader sees the gap.
+        """
         if self._deps.database_path is None:
-            return {}
+            return dict.fromkeys(("file_bytes", "wal_bytes", "data_dir_free_bytes"))
         path = self._deps.database_path()
 
         def size(file: Path) -> int | None:
