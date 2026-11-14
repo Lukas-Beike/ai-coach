@@ -485,7 +485,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "list_planned_workouts",
-            "Read future locally scheduled workouts, the authoritative plan. Use it when the planned units in the context are not enough or the athlete asks to list them; for edits, repairs and syncs read_training_state supplies revisions and hashes. Read-only.",
+            "Read future active local planned units, bounded by limit (not past or archived ones). Use it when the planned units in the context are not enough or the athlete asks to list them; for edits, repairs and syncs read_training_state supplies revisions and hashes. Read-only.",
             {
                 "limit": {
                     "type": "integer",
@@ -584,7 +584,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "commit_training_plan",
-            "Commit a staged training-plan draft (artifact_id from stage_training_plan, referenced in this dialogue) as local planned workouts in one transaction. Use it only when the athlete accepts that draft; never for an arbitrary outstanding artifact. Never writes remotely.",
+            "Commit a staged training-plan draft (artifact_id from stage_training_plan, referenced in this dialogue) as local planned workouts in one transaction. Use it only when the athlete accepts that draft, with the draft's source_message_id and the acceptance in source_message_ids; never for an arbitrary outstanding artifact. Never writes remotely.",
             {
                 "artifact_id": {"type": "string"},
                 "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
@@ -936,7 +936,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "delete_competition",
-            "Delete one locally stored target competition by its exact competition_id (list_competitions). Use it only when the athlete asks to delete or remove that competition; the server checks that request. Local only, no remote write.",
+            "Delete one locally stored target competition by its exact competition_id (list_competitions). Use it only when the athlete asks to delete or remove that competition; the server checks that request. It writes nothing remotely itself; a linked Intervals.icu event is removed on the next named competition sync (remote_sync_pending).",
             {"competition_id": {"type": "string"}},
         ),
         _canonical_coach_tool(
@@ -1035,11 +1035,11 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "preview_adaptive_replan",
-            "Calculate a preview of adaptive changes to future local workouts without changing anything. Use it to explain a proposed replan and ask whether to apply it; only the athlete's very next message can approve this preview.",
+            "Calculate a preview of adaptive changes to future local workouts without changing workouts; it replaces the pending preview, so call it once per proposal. Use it to explain a proposed replan and ask whether to apply it; only the athlete's very next message can approve this preview.",
         ),
         _canonical_coach_tool(
             "apply_adaptive_replan",
-            "Apply the latest adaptive planning preview (its adjustment_id) to future local workouts. Use it only when the athlete's very next message after the preview clearly asks to apply it; otherwise create a fresh preview. Set sync_illness_to_intervals only when that message names the Intervals.icu sync of the illness pause.",
+            "Apply the latest adaptive planning preview (its adjustment_id) to future local workouts; during an illness pause it also records today's check-in as ill, so name that change. Use it only when the athlete's very next message after the preview clearly asks to apply it; otherwise create a fresh preview. Set sync_illness_to_intervals only when that message names the Intervals.icu sync of the illness pause.",
             {
                 "adjustment_id": {"type": "string"},
                 "sync_illness_to_intervals": {"type": "boolean"},
