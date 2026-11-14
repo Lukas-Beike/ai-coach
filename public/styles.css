@@ -1835,7 +1835,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-adherence [data-band="fair"] { --band: var(--orange); }
 .activity-adherence [data-band="poor"] { --band: var(--danger); }
 .activity-adherence-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
-.activity-adherence-score { padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--band) 16%, transparent); color: var(--band); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.activity-adherence-score { padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--band) 16%, var(--transparent)); color: var(--band); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .activity-adherence-strip { display: flex; gap: 2px; height: 14px; }
 .activity-adherence-strip i { flex-basis: 0; min-width: 3px; border-radius: 3px; background: var(--band); }
 .activity-adherence-strip [data-band="none"] { background: var(--surface-raised); }

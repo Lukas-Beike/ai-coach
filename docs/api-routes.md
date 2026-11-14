@@ -158,7 +158,8 @@ names one session; no body.
 Response: 200 with `ok`, the document (`contract`, `session`, `metrics`,
 `streams`, `laps`, `zones`, `strength_sets`, `analysis`, `detail_data`
 and more, plus `weather` and `route` when stored, and `data_scope`),
-and `session_bundle` (the session's provider copies and merge
+`planned_adherence` for a run or ride with a matched local planned
+unit (each step's time in target, the score and zone times), and `session_bundle` (the session's provider copies and merge
 candidates; null when the session is not live).
 
 Errors: 400 `invalid_activity_request` "Die Aktivität konnte nicht
