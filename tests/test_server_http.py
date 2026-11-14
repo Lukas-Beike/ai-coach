@@ -61,6 +61,29 @@ def _api_route_paths() -> set[str]:
     return paths | {f"{path}/{SAMPLE_ID}" for path in paths}
 
 
+def _request_status(method, path, headers, port):
+    """Status of one request; a socket aborted before the reply is sent once more.
+
+    Under full-suite load on Windows the socket was aborted (WinError 10053)
+    before the status line arrived (#2734). A second attempt keeps every
+    assertion: a handler that ran is still recorded by the caller.
+    """
+    try:
+        return _send_once(method, path, headers, port)
+    except ConnectionAbortedError, ConnectionResetError:
+        return _send_once(method, path, headers, port)
+
+
+def _send_once(method, path, headers, port):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        body = None if method == "GET" else b"{}"
+        connection.request(method, path, body=body, headers=headers)
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
 class ServerHttpTests(ServerTestCase):
     def test_every_api_route_rejects_a_request_without_session(self):
         auth = http_auth.SessionAuthService(
@@ -155,13 +178,9 @@ class ServerHttpTests(ServerTestCase):
                     if access is not None and route.access is not access:
                         continue
                     path = re.sub(r"\{.*?\}", "abc-123", route.path)
-                    connection = http.client.HTTPConnection(
-                        "127.0.0.1", port, timeout=10
+                    found[route.method, path] = _request_status(
+                        route.method, path, headers, port
                     )
-                    body = None if route.method == "GET" else b"{}"
-                    connection.request(route.method, path, body=body, headers=headers)
-                    found[route.method, path] = connection.getresponse().status
-                    connection.close()
             return found
 
         anonymous = {
