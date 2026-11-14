@@ -157,6 +157,11 @@ choice authorizes only that action for that finding. Without an answer, or on a
 noninteractive host, create nothing: report the findings with issue drafts as
 pending decisions.
 
+- **Before filing**, check each finding: it still holds on the current
+  `origin/develop` (re-read the code or rerun the check; drop it if already
+  fixed), and no open or closed issue already covers it (the duplicate search of
+  issue-create plus a `gh issue list --state all --search` on its key terms);
+  comment on a found issue instead of filing a new one.
 - **New issue**: file it with [issue-create](../pacecraft-issue-create/SKILL.md)
   (duplicate search, title rule) and `--label retro`, as every issue a retro
   opens, including one for a fix in this session; link a found duplicate
