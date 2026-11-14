@@ -64,9 +64,9 @@ first-level `AGENTS.md` files outside `public/`. Shard 1 then runs
 `--changed --base HEAD^1 --with-heavy` (slow tooling modules stay in when
 selected) and the Node unit tests, the other shards report without tests, and
 the container, browser and quality jobs are skipped; the image with its SBOM
-and the syntax check (shard 1) still run. The `test` and `Browser checks` aggregates print "docs-only: suites
-skipped". Push, release and dispatch runs never classify and always run
-everything. Before this, a docs-only PR ran all 17 jobs like any other PR
+and the syntax check (shard 1) still run. The `test` and `Browser checks`
+aggregates print "docs-only: suites skipped". Push, release and dispatch runs
+never classify and always run everything. Before this, a docs-only PR ran all 17 jobs like any other PR
 (median PR run 11.9 min, p90 18.1 min over 31 runs on 2026-11-13). The first
 docs-only run (#2760, run 43569747387) took 1.3 min: 10 of 14 jobs ran, shard 1
 ran 144 affected Python tests and 594 Node tests.

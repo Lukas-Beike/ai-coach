@@ -128,7 +128,7 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 
 #### Scenario: SBOM
 - **WHEN** SBOM generation fails once
-- **THEN** it is retried once after 30 seconds, and a second failure fails the required aggregate
+- **THEN** it is retried once after 30 seconds, and a second failure fails the image job, so its consumers and the required aggregates fail
 
 #### Scenario: Run cancellation
 - **WHEN** a push, release or dispatch run is in progress
@@ -146,7 +146,7 @@ Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `sourc
 
 ### Requirement: Immutable release source and version agreement
 
-Release publication SHALL resolve immutable tested source, require a release tag matching APP_VERSION on protected-main ancestry, and verify the source/version contract again before pushing the tested image. The published image SHALL be the image the test, browser and SBOM jobs used, never a rebuild.
+Release publication SHALL resolve immutable tested source, require a release tag matching APP_VERSION on protected-main ancestry, and verify the source/version contract again before pushing the tested image. The published image SHALL be the image the test and browser jobs used and the image job described in its SBOM, never a rebuild.
 
 #### Scenario: Version or tag mismatch
 - **WHEN** a requested release tag, tested source and APP_VERSION do not identify the required release

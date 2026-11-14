@@ -277,7 +277,7 @@ class WorkflowSourceTests(unittest.TestCase):
         image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
         self.assertIn("docker build --tag pacecraft:ci\n", image)
         self.assertIn("needs: source\n", image)
-        upload = image.split("actions/upload-artifact@", 1)[1]
+        upload = image.split("actions/upload-artifact@", 1)[1].split("- name:", 1)[0]
         self.assertIn("name: pacecraft-ci-image", upload)
         self.assertIn("retention-days: 1", upload)
         consumers = {
@@ -297,6 +297,10 @@ class WorkflowSourceTests(unittest.TestCase):
                 self.assertIn("gunzip -c pacecraft-ci-image.tar.gz | docker load", text)
                 self.assertNotIn("docker build", text)
         # The SBOM describes the image the same job built (#2750), after its upload.
+        self.assertLess(
+            image.index("- name: Upload shared CI image\n"),
+            image.index("- name: Generate SPDX SBOM\n"),
+        )
         sbom = image.split("- name: Generate SPDX SBOM\n", 1)[1]
         self.assertIn("image: pacecraft:ci", sbom)
         self.assertIn("name: pacecraft-sbom", sbom)
