@@ -151,12 +151,18 @@ def plan_line(result: dict[str, Any]) -> tuple[str, str]:
 def comparison_lines(
     result: dict[str, Any], previous: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
-    """Record counts must not drop against the previous result; memory is shown."""
+    """Record counts must not drop against the previous result; memory is shown.
+
+    The calendar sync refills external_calendar_events from today on every
+    refresh, so a drop there is no data loss.
+    """
     before = (previous or {}).get("counts") or {}
     lines = []
     for name, count in result["counts"].items():
         old = before.get(name)
-        if isinstance(count, int) and isinstance(old, int):
+        if name == "external_calendar_events":
+            lines.append(("info", f"count {name} {old} -> {count}"))
+        elif isinstance(count, int) and isinstance(old, int):
             lines.append(mark(count >= old, f"count {name} {old} -> {count}"))
         else:
             lines.append(("info", f"count {name} {count}"))
