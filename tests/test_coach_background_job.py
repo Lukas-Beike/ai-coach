@@ -23,6 +23,7 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         self.chat.run.return_value = {
             "status": "completed",
             "message": {"content": "synthetic"},
+            "session_key": "must-not-leave-server",
         }
         self.sessions = Mock()
         self.sessions.restore_coach_session_csrf_hash.return_value = "synthetic-session"
@@ -93,6 +94,7 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
             ).get_nowait()
             self.assertEqual(event, "completed")
             self.assertEqual(receipt["message"]["content"], "synthetic")
+            self.assertNotIn("session_key", receipt)
         finally:
             self.streams.unregister("synthetic-session", operation_id)
 
@@ -289,12 +291,20 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         for reached in (False, True):
             with self.subTest(reached=reached):
                 self.chat.run.reset_mock()
+                self.jobs.merge_receipt.reset_mock()
                 session = f"synthetic-session-{reached}"
                 self.sessions.restore_coach_session_csrf_hash.return_value = session
                 operation_id, _ = self.streams.register(session)
 
                 self.runner.run(self.job(operation_id, openai_reached=reached))
 
+                # A checkpointed phase is not reset to "preparing".
+                self.jobs.merge_receipt.assert_called_once_with(
+                    "synthetic-turn",
+                    {"status": "running"}
+                    if reached
+                    else {"status": "running", "phase": "preparing"},
+                )
                 publish = self.chat.run.call_args.kwargs["on_text_delta"]
                 if reached:
                     # The first attempt may have shown text already.
