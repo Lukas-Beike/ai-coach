@@ -22,6 +22,7 @@ from backend.activities.session_linking import (
     split_unmatched_sessions,
 )
 from backend.canonical.garmin_payload import DEDICATED_ACTIVITY_SECTIONS
+from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import ObservationScope, WriteOutcome
@@ -177,6 +178,8 @@ def ingest_plan(
             fetched_at=_fetched_at(raw.retrieved_at, stamp),
             now=stamp,
             observed_on=raw.observed_on,
+            # Garmin re-projects with the latest delivery time (#2782).
+            refresh_fetched_at=plan.provider is ProviderId.GARMIN,
         )
     for activity in plan.activities:
         counters.count(
@@ -198,14 +201,21 @@ def ingest_plan(
         scopes=observation_scopes(plan),
         now=stamp,
     )
-    seen_keys: set[str] = set()
+    # Natural-key collisions inside one payload: the first wins, later ones are
+    # skipped. Two ranked Garmin sections are left to the store, which decides
+    # them by the one rule the re-projection follows (#2782).
+    seen_keys: set[tuple[str, str | None]] = set()
     for item in plan.observations:
-        # Natural-key collisions inside one payload: the first wins, later ones are skipped.
-        natural_key = canonical_store.observation_natural_key(item.observation)
-        if natural_key in seen_keys:
+        slot = (
+            canonical_store.observation_natural_key(item.observation),
+            canonical_store.rank_section(
+                item.owner, item.observation.provenance.source_record_id, item.ranks
+            ),
+        )
+        if slot in seen_keys:
             counters.skipped_invalid += 1
             continue
-        seen_keys.add(natural_key)
+        seen_keys.add(slot)
         counters.count(
             canonical_store.upsert_observation(
                 db,
@@ -214,6 +224,7 @@ def ingest_plan(
                 now=stamp,
                 fill_only=item.fill_only,
                 owner=item.owner,
+                ranks=item.ranks,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}

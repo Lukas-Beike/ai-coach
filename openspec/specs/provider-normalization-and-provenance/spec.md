@@ -590,6 +590,10 @@ The system SHALL store one observation row per natural key `provider|metric|spor
 - **WHEN** a fill-only observation (Garmin `performance_history`) meets an active row that another source record wrote at the same or a newer mapper version
 - **THEN** the stored row stays; the fill-only value only inserts, updates its own row, revives a retired row or replaces a row left at an older mapper version.
 
+#### Scenario: Two Garmin sections with one key
+- **WHEN** a Garmin health observation meets an active row of the same natural key that another source record wrote at the same or a newer mapper version
+- **THEN** a fill-only history value loses to any other section; otherwise the later retrieval wins, then the section that comes first in the Garmin section order (for example `readiness` before `training_readiness_history`, `cycling_ftp` before `cycling_ftp_history`), in the live ingest and the re-projection alike, so a re-projection reproduces the live rows; a Garmin raw record delivered again unchanged keeps its row and takes the later fetch time.
+
 #### Scenario: Local per-session value
 - **WHEN** a locally derived per-session kind (session load, intensity factor, efficiency factor, variability index, mechanical work, aerobic decoupling, the five activity weather kinds) is stored without a provider
 - **THEN** its series is `session:<session id>`, so two sessions with the same sport and start keep separate rows.
@@ -618,6 +622,10 @@ Evidence:
 - `tests/test_canonical_domain_store.py:test_a_provider_replace_keeps_local_configurations`
 - `tests/test_canonical_domain_store.py:test_a_row_another_source_record_emits_moves_to_that_record`
 - `tests/test_canonical_ingest.py:test_duplicate_natural_keys_keep_the_first_and_count_the_rest`
+- `backend/providers/canonical_plans.py:GARMIN_SECTION_RANKS`
+- `tests/test_canonical_backfill.py:test_reprojection_keeps_the_dedicated_section_of_a_shared_key`
+- `tests/test_canonical_store.py:test_same_payload_and_version_is_unchanged_and_not_rewritten`
+- `tests/test_garmin_performance_history_canonical.py:test_the_history_reprojects_to_the_pinned_observations_and_context`
 - `tests/test_canonical_store.py:test_natural_key_uses_provider_metric_sport_and_observation_time`
 - `tests/test_garmin_performance_history_canonical.py:test_history_refills_a_day_whose_dedicated_row_is_outdated`
 - `tests/test_garmin_performance_history_canonical.py:test_the_dedicated_ftp_of_a_day_survives_the_next_sync`

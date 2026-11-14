@@ -108,6 +108,15 @@ GARMIN_ACTIVITIES_SECTION: Final = "activities"
 # Dedicated training-load rows merged into the activities before they are stored.
 GARMIN_TRAINING_LOAD_SECTION: Final = "training_load_activities"
 GARMIN_WEIGHT_SECTION: Final = "weight"
+# The rank of each Garmin health section on a natural key two sections share,
+# in ``GARMIN_HEALTH_SECTION_NAMES`` order (the order the live ingest keeps inside
+# one payload); the weight aliases share the weight section's rank, and the
+# last-ranked section is the fill-only performance history (#2782).
+GARMIN_SECTION_RANKS: Final[Mapping[str, int]] = {
+    alias: rank
+    for rank, name in enumerate(GARMIN_HEALTH_SECTION_NAMES)
+    for alias in (WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,))
+}
 GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
 GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
 GARMIN_MORNING_ATTEMPTED_AT_KEY: Final = "attempted_at"
@@ -152,6 +161,9 @@ class ObservationItem:
     # Source record id of the raw record whose projection emits the observation,
     # or None when that is not known exactly; an unowned row is never retired.
     owner: str | None = None
+    # The rank of each section of the provider on a shared natural key
+    # (``GARMIN_SECTION_RANKS``); None leaves the key's precedence to the writer.
+    ranks: Mapping[str, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,6 +497,7 @@ def _garmin_section_observations(
                 GARMIN_HEALTH_VERSION,
                 fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
                 owner=owner,
+                ranks=GARMIN_SECTION_RANKS,
             )
 
 
@@ -870,6 +883,7 @@ def _reprojected_health(
                 GARMIN_HEALTH_VERSION,
                 fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
                 owner=section_name,
+                ranks=GARMIN_SECTION_RANKS,
             )
             for observation in health.records
         ),

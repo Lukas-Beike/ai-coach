@@ -499,8 +499,8 @@ class HistoryReprojectionGoldenTests(unittest.TestCase):
     day to day, so the accumulated ``performance_history`` is the only stored
     record of earlier days. The golden file pins the stored history rows, the
     provider charts, every canonical Garmin observation and the Coach's Garmin
-    context after the live ingest, and how a forced re-projection of the stored
-    raw records differs from it.
+    context after the live ingest; a forced re-projection of the stored raw
+    records must reproduce them exactly (#2782).
     """
 
     def setUp(self) -> None:
@@ -611,18 +611,10 @@ class HistoryReprojectionGoldenTests(unittest.TestCase):
 
         self.assertEqual(rows["raw_records"], ingested["raw_records"])
         self.assertEqual(rows["raw_records_sha256"], ingested["raw_records_sha256"])
-        # The re-projection is pinned by how it differs from the live ingest.
-        before, after = set(ingested["observations"]), set(rows["observations"])
-        reprojected = {
-            "observations_removed": sorted(before - after),
-            "observations_added": sorted(after - before),
-            "coach_context_changed": sorted(
-                key
-                for key, value in context.items()
-                if value != ingested["coach_context"][key]
-            ),
-            "coach_context": _digests(context),
-        }
+        # The re-projection equals the live ingest (#2782): every observation,
+        # with its owner and provenance, and the Coach context.
+        self.assertEqual(rows["observations"], ingested["observations"])
+        self.assertEqual(context, ingested["coach_context"])
         actual = json.loads(
             json.dumps(
                 {
@@ -635,7 +627,6 @@ class HistoryReprojectionGoldenTests(unittest.TestCase):
                             "performance_history"
                         ],
                     },
-                    "reprojected": reprojected,
                 },
                 sort_keys=True,
                 default=str,

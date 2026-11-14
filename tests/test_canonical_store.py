@@ -39,6 +39,7 @@ from backend.canonical.vocabulary import (
 from backend.db import canonical_store
 from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
+from backend.providers import canonical_plans
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
@@ -165,7 +166,15 @@ class CanonicalJsonTests(unittest.TestCase):
 
 
 class ProviderRecordStoreTests(StoreFixture):
-    def write(self, payload: dict[str, Any], *, version: int = 1, now: str = STAMP):
+    def write(
+        self,
+        payload: dict[str, Any],
+        *,
+        version: int = 1,
+        now: str = STAMP,
+        fetched_at: str = STAMP,
+        refresh: bool = False,
+    ):
         return canonical_store.upsert_provider_record(
             self.db,
             provider="intervals",
@@ -173,8 +182,9 @@ class ProviderRecordStoreTests(StoreFixture):
             source_record_id="rec-1",
             payload=payload,
             mapper_version=version,
-            fetched_at=STAMP,
+            fetched_at=fetched_at,
             now=now,
+            refresh_fetched_at=refresh,
         )
 
     def test_new_record_is_written_with_its_hash_and_version(self) -> None:
@@ -190,6 +200,25 @@ class ProviderRecordStoreTests(StoreFixture):
         self.write({"name": "Ride"})
         self.assertIs(self.write({"name": "Ride"}, now=LATER), WriteOutcome.UNCHANGED)
         self.assertEqual(self.one("SELECT updated_at FROM provider_records")[0], STAMP)
+        # Without the refresh (Wahoo, Intervals.icu) the first fetch time stays.
+        self.write({"name": "Ride"}, now=LATER, fetched_at=LATER)
+        self.assertEqual(self.one("SELECT fetched_at FROM provider_records")[0], STAMP)
+        # A later Garmin delivery of the same payload takes only its fetch time, so
+        # a re-projection stamps the time the live ingest stamped; an earlier one
+        # never moves it back (#2782).
+        for fetched_at in (LATER, STAMP):
+            self.assertIs(
+                self.write(
+                    {"name": "Ride"}, now=LATER, fetched_at=fetched_at, refresh=True
+                ),
+                WriteOutcome.UNCHANGED,
+            )
+        self.assertEqual(
+            tuple(
+                self.one("SELECT payload, updated_at, fetched_at FROM provider_records")
+            ),
+            ('{"name":"Ride"}', STAMP, LATER),
+        )
 
     def test_changed_payload_is_updated_in_place(self) -> None:
         self.write({"name": "Ride"})
@@ -308,6 +337,71 @@ class ObservationStoreTests(StoreFixture):
         return canonical_store.upsert_observation(
             self.db, item, mapper_version=2, now=now
         )
+
+    def test_a_shared_garmin_key_follows_one_order(self) -> None:
+        # #2782: the fill-only history loses to any section, then the later
+        # retrieval wins, then the earlier section; within one section the later
+        # write wins (a replaced element hands its row to its successor).
+        later = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
+        cases = (
+            (
+                "readiness/D",
+                RETRIEVED_AT,
+                "training_readiness_history/D",
+                RETRIEVED_AT,
+                81.0,
+            ),
+            (
+                "training_readiness_history/D",
+                RETRIEVED_AT,
+                "readiness/D",
+                RETRIEVED_AT,
+                66.0,
+            ),
+            ("readiness/D", RETRIEVED_AT, "training_readiness_history/D", later, 66.0),
+            ("performance_history/D", later, "readiness/D", RETRIEVED_AT, 66.0),
+            ("readiness/D", RETRIEVED_AT, "readiness/D#1", RETRIEVED_AT, 66.0),
+            (None, RETRIEVED_AT, "training_readiness_history/D", RETRIEVED_AT, 81.0),
+        )
+        ranks = canonical_plans.GARMIN_SECTION_RANKS
+        for first, first_at, second, second_at, kept in cases:
+            with self.subTest(first=first, second=second):
+                self.db.execute("DELETE FROM observations")
+                for owner, retrieved_at, value in (
+                    (first, first_at, 81.0),
+                    (second, second_at, 66.0),
+                ):
+                    section = (owner or "readiness/D").partition("/")[0]
+                    item = observation(
+                        value,
+                        kind=MetricKind.READINESS,
+                        provider=ProviderId.GARMIN,
+                        source_record_id=f"{section}:{owner}",
+                    )
+                    canonical_store.upsert_observation(
+                        self.db,
+                        replace(
+                            item,
+                            provenance=replace(
+                                item.provenance, retrieved_at=retrieved_at
+                            ),
+                        ),
+                        mapper_version=2,
+                        now=STAMP,
+                        owner=owner,
+                        ranks=ranks,
+                    )
+                self.assertEqual(self.one("SELECT value FROM observations")[0], kept)
+        # Without ranks (every other provider) the later write replaces the row.
+        self.db.execute("DELETE FROM observations")
+        for value in (81.0, 66.0):
+            canonical_store.upsert_observation(
+                self.db,
+                observation(value, source_record_id=f"rec-{value}"),
+                mapper_version=2,
+                now=STAMP,
+            )
+        self.assertEqual(self.one("SELECT value FROM observations")[0], 66.0)
 
     def test_natural_key_uses_provider_metric_sport_and_observation_time(self) -> None:
         by_day = observation(source_record_id="2026-10-01")
