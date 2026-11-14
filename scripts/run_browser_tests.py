@@ -7,7 +7,9 @@ traces are disabled. Durations v1: {version:1, environment:{}, projects:{project
 
 from __future__ import annotations
 
+import _thread
 import argparse
+import ctypes
 import hashlib
 import inspect
 import json
@@ -33,6 +35,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
+# The runner's process id: a later run or --cleanup-stale removes the
+# containers of a runner that was killed before its own cleanup (#2721).
+OWNER_LABEL = LABEL + ".owner"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 # The fixture's other fake credential (e2e/fixture_runtime.py); redacted like the password.
 FAKE_OPENAI_KEY = "e2e-fixture-openai-key"
@@ -539,6 +544,8 @@ class Containers:
                     name,
                     "--label",
                     LABEL + "=" + self.run_id,
+                    "--label",
+                    f"{OWNER_LABEL}={os.getpid()}",
                     "--cidfile",
                     str(cidfile),
                     *arguments,
@@ -600,6 +607,66 @@ class Containers:
             except RunnerError, OSError:
                 errors.append("Owned container cleanup failed")
         return errors
+
+
+def process_alive(pid):
+    """Whether a local process id is running; unsure answers count as alive."""
+    if pid <= 0:
+        return True
+    if sys.platform == "win32":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # query limited information
+        if not handle:
+            return ctypes.get_last_error() != 87  # 87: no such process
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_stale(processes):
+    """Remove the labelled containers whose runner process is gone (#2721).
+
+    Only containers carrying an owner process id are considered; another
+    running lane's containers and those of older runners are never touched.
+    """
+    rows = checked(
+        processes,
+        ["docker", "ps", "-a", "--filter", f"label={OWNER_LABEL}", "--format",
+         "{{.ID}} {{.Label \"" + OWNER_LABEL + "\"}}"],
+    )  # fmt: skip
+    stale = []
+    for row in rows.splitlines():
+        cid, _, owner = row.strip().partition(" ")
+        if (
+            re.fullmatch(r"[a-f0-9]{12,64}", cid)
+            and owner.isdigit()
+            and int(owner) != os.getpid()
+            and not process_alive(int(owner))
+        ):
+            stale.append(cid)
+    for cid in stale:
+        checked(processes, ["docker", "rm", "--force", cid])
+    return len(stale)
+
+
+def watch_parent(stop, parent, interval=2.0):
+    """Interrupt the run once the process that started it is gone (#2721)."""
+    while not stop.wait(interval):
+        if not process_alive(parent):
+            stop.set()
+            _thread.interrupt_main()
+            return
 
 
 def image_identity(processes, image):
@@ -1235,6 +1302,11 @@ def parser():
         action="store_true",
         help="resolve identical selection without Docker/browser fixtures",
     )
+    result.add_argument(
+        "--cleanup-stale",
+        action="store_true",
+        help="only remove the containers of browser runs whose runner is gone",
+    )
     return result
 
 
@@ -1270,6 +1342,10 @@ def main(argv=None):
     if args.print_image:
         print(args.image)
         return 0
+    if args.cleanup_stale:
+        removed = sweep_stale(Processes())
+        print(f"Removed {removed} container(s) of stopped browser runs")
+        return 0
     if not args.project:
         parser().error("--project is required")
     run_id = uuid.uuid4().hex
@@ -1292,6 +1368,9 @@ def main(argv=None):
 
     for number in (signal.SIGINT, signal.SIGTERM):
         old_handlers[number] = signal.signal(number, interrupt)
+    threading.Thread(
+        target=watch_parent, args=(processes.stop, os.getppid()), daemon=True
+    ).start()
     code, containers = 1, None
     try:
         with tempfile.TemporaryDirectory(
@@ -1366,6 +1445,7 @@ def main(argv=None):
                     code = 0
                 else:
                     with evidence.phase("prerequisites"):
+                        evidence.update(stale_containers_removed=sweep_stale(processes))
                         image = image_identity(processes, args.image)
                         current = image_matches_source(
                             processes, containers, image, ROOT
