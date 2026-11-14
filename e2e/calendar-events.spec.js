@@ -3,12 +3,13 @@ const AxeBuilder = require("@axe-core/playwright").default;
 const { showCalendarDay } = require("./helpers/ui");
 const { openCalendar } = require("./helpers/calendar");
 
-// Fake personal events around tomorrow: one per impact, a weekly series and a title marker.
+// Fake personal events on the next Tuesday, so the checked day and the one after share a week
+// on any weekday (#2708): one per impact, a weekly series and a title marker.
 async function renderEvents(page) {
   return page.evaluate(() => {
     const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
-    const day = addDateKey(today, 1);
-    const week = addDateKey(today, 8);
+    const day = addDateKey(today, (9 - dateFromKey(today).getDay()) % 7 || 7);
+    const week = addDateKey(day, 7);
     const event = (uid, start, end, impact, extra = {}) => ({
       uid, name: uid, start_local: `${start}`, end_local: `${end}`, event_date: start.slice(0, 10), all_day: 0,
       impact, decision_scope: impact === "open" ? null : "event", recurring: 0, ...extra,
@@ -41,8 +42,6 @@ test("@responsive personal events show as a band and take a decision per event o
   await expect(chips.filter({ hasText: "Zahnarzt" })).toHaveAttribute("data-impact", "short");
   await expect(chips.filter({ hasText: "Zahnarzt" })).not.toContainText("SHORT_ONLY");
   await expect(chips.filter({ hasText: "Dienstreise" })).toContainText("ganztägig");
-  // An event that began before today shows from today on only.
-  expect(await page.evaluate((today) => [...plannedEventsByDate(today).keys()].every((day) => day >= today), days.today)).toBe(true);
   // A multi-day event shows on each of its days but not on its end day at midnight.
   await expect(page.locator(`.planned-day[data-date="${days.after}"] .planned-event-chip`)).toHaveCount(1);
   // The band replaces the calendar note line for the day.
@@ -139,10 +138,30 @@ test("a blocked event marks its day in the month view", async ({ page, request }
   await openCalendar(page, request);
   const days = await renderEvents(page);
   await page.locator(".planned-view-switch [data-view='month']").click();
+  await page.evaluate((day) => selectPlannedDay(day), days.day);
   const cell = page.locator(`.planned-month-day[data-date="${days.day}"]`);
   await expect(cell).toHaveClass(/has-blocked-event/);
   await expect(cell).toHaveAccessibleName(/Termin blockiert Training/);
   await expect(page.locator(`.planned-month-day[data-date="${addDays(days.day, -1)}"]`)).not.toHaveClass(/has-blocked-event/);
+});
+
+test("@responsive the band holds on every weekday", async ({ page, request }) => {
+  await openCalendar(page, request);
+  // Monday 2026-11-16 to Sunday 2026-11-22, noon in the athlete's time zone.
+  for (let offset = 0; offset < 7; offset += 1) {
+    await page.clock.setFixedTime(new Date(Date.UTC(2026, 10, 16 + offset, 11)));
+    const days = await renderEvents(page);
+    await showCalendarDay(page, days.day);
+    await expect(page.locator(`.planned-day[data-date="${days.day}"] .planned-event-chip`), days.today).toHaveCount(5);
+    await expect(page.locator(`.planned-day[data-date="${days.after}"] .planned-event-chip`), days.today).toHaveCount(1);
+    // An event that began before today ("Urlaub") shows from today on only, in the rendered week.
+    await showCalendarDay(page, days.today);
+    await expect(page.locator(`.planned-day[data-date="${days.today}"] .planned-event-chip`).filter({ hasText: "Urlaub" }), days.today).toHaveCount(1);
+    const pastChips = await page.locator(".planned-day").evaluateAll((sections, today) => sections
+      .filter((section) => section.dataset.date < today)
+      .reduce((count, section) => count + section.querySelectorAll(".planned-event-chip").length, 0), days.today);
+    expect(pastChips, days.today).toBe(0);
+  }
 });
 
 function addDays(key, offset) {
