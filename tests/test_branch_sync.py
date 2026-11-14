@@ -132,6 +132,18 @@ class BranchSyncTests(unittest.TestCase):
         )
         self.assertTrue((self.work / "hook-ran").exists())
 
+        (hooks / "pre-push").write_text(
+            "#!/bin/sh\necho 'Push blocked: the quality ratchet could not run' >&2\nexit 1\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        git(self.work, "commit", "-q", "-am", "chore: refusing hook")
+        with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):
+            code, _, err = self.sync("--push")
+        self.assertEqual(code, 2)
+        self.assertIn("failed to push", err)
+        self.assertIn("Push blocked: the quality ratchet could not run", err)
+
     def test_push_keeps_remote_work_the_branch_has_not_seen(self):
         commit(self.work, "c.txt", "1\n", "feat(ui): add c")
         git(self.work, "push", "-q", "-u", "origin", "feat/x")
