@@ -18,6 +18,7 @@ from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.sync import garmin_metric_history
+from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 
 # The sections the history records, read as the current Garmin metrics read them.
 _CURRENT_SECTIONS: Final = (
@@ -79,11 +80,15 @@ def current_garmin_metrics(
         )
     )
     current = garmin_performance_metrics(status, current_date, canonical)
+    # The newest readiness record counts even without a usable score, so an
+    # older day's score never stands in for it.
+    newest = garmin_source_observed_at(payload.get("readiness"))
     readiness = canonical.performance_history.get("readiness", {})
+    value = readiness.get(date.fromisoformat(newest)) if newest else None
     current["readiness"] = performance_freshness.garmin_metric_freshness(
         status,
         "readiness",
-        {"value": provider_number(readiness[max(readiness)]) if readiness else None},
+        {"value": None if value is None else provider_number(value)},
         current_date,
     )
     return current

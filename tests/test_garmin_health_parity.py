@@ -528,7 +528,7 @@ class NamedDeviationTests(unittest.TestCase):
             ),
             ("A5", "readiness", {"score": "7,5"}, "readiness", 7.5, None),
             ("A6", "heart_rate_zones", zone_sets, "cycling_max_hr_bpm", 189, 195),
-            ("B1a", "readiness", mixed_readiness, "readiness", 72, 61),
+            ("B1a", "readiness", mixed_readiness, "readiness", 72, None),
             ("B1b", "readiness", nested_readiness, "readiness", 66, None),
             (
                 "B1c",

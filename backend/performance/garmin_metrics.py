@@ -15,6 +15,7 @@ from backend.performance.activity_validation import bounded_performance_metric
 from backend.performance.current_metrics import metric as _metric
 from backend.performance.garmin_canonical import (
     ACTIVITY_MAX_HR_CATEGORIES,
+    RACE_PREDICTION_KEYS,
     GarminCanonicalMetrics,
     profile_max_hr_for,
 )
@@ -25,12 +26,6 @@ GARMIN_PERFORMANCE_SOURCE = provider_label(
 )
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 _VO2MAX_UNIT = "ml/kg/min"
-RACE_PREDICTION_KEYS = (
-    "run_5k_seconds",
-    "run_10k_seconds",
-    "run_half_marathon_seconds",
-    "run_marathon_seconds",
-)
 
 
 def _garmin_canonical_thresholds(
@@ -201,7 +196,7 @@ def _garmin_performance_freshness(
     return metrics
 
 
-def assemble_garmin_metrics(
+def _assemble_garmin_metrics(
     status: performance_freshness.GarminSyncStatus,
     current_date: date,
     weight: dict[str, Any],
@@ -273,9 +268,9 @@ def garmin_performance_metrics(
     the activity max heart rate fallback come from ``canonical``; ``status``
     supplies only the freshness.
     """
-    races: dict[str, float | int | None] = dict.fromkeys(RACE_PREDICTION_KEYS)
+    races: dict[str, float | int | None] = dict.fromkeys(RACE_PREDICTION_KEYS.values())
     races.update(canonical.race_predictions)
-    return assemble_garmin_metrics(
+    return _assemble_garmin_metrics(
         status,
         current_date,
         {"value": canonical.weight_kg},
