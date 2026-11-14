@@ -978,42 +978,28 @@ class ReleaseSourceTests(unittest.TestCase):
 
     def test_read_only_release_pr_version_must_match_application(self):
         self.commit("1.7.3")
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(
-                    Path(__file__).resolve().parents[1]
-                    / ".github/scripts/release_source.py"
-                ),
-                "--source",
-                "develop",
-                "--expected-version",
-                "1.7.3",
-            ],
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            check=False,
+        script = (
+            Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py"
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        mismatch = subprocess.run(
-            [
-                sys.executable,
-                str(
-                    Path(__file__).resolve().parents[1]
-                    / ".github/scripts/release_source.py"
-                ),
-                "--source",
-                "develop",
-                "--expected-version",
-                "1.7.4",
-            ],
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertNotEqual(mismatch.returncode, 0)
+        # #2814: a release PR's own run takes the version from its head branch.
+        for extra, head_ref, passes in (
+            (["--expected-version", "1.7.3"], "", True),
+            (["--expected-version", "1.7.4"], "", False),
+            ([], "chore/release-version-1.7.3", True),
+            ([], "chore/release-version-1.7.4", False),
+            ([], "chore/release-promotion-1.7.4", False),
+            ([], "feat/release-version-1.7.4", True),  # not a release branch
+        ):
+            with self.subTest(extra=extra, head_ref=head_ref):
+                result = subprocess.run(
+                    [sys.executable, str(script), "--source", "develop", *extra],
+                    cwd=self.root,
+                    env={**os.environ, "GITHUB_HEAD_REF": head_ref},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode == 0, passes, result.stderr)
 
     def test_release_rejects_commit_outside_main(self):
         self.commit("1.7.3")
