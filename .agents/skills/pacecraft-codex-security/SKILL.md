@@ -1,9 +1,9 @@
 ---
 name: pacecraft-codex-security
-description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Pacecraft security boundaries.
+description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Pacecraft security boundaries. Use only when the user explicitly asks for a Codex Security scan or a security review of a code change; not for ordinary PR reviews (code-review).
 ---
 
-Use for an explicitly requested Codex Security scan or security review of a code change. This is a local workflow; do not add GitHub Actions integration or require an API key.
+This is a local workflow; do not add GitHub Actions integration or require an API key.
 
 - Use the installed Codex Security plugin when available. For the CLI, authenticate with the ChatGPT account using `npx @openai/codex-security login`, then pass `--auth chatgpt` to every scan. Never fall back to `OPENAI_API_KEY` or `CODEX_API_KEY`; report the scan as blocked if ChatGPT authentication is unavailable.
 - For a CLI scan, use `npx @openai/codex-security scan <safe-path> --auth chatgpt --mode standard --effort high --output-dir <outside-repo-path>`. Use `--working-tree` for staged and unstaged local changes, or `--diff <base-ref>` for a committed change set.

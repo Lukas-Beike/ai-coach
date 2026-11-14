@@ -1,6 +1,6 @@
 ---
 name: orchestrated-plan-implementation
-description: Use when considering subagents or parallel workers for repository work. Default to the main model; delegate only for a clear, cost-effective benefit, using the fixed Claude/Gemini tiers and the repository agent definitions. The main model reviews and alone integrates worker results.
+description: Decide whether repository work stays with the main model or goes to subagents or parallel workers; delegate only for a clear, cost-effective benefit, using the fixed Claude/Gemini tiers and the repository agent definitions. The main model reviews and alone integrates worker results. Use when considering a subagent, a parallel worker or a delegate for repository work.
 license: MIT adaptations; see ../THIRD_PARTY.md.
 ---
 

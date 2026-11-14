@@ -1,6 +1,6 @@
 ---
 name: pacecraft-skill-evaluation
-description: Use only when the user explicitly asks to evaluate repository skills behaviorally (trigger quality, workflow usefulness) or to create a new skill. Ordinary skill edits do not need it. Do not use for application changes, general benchmarks, or installing app plugins.
+description: Evaluate repository skills behaviorally (trigger quality, workflow usefulness) with the synthetic case catalogue, and author new skills. Use only when the user explicitly asks for a skill evaluation or a new skill; ordinary skill edits do not need it. Do not use for application changes, general benchmarks, or installing app plugins.
 license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 ---
 

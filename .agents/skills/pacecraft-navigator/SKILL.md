@@ -1,9 +1,7 @@
 ---
 name: pacecraft-navigator
-description: Locate the smallest relevant ai-coach files and request flows before code changes or diagnosis.
+description: Locate the smallest relevant ai-coach files and request flows before code changes or diagnosis. Use for unfamiliar tasks that span Coach, providers, sync, planning, HTTP, persistence, or PWA code.
 ---
-
-Use for unfamiliar ai-coach tasks that span Coach, providers, sync, planning, HTTP, persistence, or PWA code.
 
 - Start with `AGENTS.md` in scope, then search named symbols with `rg`.
 - Use the root AGENTS domain map to find the cohesive `backend/` owner. Inspect `server.py` for wiring and affected legacy callers without treating legacy ownership as a precedent for new logic.
