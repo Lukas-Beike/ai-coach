@@ -54,10 +54,15 @@ class IssueStatusTests(unittest.TestCase):
             6: "Closes #123",
             7: "Part of #1",
             8: None,
+            9: "_Part of #12_",
+            10: "Suffixes #12",
         }
         pulls = [{"number": n, "body": body} for n, body in bodies.items()]
-        linked = issue_status.linked_pulls(pulls, 12)
-        self.assertEqual([pull["number"] for pull in linked], [1, 2, 3, 4])
+        calls = []
+        linked = issue_status.linked_pulls(12, lambda *a: calls.append(a) or pulls)
+        self.assertEqual([pull["number"] for pull in linked], [1, 2, 3, 4, 9])
+        # the default 30 results could hide an older linked PR
+        self.assertIn("1000", calls[0])
 
     def test_empty_body_has_no_checkboxes(self):
         self.assertEqual(issue_status.open_checkboxes(None), [])

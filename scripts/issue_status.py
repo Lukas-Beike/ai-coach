@@ -3,7 +3,7 @@
 Run before reporting an issue as done: `python scripts/issue_status.py 1906`.
 Exit code 1 means the issue is not done yet (open checkboxes or open PRs);
 open boxes under an acceptance-criteria heading do not count. A PR links the
-issue only with `Closes`, `Fixes`, `Resolves` or `Part of #n`; a mention does not.
+issue only with a closing keyword or `Part of #n`; a mention does not.
 """
 
 import json
@@ -42,20 +42,29 @@ def open_checkboxes(body):
     return [m[1].strip() for m in open_boxes(body)[0]]
 
 
-def linked_pulls(pulls, number):
-    """The PRs whose body closes or is part of issue `number`, not a mere mention."""
-    link = re.compile(
-        rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part\s+of):?\s+#{number}(?!\d)",
-        re.IGNORECASE,
-    )
-    return [pull for pull in pulls if link.search(pull.get("body") or "")]
-
-
 def gh_json(*args):
     output = subprocess.run(
         ["gh", *args], capture_output=True, text=True, check=True
     ).stdout
     return json.loads(output or "null")
+
+
+def linked_pulls(number, query=gh_json):
+    """The PRs whose body closes or is part of issue `number`, not a mere mention.
+
+    A closing keyword in any form GitHub acts on (close, closes, closed, fix ...)
+    or `Part of`, then `#number` and no further digit.
+    """
+    pulls = query(
+        "pr", "list", "--state", "all", "--search", f"#{number} in:body",
+        "--limit", "1000", "--json", "number,state,title,body",
+    )  # fmt: skip
+    link = re.compile(
+        r"(?<![a-z0-9])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part\s+of)"
+        rf":?\s+#{number}(?!\d)",
+        re.IGNORECASE,
+    )
+    return [pull for pull in pulls if link.search(pull.get("body") or "")]
 
 
 def main(argv):
@@ -69,17 +78,7 @@ def main(argv):
         print("usage: python scripts/issue_status.py <issue-number>", file=sys.stderr)
         return 2
     issue = gh_json("issue", "view", number, "--json", "state,body")
-    pulls = gh_json(
-        "pr",
-        "list",
-        "--state",
-        "all",
-        "--search",
-        f"#{number} in:body",
-        "--json",
-        "number,state,title,body",
-    )
-    pulls = linked_pulls(pulls, number)
+    pulls = linked_pulls(number)
     boxes = open_checkboxes(issue["body"])
     print(f"Issue #{number}: {issue['state']}")
     for item in boxes:

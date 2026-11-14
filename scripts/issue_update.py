@@ -65,11 +65,7 @@ def blockers(number: int) -> tuple[dict[str, Any], list[str]]:
     """The issue's state and body, and what keeps it from being done."""
     issue = gh_json("issue", "view", str(number), "--json", "state,body")
     found = [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
-    pulls = gh_json(
-        "pr", "list", "--state", "all", "--search", f"#{number} in:body",
-        "--json", "number,state,title,body",
-    )  # fmt: skip
-    for pull in linked_pulls(pulls, number):
+    for pull in linked_pulls(number, gh_json):
         if pull["state"] == "OPEN":
             found.append(f"open PR #{pull['number']}: {pull['title']}")
     return issue, found
