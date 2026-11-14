@@ -143,13 +143,15 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertEqual(config["tool"]["coverage"]["report"]["precision"], 2)
         self.assertEqual(evidence["shards"], 4)
 
-        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        shards = workflow.split("  test_shards:\n", 1)[1].split(
+            "  container_tests:\n", 1
+        )[0]
         self.assertIn("coverage run tests/run_tests.py --shard", shards)
         self.assertIn('--total "$PYTHON_TEST_SHARDS"', shards)
         self.assertIn("python-coverage-${{ matrix.shard }}", shards)
         self.assertIn("include-hidden-files: true", shards)
         self.assertIn("if-no-files-found: error", shards)
-        quality = workflow.split("  quality:\n", 1)[1].split("  image_sbom:\n", 1)[0]
+        quality = workflow.split("  quality:\n", 1)[1].split("  e2e:\n", 1)[0]
         self.assertIn("pattern: python-coverage-*", quality)
         self.assertNotIn("merge-multiple", quality)
         self.assertIn('for shard in $(seq 1 "$PYTHON_TEST_SHARDS")', quality)
@@ -253,7 +255,8 @@ class WorkflowSourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.MULTILINE)
-        self.assertEqual(len(checkout_refs), 10)
+        # The syntax and SBOM jobs were merged into others (#2750).
+        self.assertEqual(len(checkout_refs), 8)
         self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
         self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
         self.assertNotIn("source_ref", workflow)
@@ -274,16 +277,12 @@ class WorkflowSourceTests(unittest.TestCase):
         image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
         self.assertIn("docker build --tag pacecraft:ci\n", image)
         self.assertIn("needs: source\n", image)
-        upload = image.split("actions/upload-artifact@", 1)[1]
+        upload = image.split("actions/upload-artifact@", 1)[1].split("- name:", 1)[0]
         self.assertIn("name: pacecraft-ci-image", upload)
         self.assertIn("retention-days: 1", upload)
         consumers = {
             "container_tests": (
                 workflow.split("  container_tests:\n", 1)[1].split("  test:\n", 1)[0],
-                "needs: [source, image]",
-            ),
-            "image_sbom": (
-                workflow.split("  image_sbom:\n", 1)[1].split("  e2e:\n", 1)[0],
                 "needs: [source, image]",
             ),
             "e2e": (
@@ -297,7 +296,16 @@ class WorkflowSourceTests(unittest.TestCase):
                 self.assertIn("name: pacecraft-ci-image", text)
                 self.assertIn("gunzip -c pacecraft-ci-image.tar.gz | docker load", text)
                 self.assertNotIn("docker build", text)
-        self.assertIn("image: pacecraft:ci", consumers["image_sbom"][0])
+        # The SBOM describes the image the same job built (#2750), after its upload.
+        self.assertLess(
+            image.index("- name: Upload shared CI image\n"),
+            image.index("- name: Generate SPDX SBOM\n"),
+        )
+        sbom = image.split("- name: Generate SPDX SBOM\n", 1)[1]
+        self.assertIn("image: pacecraft:ci", sbom)
+        self.assertIn("name: pacecraft-sbom", sbom)
+        self.assertIn("- name: Retry SPDX SBOM generation\n", sbom)
+        self.assertNotIn("  image_sbom:\n", workflow)
         self.assertIn("--workdir /app pacecraft:ci", consumers["container_tests"][0])
 
     def test_e2e_selects_specs_with_playwright_list_not_file_grep(self):
@@ -319,9 +327,7 @@ class WorkflowSourceTests(unittest.TestCase):
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
         # Browser checks no longer wait for the unit tests; publishing still needs both.
         self.assertNotIn("needs.test", e2e)
-        self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
-        )
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", workflow)
         # Every project runs unless the classifier answered ui=false (#2748).
         choice = re.search(
             r"project: \$\{\{ fromJSON\(needs\.source\.outputs\.ui == 'false' "
@@ -428,9 +434,7 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertNotIn("attempt-${{ github.run_attempt }}", browser)
         self.assertIn("python .github/scripts/aggregate_browser_results.py", browser)
         self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
-        self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
-        )
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", workflow)
 
     def test_release_pushes_the_tested_image_instead_of_rebuilding(self):
         workflow = (
@@ -439,9 +443,7 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         publish = workflow.split("  build-and-push:\n", 1)[1]
         self.assertNotIn("docker/build-push-action", workflow)
-        self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", publish
-        )
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", publish)
         self.assertIn("name: pacecraft-ci-image", publish)
         self.assertIn("docker tag pacecraft:ci", publish)
         self.assertIn("cosign attest --type spdxjson", publish)
@@ -823,7 +825,9 @@ class ShardingContractTests(unittest.TestCase):
         workflow = (root / ".github/workflows/publish-container.yml").read_text(
             encoding="utf-8"
         )
-        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        shards = workflow.split("  test_shards:\n", 1)[1].split(
+            "  container_tests:\n", 1
+        )[0]
         matrix = re.search(r"shard: \[([0-9, ]+)\]", shards)
         self.assertIsNotNone(matrix)
         self.assertEqual(
@@ -1197,10 +1201,10 @@ class ChangedFileClassifierTests(unittest.TestCase):
         self.assertIn(skip, _job(workflow, "e2e", "browser"))
         self.assertIn(
             "if: needs.test.result == 'success' && needs.source.outputs.docs_only != 'true'\n",
-            _job(workflow, "quality", "image_sbom"),
+            _job(workflow, "quality", "e2e"),
         )
         # Required "Test shard N/4" names need the matrix job itself to run.
-        shards = _job(workflow, "test_shards", "syntax")
+        shards = _job(workflow, "test_shards", "container_tests")
         self.assertNotRegex(shards.split("steps:", 1)[0], r"\n    if:")
         self.assertIn(
             "MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' "
@@ -1231,11 +1235,14 @@ class ChangedFileClassifierTests(unittest.TestCase):
         self.assertIn(
             'if [[ "$DOCS_ONLY" == "true" && "$E2E_RESULT" == "skipped" ]]', browser
         )
-        # Image, syntax, SBOM and publishing never skip.
+        # Image with its SBOM, the syntax check and publishing never skip.
+        self.assertIn(
+            "- name: Run syntax checks\n"
+            "        if: env.MODE != 'idle' && matrix.shard == 1\n",
+            shards,
+        )
         never_skip = (
             _job(workflow, "image", "test_shards"),
-            _job(workflow, "syntax", "container_tests"),
-            _job(workflow, "image_sbom", "e2e"),
             workflow.split("  build-and-push:\n", 1)[1],
         )
         for job in never_skip:
