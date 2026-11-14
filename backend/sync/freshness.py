@@ -22,6 +22,7 @@ from backend.sync.freshness_sources import (
     FreshnessInputs,
     FreshnessSource,
 )
+from backend.sync.jobs import queued_refresh_times
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import FreshnessArea
 from backend.sync.refresh import cleanup_refresh_history
@@ -55,13 +56,7 @@ def _scheduled_provider_retry_at(
     db: Any, provider: str, *, now: datetime
 ) -> str | None:
     """Return only a future queued retry, never an advisory history timestamp."""
-    rows = db.execute(
-        "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type='refresh' "
-        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
-        (provider,),
-    ).fetchall()
-    for row in rows:
+    for row in queued_refresh_times(db, provider):
         available_at = _parse_utc(row["available_at"])
         if available_at is not None and available_at > now:
             return available_at.isoformat()

@@ -38,6 +38,7 @@ from backend.planning.repository import parse_payload
 from backend.planning.workout_export import past_export_horizon
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
+from backend.sync.jobs import job_provider_payload
 
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
 # Entries of one Garmin plan_push job (backend/sync/jobs.py).
@@ -127,10 +128,7 @@ class CoachProposalCreationService:
         if tool != "resolve_training_sync_conflict" or not arguments.get("job_id"):
             return False
         with self._database_manager.reader() as db:
-            row = db.execute(
-                "SELECT provider, payload FROM sync_jobs WHERE id=?",
-                (str(arguments["job_id"]),),
-            ).fetchone()
+            row = job_provider_payload(db, str(arguments["job_id"]))
             try:
                 payload = json.loads(row["payload"]) if row else {}
             except TypeError, ValueError:

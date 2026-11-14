@@ -1,6 +1,7 @@
 """Provider-job contracts shared by the persistence and worker layers.
 
-The module deliberately has no database, HTTP, or provider transport dependency.
+The module owns the sync_jobs and sync_job_items SQL through the caller's
+connection; it has no HTTP or provider transport dependency.
 Provider rules (accepted providers, job types, refresh fields) come from the
 declarative provider registry. It owns the small state-machine vocabulary so the
 server can persist jobs without duplicating validation and retry decisions in
@@ -222,10 +223,14 @@ def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
     return job, items
 
 
-def list_jobs(db: Any, limit: int) -> builtins.list[dict[str, Any]]:
-    """Project recent jobs without taking ownership of the database scope."""
+def list_jobs(
+    db: Any, limit: int, job_type: str | None = None
+) -> builtins.list[dict[str, Any]]:
+    """Project recent jobs, of one type when given, through the caller's scope."""
+    where = " WHERE type=?" if job_type else ""
     jobs = db.execute(
-        "SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        f"SELECT * FROM sync_jobs{where} ORDER BY created_at DESC LIMIT ?",
+        (*((job_type,) if job_type else ()), limit),
     ).fetchall()
     return [job_dto(job, read_job(db, job["id"])[1]) for job in jobs]
 
@@ -237,6 +242,31 @@ def has_active_job(db: Any, provider: str, job_type: str) -> bool:
         (provider, job_type),
     ).fetchone()
     return row is not None
+
+
+def job_provider_payload(db: Any, job_id: str) -> Any:
+    return db.execute(
+        "SELECT provider, payload FROM sync_jobs WHERE id=?", (job_id,)
+    ).fetchone()
+
+
+def last_completed_jobs(db: Any) -> builtins.list[Any]:
+    """The newest finish time of each provider's completed job types."""
+    return db.execute(
+        "SELECT provider, type, MAX(finished_at) AS finished_at FROM sync_jobs "
+        "WHERE status = 'completed' AND finished_at IS NOT NULL "
+        "GROUP BY provider, type"
+    ).fetchall()
+
+
+def queued_refresh_times(db: Any, provider: str) -> builtins.list[Any]:
+    """When the provider's queued refresh jobs become available, earliest first."""
+    return db.execute(
+        "SELECT available_at FROM sync_jobs "
+        "WHERE provider=? AND type='refresh' "
+        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
+        (provider,),
+    ).fetchall()
 
 
 def utc_timestamp(now: datetime | None = None) -> str:
