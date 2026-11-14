@@ -208,6 +208,7 @@ class LibraryPlanServiceTests(unittest.TestCase):
             )
             + ". Weitere Konflikte wurden nicht aufgelistet.",
         )
+        self.assertEqual(self.state()[0], [])
 
     def test_multiple_different_templates_on_same_date_are_allowed(self):
         ids = [str(uuid.uuid4()), str(uuid.uuid4())]

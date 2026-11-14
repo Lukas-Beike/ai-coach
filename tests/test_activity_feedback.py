@@ -93,6 +93,7 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(result["activity_date"], "20260920")
         self.assertEqual(len(result["notes"]), ACTIVITY_FEEDBACK_TEXT_LIMITS["notes"])
+        self.assertEqual(len(result["notes"]), 4000)
 
     def test_unknown_fields_are_ignored(self) -> None:
         result = normalize_activity_feedback(

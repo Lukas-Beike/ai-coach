@@ -282,6 +282,12 @@ class StructuredTrainingChangeServiceTests(unittest.TestCase):
             "rationale": "Recovery",
             "id": "attacker-controlled-id",
             "plan_name": "attacker-controlled-name",
+            "external_id": "foreign-external-id",
+            "remote_event_id": "foreign-remote-id",
+            "remote_event_external_id": "foreign-remote-external-id",
+            "archived": True,
+            "local_deleted": True,
+            "sync_state": "synced",
         }
         if plan_id is not None:
             change["plan_id"] = plan_id
@@ -381,8 +387,17 @@ class StructuredTrainingChangeServiceTests(unittest.TestCase):
         self.assertEqual(created["workout"]["source"], "coach")
         self.assertEqual(created["workout"]["plan_id"], "plan-a")
         self.assertEqual(created["workout"]["plan_name"], "Spring plan")
-        self.assertNotIn("id", created["workout"])
-        self.assertNotIn("local_id", created["workout"])
+        for protected in (
+            "id",
+            "local_id",
+            "external_id",
+            "remote_event_id",
+            "remote_event_external_id",
+            "archived",
+            "local_deleted",
+            "sync_state",
+        ):
+            self.assertNotIn(protected, created["workout"])
         self.assertEqual(self.plans.bounds_calls, [{"plan-a"}])
         self.assertEqual(self.revisions.bump_calls, 1)
         self.assertEqual(self.published, 1)
@@ -446,6 +461,30 @@ class StructuredTrainingChangeServiceTests(unittest.TestCase):
         self.assertNotIn("plan_id", created)
         self.assertNotIn("plan_name", created)
         self.assertEqual(self.plans.bounds_calls, [{"plan-a"}])
+
+    def test_create_inherits_the_plan_of_an_archived_reference_but_not_beside_a_standalone_one(
+        self,
+    ) -> None:
+        unit = {"date": "2031-06-10", "archived": False, "local_deleted": False}
+        self._add_unit("unit-a", {**unit, "plan_id": "plan-a"})
+        self._add_unit("unit-b", unit)
+        self.service.apply(
+            {"changes": [{"action": "archive", "local_id": "unit-a"}, self._create()]}
+        )
+        self.service.apply(
+            {
+                "changes": [
+                    {"action": "update", "local_id": "unit-a", "name": "Plan update"},
+                    {"action": "update", "local_id": "unit-b", "name": "Standalone"},
+                    self._create(),
+                ]
+            }
+        )
+        inherited, ambiguous = (
+            call["workout"] for call in self.planned_units.create_calls
+        )
+        self.assertEqual(inherited["plan_id"], "plan-a")
+        self.assertNotIn("plan_id", ambiguous)
 
     def test_apply_in_db_uses_only_the_callers_transaction_and_publishes_nothing(
         self,

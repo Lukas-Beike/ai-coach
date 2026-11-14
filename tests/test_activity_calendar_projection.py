@@ -139,6 +139,14 @@ class PlanningComplianceTests(unittest.TestCase):
                 "planned_duration_s": 3600,
                 "planned_load": 50,
             },
+            {
+                "id": "race",
+                "category": "RACE",
+                "type": "Ride",
+                "starts_at_local": (today - timedelta(days=1)).isoformat(),
+                "planned_duration_s": 7200,
+                "planned_load": 100,
+            },
         ]
         activities = [
             {
@@ -148,16 +156,38 @@ class PlanningComplianceTests(unittest.TestCase):
                 "started_at_local": f"{today.isoformat()}T07:00:00",
                 "moving_duration_s": 3300,
                 "training_load": 40,
+                "rpe": 6,
                 "private_note": "hidden",
             }
         ]
 
         enriched, weekly = planning_compliance_state(events, activities, today)
 
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
         self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
-        self.assertNotIn("private_note", enriched[0]["compliance"]["actual_activity"])
+        actual = enriched[0]["compliance"]["actual_activity"]
+        self.assertEqual((actual["rpe"], actual["training_load"]), (6, 40))
+        self.assertNotIn("private_note", actual)
+        self.assertEqual(enriched[1]["compliance"]["status"], "missed")
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
+        self.assertNotIn("compliance", enriched[2])
         self.assertEqual(sum(row["planned_units"] for row in weekly), 2)
+        current_week = next(
+            row
+            for row in weekly
+            if row["week_start"]
+            == (today - timedelta(days=today.weekday())).isoformat()
+        )
+        self.assertEqual(
+            (
+                current_week["planned_units"],
+                current_week["completed_units"],
+                current_week["unit_percentage"],
+                current_week["percentage"],
+                current_week["basis"],
+            ),
+            (2, 1, 50, 40, "training_load"),
+        )
 
     def test_duration_and_unavailable_fallbacks(self):
         today = date(2026, 9, 12)
@@ -188,6 +218,31 @@ class PlanningComplianceTests(unittest.TestCase):
             (unavailable["basis"], unavailable["percentage"]),
             ("unavailable", 100),
         )
+
+    def test_unpaired_same_day_activity_of_the_same_sport_is_matched(self):
+        today = date(2026, 9, 12)
+        events = [
+            {
+                "id": "event-1",
+                "category": "WORKOUT",
+                "type": "Run",
+                "starts_at_local": f"{today.isoformat()}T00:00:00",
+                "planned_duration_s": 1800,
+            }
+        ]
+        activities = [
+            {
+                "id": "activity-1",
+                "sport": "run",
+                "started_at_local": f"{today.isoformat()}T08:00:00",
+                "moving_duration_s": 1500,
+            }
+        ]
+
+        enriched, _weekly = planning_compliance_state(events, activities, today)
+
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
+        self.assertEqual(enriched[0]["compliance"]["percentage"], 83)
 
     def test_calendar_keeps_unmatched_activity_without_repeating_match(self):
         planned = [
