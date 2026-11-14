@@ -225,6 +225,15 @@ for manual login, PWA/offline and UI checks. Never target a connected installati
 Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.
 
+A pull request that changes no UI path runs only the `desktop` project (#2748);
+`mobile` and `tablet-landscape` then run on the push to `develop`, and a red run
+there stops merges like any red `develop` run. UI paths, listed in `UI_PATHS` of
+`.github/scripts/ci_changes.py`: `public/`, `e2e/`, `playwright.config.cjs`,
+`package.json`, `package-lock.json`, `backend/http_api/static_assets.py` (shell,
+asset stamping, service worker, headers), the browser runner and its pinned
+environment, the browser aggregate, the classifier and the test workflow. Push,
+release and dispatch runs always run every project.
+
 Configured viewports in `playwright.config.cjs`:
 - `mobile`: 390x844 (Standard mobile)
 - `tablet-landscape`: 844x390 (Phone landscape)
