@@ -643,19 +643,7 @@ class CoverageGuardTests(DataKindFixture):
         self.assertNotIn(b"synthetic-token-hash", exported)
 
     def test_explicit_export_columns_cover_every_column_but_the_listed_ones(self):
-        source = Path(export_module.__file__).read_text(encoding="utf-8")
-        # The persistence owners hold the column lists of some exported tables:
-        # read every *_export_rows function the export calls.
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-                owner, name = node.value.id, node.attr
-            elif isinstance(node, ast.Name):
-                owner, name = None, node.id
-            else:
-                continue
-            if name.endswith("export_rows"):
-                module = getattr(export_module, owner) if owner else export_module
-                source += inspect.getsource(getattr(module, name))
+        source = _export_source()
         joined = re.sub(r'"\s*\n\s*"', "", source)
         checked = set()
         for match in re.finditer(r'"SELECT (.*?) FROM (\w+)', joined):
@@ -963,6 +951,22 @@ class BackupRestoreRoundTripTests(DataKindFixture):
             ],
             0,
         )
+
+
+def _export_source() -> str:
+    """The export module plus every *_export_rows function it calls (#2710)."""
+    source = Path(export_module.__file__).read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            owner, name = node.value.id, node.attr
+        elif isinstance(node, ast.Name):
+            owner, name = None, node.id
+        else:
+            continue
+        if name.endswith("export_rows"):
+            module = getattr(export_module, owner) if owner else export_module
+            source += inspect.getsource(getattr(module, name))
+    return source
 
 
 if __name__ == "__main__":
