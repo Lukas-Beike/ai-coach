@@ -1024,44 +1024,32 @@ class GarminSelectionTests(unittest.TestCase):
             select_current(without_garmin, MetricKind.FTP, sport=Sport.RIDE)
         )
 
-    def test_cycling_ftp_is_date_blind_and_keeps_the_last_garmin_record(self) -> None:
+    def test_cycling_ftp_keeps_the_last_garmin_record_whatever_its_date(self) -> None:
         # Current FTP reads the last numeric input record and ignores dates, so the
-        # older-dated 300 wins because it comes last.
-        garmin = {
-            "cycling_ftp": [
-                _garmin_record("2026-05-04", functionalThresholdPower=302),
-                _garmin_record("2026-05-03", functionalThresholdPower=300),
-            ]
-        }
-        metrics = garmin_payload_performance_metrics(garmin, TODAY)
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(
-            _values(
-                select_current(
-                    _mapped([], None, garmin), MetricKind.FTP, sport=Sport.RIDE
-                )
-            ),
-            300,
-        )
+        # older-dated 300 wins because it comes last; same-day duplicates also keep
+        # the last record.
+        for records, expected in (
+            ((("2026-05-04", 302), ("2026-05-03", 300)), 300),
+            ((("2026-05-04", 250), ("2026-05-04", 260)), 260),
+        ):
+            with self.subTest(expected=expected):
+                garmin = {
+                    "cycling_ftp": [
+                        _garmin_record(day, functionalThresholdPower=watts)
+                        for day, watts in records
+                    ]
+                }
 
-    def test_same_day_garmin_ftp_duplicates_keep_the_last_record(self) -> None:
-        garmin = {
-            "cycling_ftp": [
-                _garmin_record("2026-05-04", functionalThresholdPower=250),
-                _garmin_record("2026-05-04", functionalThresholdPower=260),
-            ]
-        }
-
-        metrics = garmin_payload_performance_metrics(garmin, TODAY)
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 260)
-        self.assertEqual(
-            _values(
-                select_current(
-                    _mapped([], None, garmin), MetricKind.FTP, sport=Sport.RIDE
+                metrics = garmin_payload_performance_metrics(garmin, TODAY)
+                self.assertEqual(metrics["cycling_ftp_watts"]["value"], expected)
+                self.assertEqual(
+                    _values(
+                        select_current(
+                            _mapped([], None, garmin), MetricKind.FTP, sport=Sport.RIDE
+                        )
+                    ),
+                    expected,
                 )
-            ),
-            260,
-        )
 
     def test_same_day_garmin_resting_hr_duplicates_keep_the_last_record(self) -> None:
         garmin = {

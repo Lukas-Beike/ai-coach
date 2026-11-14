@@ -267,78 +267,44 @@ class MetricWindowTests(unittest.TestCase):
             1,
         )
 
-    def test_metric_with_too_few_observations_is_not_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            window(ProviderId.INTERVALS, "ctl", 3, NEWEST - timedelta(days=10)),
-            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
+    def test_a_metric_is_stalled_only_when_its_lag_outgrows_its_cadence(self) -> None:
+        # (metric, observations, lag in days, weekly cadence, stalled)
+        cases = (
+            ("ctl", 3, 10, False, False),
+            ("ctl", 10, 6, False, False),
+            ("ctl", 10, 7, False, True),
+            ("steps", 10, 10, False, True),
+            ("weight", 10, 10, True, False),
+            ("weight", 10, 21, True, True),
+            ("ftp", 10, 60, False, False),
         )
+        for metric, observations, lag, weekly, stalled in cases:
+            with self.subTest(metric=metric, observations=observations, lag=lag):
+                make = weekly_window if weekly else window
+                metrics = self.intervals_metrics(
+                    make(
+                        ProviderId.INTERVALS,
+                        metric,
+                        observations,
+                        NEWEST - timedelta(days=lag),
+                    ),
+                    window(
+                        ProviderId.INTERVALS,
+                        "weight" if metric == "ctl" else "ctl",
+                        1,
+                        NEWEST,
+                    ),
+                )
 
-        self.assertEqual(metrics["ctl"]["lag_days"], 10)
-        self.assertFalse(metrics["ctl"]["stalled"])
-
-    def test_lag_below_a_week_is_not_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=6)),
-            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
-        )
-
-        self.assertEqual(metrics["ctl"]["lag_days"], 6)
-        self.assertFalse(metrics["ctl"]["stalled"])
-
-    def test_weekly_metric_within_its_cadence_is_not_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            weekly_window(
-                ProviderId.INTERVALS, "weight", 10, NEWEST - timedelta(days=10)
-            ),
-            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
-        )
-
-        self.assertEqual(
-            metrics["weight"],
-            {"metric": "weight", "observations": 10, "lag_days": 10, "stalled": False},
-        )
-
-    def test_weekly_metric_lagging_three_cadences_is_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            weekly_window(
-                ProviderId.INTERVALS, "weight", 10, NEWEST - timedelta(days=21)
-            ),
-            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
-        )
-
-        self.assertEqual(
-            metrics["weight"],
-            {"metric": "weight", "observations": 10, "lag_days": 21, "stalled": True},
-        )
-
-    def test_dense_metric_lagging_a_week_is_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=7)),
-            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
-        )
-
-        self.assertEqual(metrics["ctl"]["lag_days"], 7)
-        self.assertTrue(metrics["ctl"]["stalled"])
-
-    def test_event_driven_metric_is_never_stalled_by_its_lag(self) -> None:
-        metrics = self.intervals_metrics(
-            window(ProviderId.INTERVALS, "ftp", 10, NEWEST - timedelta(days=60)),
-            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
-        )
-
-        self.assertEqual(
-            metrics["ftp"],
-            {"metric": "ftp", "observations": 10, "lag_days": 60, "stalled": False},
-        )
-
-    def test_non_event_daily_metric_with_a_long_lag_is_stalled(self) -> None:
-        metrics = self.intervals_metrics(
-            window(ProviderId.INTERVALS, "steps", 10, NEWEST - timedelta(days=10)),
-            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
-        )
-
-        self.assertEqual(metrics["steps"]["lag_days"], 10)
-        self.assertTrue(metrics["steps"]["stalled"])
+                self.assertEqual(
+                    metrics[metric],
+                    {
+                        "metric": metric,
+                        "observations": observations,
+                        "lag_days": lag,
+                        "stalled": stalled,
+                    },
+                )
 
     def test_metric_window_rejects_an_oldest_day_after_the_newest(self) -> None:
         with self.assertRaises(ValueError):

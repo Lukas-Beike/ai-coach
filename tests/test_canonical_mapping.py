@@ -141,13 +141,9 @@ class CoerceNumberTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(expected, coerce_number(text))
 
-    def test_rejects_comma_decimal_and_python_only_spellings(self) -> None:
-        for text in ("1,5", "1_000", "1.0.0", "0x10", "١٢"):
-            with self.subTest(text=text):
-                self.assertIsNone(coerce_number(text))
-
-    def test_rejects_blank_text_and_words(self) -> None:
-        for text in ("", "   ", "abc", "-", "."):
+    def test_rejects_non_decimal_spellings_blank_text_and_words(self) -> None:
+        # Comma decimals and Python-only spellings, then blank text and words.
+        for text in ("1,5", "1_000", "1.0.0", "0x10", "١٢", "", "   ", "abc", "-", "."):
             with self.subTest(text=text):
                 self.assertIsNone(coerce_number(text))
 

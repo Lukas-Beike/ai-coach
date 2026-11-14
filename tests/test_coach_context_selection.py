@@ -773,17 +773,15 @@ class CoachContextSelectionTests(unittest.TestCase):
 
 
 class CoachContextRuleTests(unittest.TestCase):
-    def test_weekday_weather_question_adds_weather_and_extends_horizon(self):
-        selection = select_coach_context(
-            "Wie wird das Wetter am Samstag für die lange Ausfahrt?", {}
-        )
-        self.assertIn("weather", selection.sections)
-        self.assertEqual(7, selection.horizon_days)
-
-    def test_plain_weather_question_adds_weather_section(self):
-        selection = select_coach_context("Regnet es Donnerstag?", {})
-        self.assertIn("weather", selection.sections)
-        self.assertEqual(7, selection.horizon_days)
+    def test_weather_questions_add_weather_and_extend_the_horizon(self):
+        for question in (
+            "Wie wird das Wetter am Samstag für die lange Ausfahrt?",
+            "Regnet es Donnerstag?",
+        ):
+            with self.subTest(question=question):
+                selection = select_coach_context(question, {})
+                self.assertIn("weather", selection.sections)
+                self.assertEqual(7, selection.horizon_days)
 
     def test_weekday_without_weather_keeps_short_horizon(self):
         selection = select_coach_context("Was trainiere ich am Samstag?", {})
@@ -869,17 +867,15 @@ class CoachContextRuleTests(unittest.TestCase):
         projected = selection.project({"daily_planning_context": days}, "2026-11-03")
         self.assertEqual(days[:2], projected["daily_planning_context"])
 
-    def test_past_week_with_planning_verb_stays_weekly_planning(self):
-        selection = select_coach_context("Plane meine letzte Woche neu", {})
-        self.assertEqual("plan_week", selection.name)
-        self.assertEqual(14, selection.horizon_days)
-
-    def test_planning_request_with_past_week_reference_stays_weekly_planning(self):
-        selection = select_coach_context(
-            "Plane die nächste Woche basierend auf letzter Woche", {}
-        )
-        self.assertEqual("plan_week", selection.name)
-        self.assertEqual(14, selection.horizon_days)
+    def test_planning_requests_mentioning_the_past_week_stay_weekly_planning(self):
+        for question in (
+            "Plane meine letzte Woche neu",
+            "Plane die nächste Woche basierend auf letzter Woche",
+        ):
+            with self.subTest(question=question):
+                selection = select_coach_context(question, {})
+                self.assertEqual("plan_week", selection.name)
+                self.assertEqual(14, selection.horizon_days)
 
     def test_past_week_pattern_stays_narrow(self):
         selection = select_coach_context("Wie war die letzte Nacht?", {})

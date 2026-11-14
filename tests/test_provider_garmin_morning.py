@@ -86,23 +86,15 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
             },
         )
 
-    def test_sleep_before_midnight_starts_the_range_on_the_sleep_date(self):
-        sleep_start = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
+    def test_the_range_starts_on_the_sleep_date_up_to_two_days_back(self):
+        for day in (3, 2):
+            with self.subTest(sleep_day=day):
+                self.fetch(datetime(2026, 9, day, 20, 0, tzinfo=UTC))
 
-        self.fetch(sleep_start)
-
-        self.assertEqual(
-            self.client.calls[-1], ("body_battery", "2026-09-03", "2026-09-04")
-        )
-
-    def test_a_sleep_start_two_days_back_keeps_its_own_date(self):
-        sleep_start = datetime(2026, 9, 2, 20, 0, tzinfo=UTC)
-
-        self.fetch(sleep_start)
-
-        self.assertEqual(
-            self.client.calls[-1], ("body_battery", "2026-09-02", "2026-09-04")
-        )
+                self.assertEqual(
+                    self.client.calls[-1],
+                    ("body_battery", f"2026-09-0{day}", "2026-09-04"),
+                )
 
     def test_missing_sleep_or_non_list_records_are_bounded(self):
         self.assertEqual(self.fetch(None), (self.client.sleep, []))

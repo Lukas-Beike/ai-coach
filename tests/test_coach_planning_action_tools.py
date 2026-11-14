@@ -81,37 +81,86 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         self.preview.preview.assert_called_once_with()
         self.adaptive_apply.apply.assert_not_called()
 
-    def test_preview_rejects_missing_operation_before_factory(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
+    def test_a_wrong_operation_scope_or_payload_is_rejected_before_any_factory(
+        self,
+    ) -> None:
+        denied = (403, "intent_scope_denied")
+        plan = {"payload": {"plan_id": "plan-1"}}
+        change = {"change_id": "change-1"}
+        cases: tuple[tuple[Any, ...], ...] = (
+            (
                 "preview_adaptive_replan",
                 {},
-                {"operation": "other", "authorization_scope": ["adaptive_replan"]},
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
-        )
-        self.factories["preview"].assert_not_called()
-
-    def test_preview_rejects_missing_scope_before_factory(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
+                "other",
+                ["adaptive_replan"],
+                denied,
+                ("preview",),
+            ),
+            (
                 "preview_adaptive_replan",
                 {},
-                {"operation": "preview_adaptive_replan", "authorization_scope": []},
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
+                "preview_adaptive_replan",
+                [],
+                denied,
+                ("preview",),
+            ),
+            (
+                "update_training_plan",
+                plan,
+                "other",
+                ["training_plan:plan-1"],
+                denied,
+                ("plans",),
+            ),
+            (
+                "update_training_plan",
+                plan,
+                "update_training_plan",
+                ["training_plan:plan-2"],
+                denied,
+                ("plans",),
+            ),
+            (
+                "update_training_plan",
+                {},
+                "update_training_plan",
+                ["local_plan"],
+                (400, "invalid_action"),
+                ("plans",),
+            ),
+            (
+                "undo_training_change",
+                change,
+                "other",
+                ["change:change-1"],
+                denied,
+                ("history", "proposals"),
+            ),
+            (
+                "undo_training_change",
+                change,
+                "undo_training_change",
+                ["change:change-2"],
+                denied,
+                ("history", "proposals"),
+            ),
         )
-        self.factories["preview"].assert_not_called()
+        for tool, arguments, operation, scope, expected, untouched in cases:
+            with self.subTest(tool=tool, operation=operation, scope=scope):
+                with self.assertRaises(AppError) as raised:
+                    self.service.execute(
+                        tool,
+                        arguments,
+                        {"operation": operation, "authorization_scope": scope},
+                        "turn-1",
+                        "csrf-hash-1",
+                    )
+
+                self.assertEqual(
+                    (raised.exception.status, raised.exception.reason), expected
+                )
+                for name in untouched:
+                    self.factories[name].assert_not_called()
 
     def test_apply_delegates_arguments_intent_and_later_client_turn(self) -> None:
         arguments = {"adjustment_id": "adjustment-1"}
@@ -174,59 +223,6 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         )
 
         self.plans.update.assert_called_once_with("plan-1", arguments["payload"])
-
-    def test_update_rejects_missing_operation_before_factory(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
-                "update_training_plan",
-                {"payload": {"plan_id": "plan-1"}},
-                {"operation": "other", "authorization_scope": ["training_plan:plan-1"]},
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
-        )
-        self.factories["plans"].assert_not_called()
-
-    def test_update_rejects_scope_for_a_different_plan_before_factory(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
-                "update_training_plan",
-                {"payload": {"plan_id": "plan-1"}},
-                {
-                    "operation": "update_training_plan",
-                    "authorization_scope": ["training_plan:plan-2"],
-                },
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
-        )
-        self.factories["plans"].assert_not_called()
-
-    def test_update_rejects_missing_payload_with_existing_client_error(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
-                "update_training_plan",
-                {},
-                {
-                    "operation": "update_training_plan",
-                    "authorization_scope": ["local_plan"],
-                },
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason), (400, "invalid_action")
-        )
-        self.factories["plans"].assert_not_called()
 
     def test_undo_creates_session_bound_proposal_and_excludes_raw_proposal(
         self,
@@ -347,45 +343,6 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         )
         self.history.apply.assert_not_called()
         self.proposals.create.assert_called_once_with(proposal, "csrf-hash-1")
-
-    def test_undo_rejects_missing_operation_before_history_or_proposal_factories(
-        self,
-    ) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
-                "undo_training_change",
-                {"change_id": "change-1"},
-                {"operation": "other", "authorization_scope": ["change:change-1"]},
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
-        )
-        self.factories["history"].assert_not_called()
-        self.factories["proposals"].assert_not_called()
-
-    def test_undo_rejects_wrong_change_scope_before_factories(self) -> None:
-        with self.assertRaises(AppError) as raised:
-            self.service.execute(
-                "undo_training_change",
-                {"change_id": "change-1"},
-                {
-                    "operation": "undo_training_change",
-                    "authorization_scope": ["change:change-2"],
-                },
-                "turn-1",
-                "csrf-hash-1",
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (403, "intent_scope_denied"),
-        )
-        self.factories["history"].assert_not_called()
-        self.factories["proposals"].assert_not_called()
 
     def test_unknown_name_returns_none_without_constructing_any_owner(self) -> None:
         result = self.service.execute(

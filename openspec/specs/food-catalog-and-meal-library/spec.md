@@ -129,7 +129,7 @@ Evidence:
 - `tests/test_nutrition_product_http_contract.py::test_favorite_and_add_to_meal_target_explicit_ids`
 - `tests/test_nutrition_products.py::NutritionProductContractTests.test_confirmed_product_is_persistent_and_can_be_archived`
 - `tests/test_nutrition_products.py::test_product_edit_keeps_extraction_confidence`
-- `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_archived_products_cannot_be_calculated_or_logged`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_archived_products_cannot_be_calculated_or_logged`
 
 ### Requirement: Product portions freeze consumed definitions
 The system SHALL scale a product portion against its saved basis amount in the same unit and freeze the definition and consumed quantity with the meal. Later catalog edits SHALL not recalculate historical intake.
@@ -273,7 +273,7 @@ The system SHALL support explicit database source selection and bounded batched 
 
 Detailed contract: a batched lookup answers `{ok, results: [{query, ...}]}` with one entry per distinct term, a failed term as `{ok: false, error, reason}`; a lookup with an explicit source answers the database result plus `local_products` when saved products match. The tool parameters are listed in `openspec/COACH_TOOLS.md`.
 
-Evidence: `backend/coach/read_tools.py::CoachReadToolService._lookup_food`, `backend/coach/read_tools.py::CoachReadToolService._lookup_one_food`; `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_batched_queries_return_each_term_and_isolate_failures`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_text_source_still_returns_matching_saved_products`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_source_outage_still_returns_saved_products`, `tests/test_nutrition_review_regressions.py::test_explicit_source_outage_still_returns_saved_products`, `tests/test_coach_tool_coverage.py::test_food_database_read_tools_calculate_without_writing`, `tests/test_coach_read_tools.py::test_read_nutrition_day_and_range`, `tests/test_coach_read_tools.py::test_nutrition_range_is_validated_and_bounded`.
+Evidence: `backend/coach/read_tools.py::CoachReadToolService._lookup_food`, `backend/coach/read_tools.py::CoachReadToolService._lookup_one_food`; `tests/test_coach_read_tools.py::CoachReadToolServiceTests.test_batched_queries_return_each_term_and_isolate_failures`, `tests/test_coach_read_tools.py::CoachReadToolServiceTests.test_explicit_text_source_still_returns_matching_saved_products`, `tests/test_coach_read_tools.py::CoachReadToolServiceTests.test_explicit_source_outage_still_returns_saved_products`, `tests/test_coach_tool_coverage.py::test_food_database_read_tools_calculate_without_writing`, `tests/test_coach_read_tools.py::test_read_nutrition_day_and_range`, `tests/test_coach_read_tools.py::test_nutrition_range_is_validated_and_bounded`.
 
 ### Requirement: Online food lookup is bounded and privacy-conscious
 The system SHALL bound Open Food Facts transport and local request rates, separate search and barcode limits, cache successful responses, and return sanitized provider failures. Provider-estimated or modified aggregate nutrient values SHALL not be treated as authoritative label values.

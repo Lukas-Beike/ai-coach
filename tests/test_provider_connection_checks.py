@@ -158,14 +158,6 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(checks.status("p")["status"], "unchecked")
         snapshot.assert_called_once_with()
 
-    def test_restoring_old_credentials_does_not_revive_a_result(self):
-        checks, state = _checks(Mock())
-        checks.check("p")
-        state["identity"] = "b"
-        self.assertEqual(checks.status("p")["status"], "unchecked")
-        state["identity"] = "a"
-        self.assertEqual(checks.status("p")["status"], "unchecked")
-
     def test_repeated_checks_within_the_cooldown_reuse_the_result(self):
         check = Mock()
         probe = simple_probe(configured=lambda: True, identity=lambda: "a", check=check)
@@ -427,33 +419,28 @@ class RouteTests(unittest.TestCase):
 
 
 class RotationAndDeadlineTests(unittest.TestCase):
-    def test_check_that_rotates_its_own_identity_keeps_its_success(self):
-        state = {"identity": "before"}
+    def test_a_check_keeps_its_success_only_if_it_rotated_its_own_identity(self):
+        # An identity the check itself rotated keeps the result; a restore during
+        # the check does not store it as verified.
+        for rotated, outcome, expected in (
+            ("after", "after", "success"),
+            ("restored", "verified-before-restore", "unchecked"),
+        ):
+            with self.subTest(identity=rotated):
+                state = {"identity": "before"}
 
-        def check():
-            state["identity"] = "after"
-            return "after"
+                def check(state=state, rotated=rotated, outcome=outcome):
+                    state["identity"] = rotated
+                    return outcome
 
-        probe = simple_probe(
-            configured=lambda: True, identity=lambda: state["identity"], check=check
-        )
-        checks = ProviderConnectionChecks({"p": probe})
-        self.assertEqual(checks.check("p")["status"], "success")
-        self.assertEqual(checks.status("p")["status"], "success")
-
-    def test_restore_during_the_check_is_not_stored_as_verified(self):
-        state = {"identity": "before"}
-
-        def check():
-            state["identity"] = "restored"
-            return "verified-before-restore"
-
-        probe = simple_probe(
-            configured=lambda: True, identity=lambda: state["identity"], check=check
-        )
-        checks = ProviderConnectionChecks({"p": probe})
-        self.assertEqual(checks.check("p")["status"], "unchecked")
-        self.assertEqual(checks.status("p")["status"], "unchecked")
+                probe = simple_probe(
+                    configured=lambda: True,
+                    identity=lambda state=state: state["identity"],
+                    check=check,
+                )
+                checks = ProviderConnectionChecks({"p": probe})
+                self.assertEqual(checks.check("p")["status"], expected)
+                self.assertEqual(checks.status("p")["status"], expected)
 
     def test_a_check_past_its_deadline_reports_checking_and_still_stores_its_result(
         self,

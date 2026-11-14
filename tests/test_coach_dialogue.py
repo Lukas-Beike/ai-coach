@@ -1769,43 +1769,29 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             history[0]["steps"][0]["error"]["validation_reason"], "request_provenance"
         )
 
-    def test_plan_replacement_does_not_resolve_invalid_patch_for_other_period(self):
-        first = {
-            "tool": "apply_training_patch",
-            "step_key": "first",
-            "request_binding_key": "period-one",
-            "plan_effect_key": "saturday",
-            "result": {"ok": False, "reason": "request_invalid"},
-        }
-        second = {
-            "tool": "replace_training_plan",
-            "step_key": "second",
-            "request_binding_key": "period-two",
-            "plan_effect_key": "monday",
-            "result": {"ok": True},
-        }
+    def test_plan_replacement_does_not_resolve_an_invalid_patch_of_another_effect(self):
+        # Another period, and a different workout under the same request binding.
+        for first_binding, second_binding in (
+            ("period-one", "period-two"),
+            ("same", "same"),
+        ):
+            with self.subTest(bindings=(first_binding, second_binding)):
+                first = {
+                    "tool": "apply_training_patch",
+                    "step_key": "first",
+                    "request_binding_key": first_binding,
+                    "plan_effect_key": "saturday",
+                    "result": {"ok": False, "reason": "request_invalid"},
+                }
+                second = {
+                    "tool": "replace_training_plan",
+                    "step_key": "second",
+                    "request_binding_key": second_binding,
+                    "plan_effect_key": "monday",
+                    "result": {"ok": True},
+                }
 
-        self.assertEqual(unresolved_coach_steps([first, second]), [first])
-
-    def test_plan_replacement_does_not_resolve_different_workout_with_same_request(
-        self,
-    ):
-        first = {
-            "tool": "apply_training_patch",
-            "step_key": "first",
-            "request_binding_key": "same",
-            "plan_effect_key": "saturday",
-            "result": {"ok": False, "reason": "request_invalid"},
-        }
-        second = {
-            "tool": "replace_training_plan",
-            "step_key": "second",
-            "request_binding_key": "same",
-            "plan_effect_key": "monday",
-            "result": {"ok": True},
-        }
-
-        self.assertEqual(unresolved_coach_steps([first, second]), [first])
+                self.assertEqual(unresolved_coach_steps([first, second]), [first])
 
     def test_other_workout_success_does_not_resolve_invalid_scope(self):
         period = {"start": "2026-09-12", "end": "2026-09-14"}
