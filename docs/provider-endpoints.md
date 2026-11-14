@@ -79,7 +79,7 @@ Personal-only batches (wellness history, FIT backfill, change check) never log t
 
 ## Garmin SDK
 
-Unofficial `garminconnect`, call shapes pinned to 0.3.19 (`providers/garmin.py:targeted_analysis_sources`). Used for every family the Personal API does not serve and for the explicit writes. A method absent from the installed client is an unsupported capability, never guessed. All rows: no timeout set by the app (exception S14), no retry by the app; refreshed tokens are written back after every run, whatever its outcome. Reads reach the caller as the common `provider_client_error`; a failed source is listed in the payload `errors` and never fails the others. Rows S3, S4 and S12 to S14 do not go through `external_call`.
+Unofficial `garminconnect`, call shapes of the version pinned in `requirements.txt` (`providers/garmin.py:targeted_analysis_sources`). Used for every family the Personal API does not serve and for the explicit writes. A method absent from the installed client is an unsupported capability, never guessed. All rows: no timeout set by the app (exception S14), no retry by the app; refreshed tokens are written back after every run, whatever its outcome. Reads reach the caller as the common `provider_client_error`; a failed source is listed in the payload `errors` and never fails the others. Rows S3, S4 and S12 to S14 do not go through `external_call`.
 
 | # | SDK call | Kind | Purpose | Caller | Error mapping |
 | --- | --- | --- | --- | --- | --- |
