@@ -153,10 +153,11 @@ noninteractive host, create nothing: report the findings with issue drafts as
 pending decisions.
 
 - **New issue**: file it with [issue-create](../pacecraft-issue-create/SKILL.md)
-  (duplicate search, title rule); link a found duplicate instead. The English
-  body holds observation, cause/hypothesis, impact, owning path, proposed
-  action, and success check; never athlete data, provider payloads,
-  credentials, or unredacted logs. Report each issue URL.
+  (duplicate search, title rule) and `--label retro`, as every issue a retro
+  opens, including one for a fix in this session; link a found duplicate
+  instead. The English body holds observation, cause/hypothesis, impact,
+  owning path, proposed action, and success check; never athlete data,
+  provider payloads, credentials, or unredacted logs. Report each issue URL.
 - **Fix in this session**: follow the owning workflow, orchestration, and
   validation as for any authorized change, then update this retro once with the
   outcome; do not run a new retro on it.
