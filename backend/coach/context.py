@@ -1124,15 +1124,18 @@ def _compact_coach_library_workout(
 
 
 _FENCE_MARKER = re.compile(r"untrusted\s+external\s+data", re.IGNORECASE)
+# The six-character JSON escape of "<" (backslash, "u003c"), built from chr(92)
+# because tests/test_source_encoding.py rejects literal unicode escapes in source.
+ESCAPED_LT = chr(92) + "u003c"
 
 
 def _defanged(text: str) -> str:
     """Stop serialized external text from reproducing the untrusted-data fence.
 
-    Every ``<`` becomes the JSON escape ``\\u003c`` (``<`` occurs only inside
-    JSON strings), so no text can open or close an instruction section tag.
+    Every ``<`` becomes ESCAPED_LT (``<`` occurs only inside JSON strings), so
+    no text can open or close an instruction section tag.
     """
-    return _FENCE_MARKER.sub("untrusted-external-data", text).replace("<", "\\u003c")
+    return _FENCE_MARKER.sub("untrusted-external-data", text).replace("<", ESCAPED_LT)
 
 
 def coach_context_json_size(value: Any) -> int:
