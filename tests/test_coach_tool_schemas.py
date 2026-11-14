@@ -71,6 +71,8 @@ class CoachToolSchemaTests(unittest.TestCase):
             ]["items"]
             self.assertIn("session_focus", item["required"])
             self.assertIn("strength_intensity", item["required"])
+            self.assertEqual(set(item["required"]), set(item["properties"]))
+            self.assertEqual(item["properties"]["duration_minutes"]["minimum"], 5)
             focus = item["properties"]["session_focus"]["enum"]
             self.assertIn("sweet_spot", focus)
             self.assertIn("legs", focus)
@@ -83,6 +85,13 @@ class CoachToolSchemaTests(unittest.TestCase):
             "templates"
         ]["items"]["properties"]
         self.assertIn("strength_intensity", template)
+
+    def test_checkin_and_activity_feedback_tools_are_exposed_and_staging_is_strict(
+        self,
+    ):
+        tools = _tools()
+        self.assertLessEqual({"save_checkin", "save_activity_feedback"}, set(tools))
+        self.assertTrue(tools["stage_training_plan"]["strict"])
 
     def test_strict_replace_plan_findings_use_supported_array_schema(self):
         tool = _tools()["replace_training_plan"]

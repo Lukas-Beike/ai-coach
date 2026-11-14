@@ -400,6 +400,26 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn("today-priority", app)
         self.assertNotIn('id="analysisHistorySegment"', index)
+        # Activity feedback stays Coach-managed: no form, history tab or route.
+        sync_status = (public / "sync-status.js").read_text(encoding="utf-8")
+        backend = Path(server.__file__).read_text(encoding="utf-8")
+        for marker in (
+            'id="feedbackForm"',
+            "Lokales Athleten-Feedback",
+            'data-analysis-segment="history"',
+            'id="activityDirtyIndicator"',
+        ):
+            self.assertNotIn(marker, index)
+        for marker in (
+            "function saveActivityFeedback",
+            "Besonderheiten speichern",
+            "activity-type-button",
+        ):
+            self.assertNotIn(marker, sync_status)
+        self.assertIn(
+            'activity_feedback: ["feedback", "plan", "performance"]', sync_status
+        )
+        self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
         self.assertNotIn("function analysisSegmentFromRoute(", navigation)
         self.assertNotIn("function renderActivities(", app)
         self.assertNotIn("activityFromDate", app + state + index)

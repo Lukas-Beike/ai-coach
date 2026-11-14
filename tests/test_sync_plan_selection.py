@@ -316,6 +316,16 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(len(prepared.entries), 367)
 
+    def test_all_pending_rejects_a_subset_of_the_pending_units(self) -> None:
+        first = self.add_entry(UNIT_A, {"name": "A"})
+        self.add_entry(UNIT_B, {"name": "B"})
+
+        with self.assertRaises(AppError) as error:
+            self.service.prepare([first], {"_sync_all_pending": True})
+
+        self.assertEqual("intent_scope_denied", error.exception.reason)
+        self.authority.mark_planning_authoritative.assert_not_called()
+
     def test_stale_hash_rejected_before_authority_mutation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
         prepared = self.service.prepare(

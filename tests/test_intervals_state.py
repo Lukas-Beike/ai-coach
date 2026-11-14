@@ -56,6 +56,7 @@ class IntervalsStateTests(unittest.TestCase):
             "connected", state(ok_at=ok, library_at=old, error="alt")["state"]
         )
         self.assertEqual("error", state(error="alt")["state"])
+        self.assertEqual("alt", state(error="alt")["last_error"])
         self.assertEqual(ok, state(ok_at=ok, library_at=old)["last_used_at"])
 
     def test_an_unreadable_or_naive_stamp_never_breaks_the_state(self) -> None:
