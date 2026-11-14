@@ -42,8 +42,6 @@ test("@responsive personal events show as a band and take a decision per event o
   await expect(chips.filter({ hasText: "Zahnarzt" })).toHaveAttribute("data-impact", "short");
   await expect(chips.filter({ hasText: "Zahnarzt" })).not.toContainText("SHORT_ONLY");
   await expect(chips.filter({ hasText: "Dienstreise" })).toContainText("ganztägig");
-  // An event that began before today shows from today on only.
-  expect(await page.evaluate((today) => [...plannedEventsByDate(today).keys()].every((day) => day >= today), days.today)).toBe(true);
   // A multi-day event shows on each of its days but not on its end day at midnight.
   await expect(page.locator(`.planned-day[data-date="${days.after}"] .planned-event-chip`)).toHaveCount(1);
   // The band replaces the calendar note line for the day.
@@ -156,7 +154,13 @@ test("@responsive the band holds on every weekday", async ({ page, request }) =>
     await showCalendarDay(page, days.day);
     await expect(page.locator(`.planned-day[data-date="${days.day}"] .planned-event-chip`), days.today).toHaveCount(5);
     await expect(page.locator(`.planned-day[data-date="${days.after}"] .planned-event-chip`), days.today).toHaveCount(1);
-    expect(await page.evaluate((today) => [...plannedEventsByDate(today).keys()].every((day) => day >= today), days.today)).toBe(true);
+    // An event that began before today ("Urlaub") shows from today on only, in the rendered week.
+    await showCalendarDay(page, days.today);
+    await expect(page.locator(`.planned-day[data-date="${days.today}"] .planned-event-chip`).filter({ hasText: "Urlaub" }), days.today).toHaveCount(1);
+    const pastChips = await page.locator(".planned-day").evaluateAll((sections, today) => sections
+      .filter((section) => section.dataset.date < today)
+      .reduce((count, section) => count + section.querySelectorAll(".planned-event-chip").length, 0), days.today);
+    expect(pastChips, days.today).toBe(0);
   }
 });
 
