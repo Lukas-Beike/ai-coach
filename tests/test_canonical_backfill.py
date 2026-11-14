@@ -458,6 +458,46 @@ class ReprojectionTests(BackfillFixture):
             rows,
         )
 
+    def test_reprojection_keeps_the_dedicated_section_of_a_shared_key(self) -> None:
+        # #2782: readiness and its history, and the latest and the historical FTP,
+        # report one natural key for the same day; the dedicated section wins in
+        # the live ingest and must win in the re-projection too.
+        day = "2026-10-03"
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                readiness=[{"calendarDate": day, "score": 81}],
+                training_readiness_history=[{"calendarDate": day, "score": 66}],
+                cycling_ftp={"calendarDate": day, "functionalThresholdPower": 260},
+                cycling_ftp_history=[
+                    {"calendarDate": day, "functionalThresholdPower": 250}
+                ],
+            ),
+        )
+        live = self.canonical_snapshot()
+        self.assertEqual(
+            self.rows(
+                "SELECT metric, value, owner_record_id FROM observations "
+                "WHERE metric IN ('readiness', 'ftp') ORDER BY metric"
+            ),
+            [
+                {"metric": "ftp", "value": 260.0, "owner_record_id": "cycling_ftp"},
+                {
+                    "metric": "readiness",
+                    "value": 81.0,
+                    "owner_record_id": f"readiness/{day}",
+                },
+            ],
+        )
+
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(self.make_backfill())
+
+        self.assertEqual(self.canonical_snapshot(), live)
+
     def garmin_activity_rows(self) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT details, load, mapper_version FROM activity_records "
