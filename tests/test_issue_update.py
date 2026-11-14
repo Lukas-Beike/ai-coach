@@ -148,15 +148,12 @@ class IssueUpdateTests(unittest.TestCase):
         self.assertEqual(fake.calls[0][4:], ["--remove-label", "in progress"])
 
     def test_close_refuses_open_boxes_and_open_prs_and_writes_nothing(self):
+        done, pull = "- [x] done\n", {"number": 5, "state": "OPEN", "title": "t"}
         for fake_args, expect in (
             ({}, "open checkbox: Add the script"),
-            (
-                {
-                    "body": "- [x] done\n",
-                    "pulls": [{"number": 5, "state": "OPEN", "title": "t"}],
-                },
-                "open PR #5",
-            ),
+            ({"body": done, "pulls": [{**pull, "body": "Closes #12"}]}, "open PR #5"),
+            # #2794: a part PR blocks the close like a closing one
+            ({"body": done, "pulls": [{**pull, "body": "part of: #12"}]}, "open PR #5"),
             (
                 {"body": "## Acceptance criteria\n- [ ] works\n## Parts\n- [ ] two\n"},
                 "open checkbox: two",
@@ -171,7 +168,11 @@ class IssueUpdateTests(unittest.TestCase):
                 self.assertEqual(fake.writes(), [])
 
     def test_close_comments_unlabels_and_closes_when_done(self):
-        pulls = [{"number": 5, "state": "MERGED", "title": "t"}]
+        pulls = [  # #2794: a mention or a longer number does not block
+            {"number": 5, "state": "MERGED", "title": "t", "body": "Closes #12"},
+            {"number": 7, "state": "OPEN", "title": "t", "body": "Builds on #12."},
+            {"number": 8, "state": "OPEN", "title": "t", "body": "Fixes #123"},
+        ]
         code, out, _, fake = self.run_script(
             "close",
             "12",
