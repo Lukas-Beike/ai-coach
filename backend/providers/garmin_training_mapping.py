@@ -209,7 +209,9 @@ def morning_readiness[T](
     undated: set[int] = set()
     for position, item in enumerate(items):
         record = record_of(item)
-        if record.get(_READINESS_CONTEXT) in _RESCORE_CONTEXTS:
+        # A non-text context (untrusted provider data) is no re-score (#2870).
+        context = record.get(_READINESS_CONTEXT)
+        if isinstance(context, str) and context in _RESCORE_CONTEXTS:
             continue
         day = _readiness_day(record)
         if day is None:
