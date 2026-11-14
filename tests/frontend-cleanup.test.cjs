@@ -42,7 +42,7 @@ test("every script and stylesheet of index.html is cached by the service worker"
 test("removed frontend symbols and files are gone from public/", () => {
   assert.ok(!fs.existsSync(path.join(publicDir, "forms.js")));
   const sources = [...scripts, "index.html", "service-worker.js"].map(read).join("\n");
-  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect"]) {
+  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect", "contextPreviewButton", "Coach-Kontext prüfen"]) {
     assert.ok(!sources.includes(removed), `${removed} is still referenced`);
   }
   assert.ok(!/id="trainingPlans"/.test(index));
