@@ -22,6 +22,9 @@ BROWSER_PROJECTS = ("mobile", "tablet-landscape", "desktop")
 BROWSER_SHARDS = 2
 WAIT_SECONDS = 45 * 60
 POLL_SECONDS = 30
+# Push runs per branch searched; a release chain spans far fewer.
+RUNS_PER_BRANCH = 100
+CALL_TIMEOUT = 60
 RUNNING = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
 
 
@@ -67,14 +70,18 @@ def complete(jobs, native_shards):
     return True
 
 
-def choose(own_tree, own_run_id, runs, tree_of, jobs_of, repository, native_shards):
+def tree_of(run):
+    return (run.get("head_commit") or {}).get("tree_id")
+
+
+def choose(own_tree, own_run_id, runs, jobs_of, repository, native_shards):
     """Return (run id or None, reason, ids of earlier same-tree runs still running)."""
     candidates = [
         run
         for run in runs
         if run["id"] < own_run_id
         and trusted(run, repository)
-        and tree_of(run["head_sha"]) == own_tree
+        and tree_of(run) == own_tree
     ]
     running = sorted(run["id"] for run in candidates if run["status"] in RUNNING)
     for run in sorted(candidates, key=lambda item: item["id"], reverse=True):
@@ -82,13 +89,14 @@ def choose(own_tree, own_run_id, runs, tree_of, jobs_of, repository, native_shar
             continue
         if complete(jobs_of(run["id"]), native_shards):
             return run["id"], f"run {run['id']} ({run['head_branch']} push)", running
-    return None, "no complete green run of this tree", running
+    searched = f"{len(runs)} develop and main push runs searched"
+    return None, f"no complete green run of this tree ({searched})", running
 
 
 class GitHub:
     def __init__(self, repository):
         self.repository = repository
-        self.trees = {}
+        self.jobs = {}
 
     def api(self, path):
         output = subprocess.run(
@@ -96,6 +104,7 @@ class GitHub:
             check=True,
             capture_output=True,
             text=True,
+            timeout=CALL_TIMEOUT,
         ).stdout
         return json.loads(output)
 
@@ -103,59 +112,65 @@ class GitHub:
         found = []
         for branch in TRUSTED_BRANCHES:
             found += self.api(
-                f"actions/workflows/{WORKFLOW}/runs?event=push&branch={branch}&per_page=30"
+                f"actions/workflows/{WORKFLOW}/runs?event=push&branch={branch}"
+                f"&per_page={RUNS_PER_BRANCH}"
             )["workflow_runs"]
         return found
 
-    def tree_of(self, sha):
-        if sha not in self.trees:
-            self.trees[sha] = self.api(f"git/commits/{sha}")["tree"]["sha"]
-        return self.trees[sha]
-
     def jobs_of(self, run_id):
-        return self.api(f"actions/runs/{run_id}/jobs?per_page=100")["jobs"]
+        """Jobs of a completed run; they no longer change, so fetch them once."""
+        if run_id not in self.jobs:
+            self.jobs[run_id] = self.api(f"actions/runs/{run_id}/jobs?per_page=100")[
+                "jobs"
+            ]
+        return self.jobs[run_id]
 
 
 def decide(
-    github, own_tree, own_run_id, native_shards, wait=WAIT_SECONDS, sleep=time.sleep
+    github,
+    own_tree,
+    own_run_id,
+    native_shards,
+    wait=WAIT_SECONDS,
+    sleep=time.sleep,
+    clock=time.monotonic,
 ):
-    waited = 0
+    deadline = clock() + wait
     while True:
         run_id, reason, running = choose(
             own_tree,
             own_run_id,
             github.runs(),
-            github.tree_of,
             github.jobs_of,
             github.repository,
             native_shards,
         )
         if run_id or not running:
             return run_id, reason
-        if waited >= wait:
+        if clock() >= deadline:
             return None, f"earlier runs {running} still running after {wait} s"
         print(f"Waiting for earlier runs of this tree: {running}", flush=True)
         sleep(POLL_SECONDS)
-        waited += POLL_SECONDS
 
 
 def main():
-    repository = os.environ["REPOSITORY"]
-    source = os.environ["SOURCE_SHA"]
+    own_tree = ""
     try:
         own_tree = subprocess.run(
-            ["git", "rev-parse", f"{source}^{{tree}}"],
+            ["git", "rev-parse", f"{os.environ['SOURCE_SHA']}^{{tree}}"],
             check=True,
             capture_output=True,
             text=True,
+            timeout=CALL_TIMEOUT,
         ).stdout.strip()
         run_id, reason = decide(
-            GitHub(repository),
+            GitHub(os.environ["REPOSITORY"]),
             own_tree,
             int(os.environ["RUN_ID"]),
             int(os.environ["PYTHON_TEST_SHARDS"]),
         )
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+    # Any failure, an unexpected API shape included, runs the full suite.
+    except Exception as error:  # noqa: BLE001
         run_id, reason = None, f"lookup failed ({type(error).__name__})"
     if run_id:
         print(f"Reusing {reason}: tree {own_tree} already passed every suite.")

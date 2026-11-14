@@ -1196,7 +1196,7 @@ class ChangedFileClassifierTests(unittest.TestCase):
         )
         return values["docs_only"], values["ui"]
 
-    def test_workflow_skips_suites_only_on_a_classified_pull_request(self):
+    def test_workflow_skips_suites_only_on_classified_or_reused_runs(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         source = _job(workflow, "source", "image")
         self.assertIn("docs_only: ${{ steps.changes.outputs.docs_only }}", source)
@@ -1264,6 +1264,10 @@ class ChangedFileClassifierTests(unittest.TestCase):
             self.assertNotIn("docs_only", job.lower())
 
 
+# Commit -> tree of the fixture runs; the own tree is tree-a.
+_REUSE_TREES = {"same": "tree-a", "same-main": "tree-a", "other": "tree-b"}
+
+
 def _reuse_run(
     run_id,
     sha,
@@ -1277,6 +1281,7 @@ def _reuse_run(
     return {
         "id": run_id,
         "head_sha": sha,
+        "head_commit": {"tree_id": _REUSE_TREES[sha]},
         "event": event,
         "head_branch": branch,
         "status": status,
@@ -1299,10 +1304,6 @@ def _complete_jobs(**overrides):
     return jobs
 
 
-# Commit -> tree of the fixture runs; the own tree is tree-a.
-_REUSE_TREES = {"same": "tree-a", "same-main": "tree-a", "other": "tree-b"}
-
-
 class ReuseGreenTreeTests(unittest.TestCase):
     """Only a complete green push run of the identical tree is reused (#2749)."""
 
@@ -1312,7 +1313,6 @@ class ReuseGreenTreeTests(unittest.TestCase):
             "tree-a",
             own_run_id,
             runs,
-            _REUSE_TREES.__getitem__,
             lambda run_id: jobs.get(run_id, _complete_jobs()),
             "owner/repo",
             4,
@@ -1377,19 +1377,26 @@ class ReuseGreenTreeTests(unittest.TestCase):
         )
         github = mock.Mock(repository="owner/repo")
         github.runs.side_effect = lambda: next(states)
-        github.tree_of.side_effect = _REUSE_TREES.__getitem__
         github.jobs_of.side_effect = lambda run_id: _complete_jobs()
         sleeps = []
         run_id, _ = reuse_green_tree.decide(
-            github, "tree-a", 100, 4, wait=60, sleep=sleeps.append
+            github, "tree-a", 100, 4, wait=60, sleep=sleeps.append, clock=lambda: 0
         )
         self.assertEqual((run_id, sleeps), (7, [reuse_green_tree.POLL_SECONDS]))
         # A run that never finishes is waited for only until the limit.
         github.runs.side_effect = lambda: [
             _reuse_run(7, "same", status="queued", conclusion=None)
         ]
+        # The deadline counts lookup time too, not only the sleeps.
+        times = iter([0, 30, 61])
         run_id, reason = reuse_green_tree.decide(
-            github, "tree-a", 100, 4, wait=60, sleep=lambda _: None
+            github,
+            "tree-a",
+            100,
+            4,
+            wait=60,
+            sleep=lambda _: None,
+            clock=lambda: next(times),
         )
         self.assertIsNone(run_id)
         self.assertIn("still running", reason)
@@ -1419,7 +1426,7 @@ class ReuseGreenTreeTests(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         e2e = _job(workflow, "e2e", "browser")
         self.assertIn(
-            json.dumps(list(reuse_green_tree.BROWSER_PROJECTS)).replace('","', '", "'),
+            json.dumps(list(reuse_green_tree.BROWSER_PROJECTS)),
             e2e,
         )
         self.assertIn(f"shards: [{reuse_green_tree.BROWSER_SHARDS}]\n", e2e)
@@ -1451,7 +1458,7 @@ class ReuseGreenTreeTests(unittest.TestCase):
         # Publishing still needs source, image, container-tested aggregates.
         publish = workflow.split("  build-and-push:\n", 1)[1]
         for condition in (
-            "always() &&",
+            "!cancelled() &&",
             "needs.source.result == 'success' && needs.image.result == 'success' &&",
             "needs.test.result == 'success' && needs.browser.result == 'success' &&",
             "(needs.e2e.result == 'success' || (needs.source.outputs.reuse_run != '' && needs.e2e.result == 'skipped')) &&",
