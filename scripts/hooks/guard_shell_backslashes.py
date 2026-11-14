@@ -23,9 +23,10 @@ INTERPRETER = re.compile(
 )
 WRITER = re.compile(r"\btee\b|\bcat\b[^>]*>(?![>&]?\s*/dev/null)(?!&)")
 HEREDOC = re.compile(r"<<-?[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\?([A-Za-z_][\w-]*))")
-INLINE = re.compile(r"^(?:-[ce]|-p?i\S*|--eval|--command|-(?i:command))$")
+INLINE = {"-c", "-e", "--eval", "--command", "-Command", "-command"}
+PERL_IN_PLACE = re.compile(r"-p?i(?![A-Za-z])")
 SED = re.compile(r"(?:^|[/\\])sed(?:\.exe)?$")
-IN_PLACE = re.compile(r"^(?:-[A-Za-z]*i\S*|--in-place\S*)$")
+IN_PLACE = re.compile(r"-[A-Za-hj-z]*i|--in-place")
 SEGMENT = re.compile(r"[;&|\n]+")
 
 
@@ -61,7 +62,7 @@ def split_heredocs(command: str) -> tuple[list[tuple[str, str]], str]:
 def _inline_edit(segment: str) -> bool:
     words = segment.split()
     runs = any(INTERPRETER.search(f" {word}") for word in words)
-    if runs and any(INLINE.match(word) for word in words):
+    if runs and any(word in INLINE or PERL_IN_PLACE.match(word) for word in words):
         return True
     return any(SED.search(word) for word in words) and any(
         IN_PLACE.match(word) for word in words
