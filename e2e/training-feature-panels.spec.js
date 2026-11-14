@@ -84,6 +84,30 @@ test("@responsive training focus legend labels never overlap for lopsided shares
   for (const split of Object.values(results)) expect(split).toEqual({ overlap: 0, spill: 0 });
 });
 
+test("@responsive training focus draws pace-zone time after power zones", async ({ page }) => {
+  await page.goto("/#analysis/load");
+  await expect(page.locator("#analysisEmptyState")).toBeVisible();
+  // The stored run pace-zone seconds arrive in the focus report like heart rate and power (#2808).
+  await page.evaluate(() => {
+    const zone = (sensor, seconds) => ({ sensor, zone_model: "local", seconds, measured_seconds: Object.values(seconds).reduce((a, b) => a + b, 0), source: "lokale Zonen" });
+    renderTrainingFocus({
+      start: "2026-10-18", end: "2026-11-14", classified_sessions: 3,
+      categories: { low_aerobic: { load: 120 }, high_aerobic: { load: 60 }, anaerobic: { load: 20 } },
+      zones: [
+        zone("heart_rate", { Z1: 900, Z2: 3600, Z3: 1200, Z4: 600, Z5: 120 }),
+        zone("power", { Z1: 600, Z2: 1500, Z3: 600, Z4: 450, Z5: 300, Z6: 100, Z7: 50 }),
+        zone("pace", { Z1: 1080, Z2: 3300, Z3: 900, Z4: 540, Z5: 180 }),
+      ],
+    });
+  });
+  const zones = page.locator("#trainingZoneCharts");
+  await expect(zones.locator("h4")).toHaveText(["HF-Zonen", "Power-Zonen", "Pace-Zonen"].map((name) => new RegExp(`^${name}`)));
+  const pace = zones.locator(".training-focus-distribution").nth(2);
+  await expect(pace.locator(".training-focus-row > span:first-child")).toHaveText(["Z5", "Z4", "Z3", "Z2", "Z1"]);
+  await expect(pace.getByRole("progressbar", { name: "Z2: 55 Prozent" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test("@responsive recovery, power, training focus, season and calendar profiles show local facts", async ({ page, request }) => {
   test.setTimeout(120000);
   const seed = await request.get("/api/fixture/features");

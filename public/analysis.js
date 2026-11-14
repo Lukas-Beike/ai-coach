@@ -1798,8 +1798,8 @@ function trainingFocusZoneInfo(report, model, items) {
 
 function appendTrainingFocusZones(report, details) {
   const zones = report.zones || [];
-  for (const sensor of ["heart_rate", "power"]) {
-    const name = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
+  // Pace zones are counted for runs only and follow power (#2808).
+  for (const [sensor, name] of [["heart_rate", "HF-Zonen"], ["power", "Power-Zonen"], ["pace", "Pace-Zonen"]]) {
     const matching = zones.filter((item) => item.sensor === sensor);
     if (!matching.some((item) => item.measured_seconds > 0)) continue;
     for (const model of ["local", "provider"]) {
