@@ -23,16 +23,21 @@ GREEN = {
     "conclusion": "SUCCESS",
 }
 RED = {**GREEN, "conclusion": "FAILURE"}
+PIN = ["--squash", "--match-head-commit", "feedc0de"]
 
 
-def view(state, checks=(GREEN,)):
+def view(state="OPEN", checks=(GREEN,), **extra):
     merge = {"oid": "0123456789abcdef"} if state == "MERGED" else None
-    return {"state": state, "mergeCommit": merge, "statusCheckRollup": list(checks)}
+    return {
+        "state": state, "baseRefName": "develop", "headRefOid": "feedc0de",
+        "autoMergeRequest": None, "mergeCommit": merge,
+        "statusCheckRollup": list(checks), "comments": [], "reviews": [], **extra,
+    }  # fmt: skip
 
 
-def run(case, *args, auto_error="", views=()):
+def run(case, *args, auto_error="", views=None):
     """Run main against a stub that answers `pr view` from `views` in order."""
-    calls, views = [], list(views)
+    calls, views = [], list(views or [view()])
 
     def fake(argv, **_kwargs):
         calls.append(argv[1:])
@@ -50,45 +55,53 @@ def run(case, *args, auto_error="", views=()):
     ):
         code = pr_merge.main([str(arg) for arg in args])
     case.assertEqual(views, [], "every stubbed state was polled")
-    return code, out.getvalue() + err.getvalue(), calls, sleep.call_count
+    writes = [call for call in calls if call[:2] == ["pr", "merge"]]
+    return code, out.getvalue() + err.getvalue(), writes, sleep.call_count
 
 
 class PrMergeTests(unittest.TestCase):
-    def test_arms_squash_auto_merge(self):
-        code, out, calls, _ = run(self, 7)
-        self.assertEqual(
-            (code, calls), (0, [["pr", "merge", "7", "--auto", "--squash"]])
-        )
+    def test_arms_squash_auto_merge_on_the_read_head(self):
+        code, out, writes, _ = run(self, 7)
+        self.assertEqual((code, writes), (0, [["pr", "merge", "7", "--auto", *PIN]]))
         self.assertIn("auto-merge armed", out)
 
-    def test_clean_status_refusal_merges_directly(self):
+    def test_clean_status_refusal_merges_the_same_head_directly(self):
         # #2776: GitHub refuses auto-merge for a PR whose checks already passed
-        code, out, calls, _ = run(self, 7, auto_error=CLEAN)
-        self.assertEqual(code, 0)
-        self.assertEqual(calls[-1], ["pr", "merge", "7", "--squash"])
-        self.assertIn("merged directly", out)
+        code, out, writes, _ = run(self, 7, auto_error=CLEAN)
+        self.assertEqual((code, writes[-1]), (0, ["pr", "merge", "7", *PIN]))
+        self.assertIn("merged feedc0de directly", out)
 
-    def test_other_refusal_fails_without_a_direct_merge(self):
-        code, out, calls, _ = run(self, 7, auto_error="GraphQL: Base branch policy")
-        self.assertEqual((code, len(calls)), (2, 1))
-        self.assertIn("Base branch policy", out)
+    def test_refusals_never_merge_directly(self):
+        for kwargs, expect in (
+            ({"auto_error": "GraphQL: Base branch policy"}, 2),
+            ({"views": [view(baseRefName="feature/x")]}, 1),
+            ({"views": [view(autoMergeRequest={"mergeMethod": "SQUASH"})]}, 0),
+        ):
+            with self.subTest(expect=expect):
+                code, _, writes, _ = run(self, 7, **kwargs)
+                self.assertEqual(code, expect)
+                self.assertNotIn(["pr", "merge", "7", *PIN], writes)
 
     def test_wait_polls_in_turn_until_merged(self):
         # #2795: no yield on a watcher that may never wake on the merge
-        views = [view("OPEN"), view("OPEN"), view("MERGED")]
+        views = [view(), view(), view(), view("MERGED")]
         code, out, _, sleeps = run(self, 7, "--wait", 5, views=views)
         self.assertEqual((code, sleeps), (0, 2))
         self.assertIn("merged: 0123456789", out)
 
-    def test_wait_stops_on_close_failure_or_timeout(self):
-        for views, minutes, expect in (
+    def test_wait_stops_on_close_failure_feedback_or_timeout(self):
+        late = view(reviews=[{"body": "finding"}])
+        for polls, minutes, expect in (
             ([view("CLOSED")], 5, 1),
-            ([view("OPEN", (GREEN, RED))], 5, 1),
-            ([view("OPEN")] * 4, 1, 3),
+            ([view(checks=(GREEN, RED))], 5, 1),
+            ([late], 5, 1),
+            ([view()] * 4, 1, 3),
         ):
-            with self.subTest(expect=expect, polls=len(views)):
-                code, _, _, sleeps = run(self, 7, "--wait", minutes, views=views)
-                self.assertEqual((code, sleeps), (expect, len(views) - 1))
+            with self.subTest(expect=expect, polls=len(polls)):
+                code, _, _, sleeps = run(
+                    self, 7, "--wait", minutes, views=[view(), *polls]
+                )
+                self.assertEqual((code, sleeps), (expect, len(polls) - 1))
 
 
 if __name__ == "__main__":
