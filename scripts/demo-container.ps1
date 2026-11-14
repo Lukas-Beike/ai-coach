@@ -7,13 +7,15 @@ Only fake data is used; providers stay blocked. Password: e2e-fixture-password-1
   .\scripts\demo-container.ps1 -Persist       # data survives recreation (named volume)
   .\scripts\demo-container.ps1 -SkipBuild -Port 8091
   .\scripts\demo-container.ps1 -Stop            # remove it again (never its volume)
+  .\scripts\demo-container.ps1 -HeavyHistory 900  # plus 900 synthetic long sessions (performance checks)
 #>
 param(
     [string]$Name = "pacecraft-demo",
     [int]$Port = 8091,
     [switch]$Persist,
     [switch]$SkipBuild,
-    [switch]$Stop
+    [switch]$Stop,
+    [ValidateRange(0, 5000)][int]$HeavyHistory = 0
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -45,13 +47,16 @@ if ($Stop) {
 $dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
     "-e", "FIXTURE_AUTO_SEED=1", "-e", "AI_COACH_DISPOSABLE_FIXTURE=1", "-v", "${PWD}\e2e:/app/e2e:ro")
 if ($Persist) { $dockerArguments += @("-v", "${Name}-data:/data") }
+if ($HeavyHistory -gt 0) { $dockerArguments += @("-e", "FIXTURE_HEAVY_HISTORY=$HeavyHistory") }
 $dockerArguments += @("pacecraft:local", "python", "/app/e2e/fixture_runtime.py")
 docker @dockerArguments | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Starting container '$Name' failed (exit $LASTEXITCODE)." }
 
-# Bounded readiness wait: at most 60 probes. Failed probes and non-200 answers both sleep.
+# Bounded readiness wait: at most 60 probes (600 while a heavy history seeds).
+# Failed probes and non-200 answers both sleep.
+$probes = if ($HeavyHistory -gt 0) { 600 } else { 60 }
 $healthy = $false
-for ($i = 0; $i -lt 60 -and -not $healthy; $i++) {
+for ($i = 0; $i -lt $probes -and -not $healthy; $i++) {
     try {
         if ((Invoke-WebRequest "http://127.0.0.1:$Port/api/health" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) {
             $healthy = $true

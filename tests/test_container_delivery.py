@@ -261,6 +261,17 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertIn("AI_COACH_DISPOSABLE_FIXTURE=1", run)
         self.assertIn("FIXTURE_AUTO_SEED=1", run)
         self.assertFalse(any(argument.endswith(":/data") for argument in run))
+        self.assertFalse(any("FIXTURE_HEAVY_HISTORY" in argument for argument in run))
+        # #2801: the heavy history is opt-in and only adds its seed variable.
+        _, calls = self.run_script(
+            "-Name", DEMO_NAME, "-SkipBuild", "-HeavyHistory", "900", fail=("run",)
+        )
+        heavy = next(call for call in calls if call[0] == "run")
+        seed = heavy.index("FIXTURE_HEAVY_HISTORY=900")
+        self.assertEqual(
+            heavy[seed - 1 : seed + 1], ["-e", "FIXTURE_HEAVY_HISTORY=900"]
+        )
+        self.assertEqual(len(heavy), len(run) + 2)
 
     def test_persist_uses_a_named_volume_and_never_removes_volumes(self):
         _, calls = self.run_script(

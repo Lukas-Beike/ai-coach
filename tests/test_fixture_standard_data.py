@@ -887,6 +887,38 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             },
         }
 
+    def test_heavy_history_seeds_count_and_full_streams_once(self):
+        # #2801: opt-in history for performance checks, seeded through the env.
+        with self._temporary_fixture_database("fixture-heavy-") as server:
+            with patch.dict("os.environ", {"FIXTURE_HEAVY_HISTORY": "3"}):
+                fixture_runtime.initialise_fixture()
+                fixture_runtime.initialise_fixture()  # a restart seeds nothing new
+            ids = [i for i in self._snapshot_activity_ids(server) if "heavy" in i]
+            self.assertEqual(sorted(ids), [f"heavy-history-{n}" for n in range(3)])
+            with server.database_manager().unit_of_work() as db:
+                for index, activity_id in enumerate(sorted(ids)):
+                    garmin = f"garmin-{fixture_runtime.fixture_wahoo_id(activity_id)}"
+                    channels = {
+                        channel: len(values)
+                        for item in detail_sets_for(db, "garmin", garmin)
+                        for channel, values in getattr(
+                            item.detail, "channels", {}
+                        ).items()
+                    }
+                    extra = (
+                        StreamChannel.POWER_W
+                        if index % 2 == 0
+                        else StreamChannel.SPEED_MPS
+                    )
+                    expected = (
+                        StreamChannel.TIME_S,
+                        StreamChannel.HEART_RATE_BPM,
+                        extra,
+                    )
+                    self.assertEqual(channels, dict.fromkeys(expected, 5400))
+            with self.assertRaises(ValueError):
+                fixture_runtime.seed_heavy_history(0)
+
     def test_v6_fresh_seed_contains_each_scenario(self):
         with self._temporary_fixture_database("fixture-v6-fresh-") as server:
             fixture_runtime.initialise_fixture()

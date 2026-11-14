@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -484,6 +485,8 @@ def initialise_fixture():
     # and seeds the training features once, so restarts leave the data as-is.
     if os.environ.get("FIXTURE_AUTO_SEED") == "1":
         seed_preview_demo()
+    if heavy := (os.environ.get("FIXTURE_HEAVY_HISTORY") or "").strip():
+        seed_heavy_history(int(heavy))
 
 
 FIXTURE_ACTIVITY_TIME = "T08:00:00"
@@ -974,6 +977,60 @@ def _run_session_analysis():
             if stage.run_batch(db).done:
                 return
     raise RuntimeError("fixture session analysis did not finish")
+
+
+FIXTURE_HEAVY_HISTORY_MAX = 5000
+
+
+def seed_heavy_history(count, seconds=5400):
+    """Opt-in large synthetic history for performance checks (#2801).
+
+    ``count`` alternating rides and runs of ``seconds`` each, about every 1.5
+    days back over several years, with full-resolution heart rate plus power or
+    speed streams on their Garmin copies. It goes through the same canonical
+    stores as the standard seed, runs once per count, and leaves the session
+    analyses to the app's own backfill, as after a real first sync.
+    """
+    if not 0 < count <= FIXTURE_HEAVY_HISTORY_MAX:
+        raise ValueError(
+            f"FIXTURE_HEAVY_HISTORY must be 1 to {FIXTURE_HEAVY_HISTORY_MAX}"
+        )
+    with server.database_manager().unit_of_work() as db:
+        if server.KEY_VALUE_REPOSITORY.get(db, "fixture_heavy_history") == str(count):
+            return
+    today = server.ATHLETE_CLOCK.now().date()
+    rows = []
+    for index in range(count):
+        ride = index % 2 == 0
+        rows.append(
+            {
+                "id": f"heavy-history-{index}",
+                "name": f"Fixture heavy {'ride' if ride else 'run'} {index}",
+                "type": "Ride" if ride else "Run",
+                "start_date_local": (
+                    today - timedelta(days=index * 3 // 2 + 1)
+                ).isoformat()
+                + FIXTURE_ACTIVITY_TIME,
+                "moving_time": seconds,
+                "elapsed_time": seconds,
+                "distance": seconds * (8.5 if ride else 3.1),
+                "icu_training_load": 60 + index % 5 * 15,
+            }
+        )
+    _merge_snapshot_activities(rows)
+    time_s = list(range(seconds))
+    heart = [round(135 + 15 * math.sin(t / 300) + t / seconds * 8, 1) for t in time_s]
+    for index, row in enumerate(rows):
+        streams = {"time": time_s, "heartrate": heart}
+        if index % 2 == 0:
+            streams["watts"] = [round(210 + 45 * math.sin(t / 90)) for t in time_s]
+        else:
+            streams["velocity_smooth"] = [
+                round(3.1 + 0.3 * math.sin(t / 60), 2) for t in time_s
+            ]
+        _save_garmin_copy(row["id"], streams)
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(db, "fixture_heavy_history", str(count))
 
 
 def _fixture_seed_fueling_ride(today):
