@@ -19,8 +19,9 @@ python scripts/run_browser_tests.py --project all --keep-going
 
 - `--project` is required (one project name, `all`, or `changed`); `--spec`
   repeats. `changed` picks what CI picks for the diff against `--base`
-  (default `origin/develop`): `desktop` without a UI change, otherwise `all`,
-  from `.github/scripts/ci_changes.py` (#2759). One project takes 28-32 min
+  (default `origin/develop`), from `.github/scripts/ci_changes.py` (#2759):
+  nothing for documentation only (exit 0, no run, as CI), `desktop` without a
+  UI change, otherwise `all`. One project takes 28-32 min
   locally with `--jobs 1`. Run the
   smallest selection that covers the change: the affected spec on the affected
   project, then the other viewports for layout changes. `--list` resolves the

@@ -183,7 +183,11 @@ class BrowserRunnerTests(unittest.TestCase):
 
     def test_changed_project_follows_the_ci_classifier(self):
         # --project changed reuses .github/scripts/ci_changes.py (#2759, #2748).
-        with tempfile.TemporaryDirectory() as directory:
+        isolated = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        with (
+            mock.patch.dict(os.environ, isolated),
+            tempfile.TemporaryDirectory() as directory,
+        ):
             root = Path(directory)
 
             def git(*args):
@@ -198,6 +202,11 @@ class BrowserRunnerTests(unittest.TestCase):
             git("add", ".")
             git("commit", "-q", "-m", "base")
             git("switch", "-q", "-c", "work")
+            self.assertEqual(runner.changed_project("base", root)[0], "desktop")
+            (root / "docs").mkdir()
+            (root / "docs" / "notes.md").write_text("", encoding="utf-8")
+            # Documentation alone: CI runs no browser project, so none runs.
+            self.assertIsNone(runner.changed_project("base", root)[0])
             (root / "server.py").write_text("x = 1\n", encoding="utf-8")
             self.assertEqual(runner.changed_project("base", root)[0], "desktop")
             # An untracked client file counts as a UI change.
@@ -206,8 +215,8 @@ class BrowserRunnerTests(unittest.TestCase):
             project, reason = runner.changed_project("base", root)
             self.assertEqual(project, "all")
             self.assertIn("public/app.js", reason)
-        args = runner.parser().parse_args(["--project", "changed"])
-        self.assertEqual((args.project, args.base), ("changed", "origin/develop"))
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            runner.main(["--project", "desktop", "--base", "origin/main"])
 
     def test_spec_a_project_does_not_list_is_skipped_with_a_note(self):
         data = report()

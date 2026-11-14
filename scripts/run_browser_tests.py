@@ -188,6 +188,8 @@ class Evidence:
                 "mode": "complete"
                 if args.project == "all" and not args.spec
                 else "focused",
+                # How --project changed chose the project (#2759), or None.
+                "chosen_by": getattr(args, "chosen_by", None),
             },
             "resources": {"jobs": args.jobs, "playwright_workers": 1, "ports": []},
             "phases": {},
@@ -1295,7 +1297,7 @@ def parser():
         "diff against --base touches the UI, as CI decides (required)",
     )
     result.add_argument(
-        "--base", default="origin/develop", help="ref --project changed compares with"
+        "--base", help="ref --project changed compares with (default origin/develop)"
     )
     result.add_argument(
         "--spec",
@@ -1381,17 +1383,26 @@ def _load(name, path):
 
 
 def changed_project(base, root=ROOT):
-    """The CI choice (#2748) for the local diff: desktop without a UI change.
+    """CI's project choice for the local diff (#2747, #2748), or None for docs only.
 
     Paths come from the Python test selector (committed, staged, unstaged and
     untracked files since the merge base) and the decision from CI's single
     classifier, so local and pull-request runs pick the same projects (#2759).
+    An empty diff, known here rather than unreadable as in CI, runs desktop.
     """
     paths = _load("changed_tests", "tests/changed_tests.py").changed_paths(base, root)
-    ui = _load("ci_changes", ".github/scripts/ci_changes.py")
-    touched = [path for path in paths if ui.touches_ui(path)]
-    if ui.ui(paths):
-        return "all", f"UI paths changed: {', '.join(touched[:5]) or 'no diff'}"
+    ci = _load("ci_changes", ".github/scripts/ci_changes.py")
+    if not paths:
+        return "desktop", "no changed path"
+    if ci.docs_only(paths):
+        return (
+            None,
+            f"documentation only ({len(paths)} paths); CI runs no browser project",
+        )
+    touched = [path for path in paths if ci.touches_ui(path)]
+    if touched:
+        more = f" (+{len(touched) - 5} more)" if len(touched) > 5 else ""
+        return "all", f"UI paths changed: {', '.join(touched[:5])}{more}"
     return "desktop", f"no UI path among {len(paths)} changed paths"
 
 
@@ -1406,12 +1417,20 @@ def main(argv=None):
         return 0
     if not args.project:
         parser().error("--project is required")
+    if args.base and args.project != "changed":
+        parser().error("--base applies only to --project changed")
+    args.chosen_by = None
     if args.project == "changed":
+        base = args.base or "origin/develop"
         try:
-            args.project, reason = changed_project(args.base)
-        except OSError, subprocess.CalledProcessError:
-            parser().error(f"--project changed cannot diff against {args.base}")
-        print(f"--project changed: {args.project} ({reason})", file=sys.stderr)
+            project, reason = changed_project(base)
+        except (OSError, subprocess.CalledProcessError) as error:
+            parser().error(f"--project changed cannot diff against {base}: {error}")
+        print(f"--project changed: {project or 'none'} ({reason})", file=sys.stderr)
+        if project is None:
+            return 0
+        args.project = project
+        args.chosen_by = {"requested": "changed", "base": base, "reason": reason}
     run_id = uuid.uuid4().hex
     args.results_dir = args.results_dir.resolve()
     directory = args.results_dir / run_id
