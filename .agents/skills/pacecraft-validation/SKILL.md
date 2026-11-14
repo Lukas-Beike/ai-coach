@@ -1,6 +1,6 @@
 ---
 name: pacecraft-validation
-description: Choose focused ai-coach backend, browser, PWA, and Docker checks for a change. Use after a change, before a commit or PR, or when validating a suspected regression.
+description: Choose focused ai-coach backend, browser, PWA, and Docker checks for a change. Use after a change or a dependency upgrade, before a commit or PR, or when validating a suspected regression.
 ---
 
 - Backend: run focused tests while iterating, then [run-tests-changed](../pacecraft-run-tests-changed/SKILL.md) on the final tree (selector, compileall, quality ratchet, JS tests when JS changed); the selector prints why each module was selected and falls back to the full suite for harness, fixture, `backend/canonical/`, `backend/db/`, and dependency changes. Do not run the full suite locally otherwise: CI runs all shards on every PR. Run it only to reproduce a CI failure, when the selector misses a dependency you can name (then fix the test so it names that path), or when the user asks. Run `python -m compileall -q server.py backend tests` for syntax checks. `python tests/run_tests.py --suite container` runs only the container-sensitive subset; `tests/run_sqlcipher_tests.ps1` runs that subset inside Docker as CI's container job does (`-Suite all` for every module); for Garmin- or SQLCipher-only modules run `python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) instead of an improvised `docker run`.

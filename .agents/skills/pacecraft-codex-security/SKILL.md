@@ -1,6 +1,6 @@
 ---
 name: pacecraft-codex-security
-description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Pacecraft security boundaries. Use only when the user explicitly asks for a Codex Security scan or a security review of a code change; not for ordinary PR reviews (code-review).
+description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Pacecraft security boundaries. Use only when the user explicitly asks for a Codex Security scan; a plain security or PR review uses code-review.
 ---
 
 This is a local workflow; do not add GitHub Actions integration or require an API key.

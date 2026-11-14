@@ -1,6 +1,6 @@
 ---
 name: pacecraft-graphify
-description: Set up, refresh, export and troubleshoot the fully local Graphify structural graph of Pacecraft source, symbols, and dependencies. Use when the graph is missing, stale or failing, or for its setup, hooks, exports and graphify-local MCP server; plain queries use pacecraft-graphify-query.
+description: Navigate Pacecraft source, symbols, and dependencies with the fully local Graphify structural graph, and set it up, refresh, export or troubleshoot it. Use for repository-wide symbol or dependency maps and when the graph is missing, stale or failing; the query commands are in pacecraft-graphify-query.
 ---
 
 # Local structural graph
@@ -49,8 +49,8 @@ Commands (run from the repository root):
 - `python scripts/graphify_local.py export wiki --output .graphify-local/exports/wiki` creates a local wiki view.
 - `python scripts/graphify_local.py mcp` starts a local stdio MCP server. The
   core CLI delegates exports to the separate export helper. Its read-only snapshot
-  exposes `graphify-local:graph_query`, `graphify-local:graph_node`,
-  `graphify-local:graph_path`, and `graphify-local:graph_stats`, with no
+  exposes `graph_query`, `graph_node`, `graph_path`, and `graph_stats` (in
+  Claude `mcp__graphify-local__graph_query` and so on), with no
   upstream PR tools; restart the server after graph edits to refresh the snapshot.
   The Claude `explorer` subagent starts it inline as `graphify-local` from the
   repository root on each run. It refuses to start while sources are newer than
@@ -59,9 +59,10 @@ Commands (run from the repository root):
 Codex requires repository trust and approval for the hook in `/hooks`. Claude
 Code requires repository trust for the checked-in hook settings. Do not bypass
 either host's trust prompt. If the host does not activate the hook, run the
-update command manually. Hook delivery is verified only for T3 Code's Claude
-SessionStart hook in a task worktree, not for native Codex/Claude hosts; the
-test commands validate configuration and launcher behavior, not host dispatch.
+update command manually. Hook delivery was observed once, for T3 Code's Claude
+SessionStart hook in a task worktree; that does not establish delivery by every
+host or provider, and the test commands validate configuration and launcher
+behavior, not host dispatch.
 
 The query CLI chooses the active graph automatically. Keep broad-match handling
 conservative: report incomplete/stale results and fall back to `rg` and direct
