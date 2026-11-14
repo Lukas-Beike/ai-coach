@@ -130,7 +130,15 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 - **WHEN** a push, release or dispatch run is in progress
 - **THEN** no other run cancels it; only a newer push to the same pull request does
 
-Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `test_shards`, `container_tests`, `test`, `quality`, `image_sbom`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`. No test pins the SBOM retry.
+#### Scenario: Documentation-only pull request
+- **WHEN** `.github/scripts/ci_changes.py` finds that the pull request's merge commit changes documentation alone
+- **THEN** shard 1 runs only the changed-test selection and the Node unit tests, the container, browser and quality jobs are skipped, the image, syntax and SBOM jobs still run, and the `test` and `Browser checks` aggregates pass with "docs-only: suites skipped"; they accept a skipped job only in that case
+
+#### Scenario: Push, release and dispatch never skip
+- **WHEN** the workflow runs for anything but a pull request, or the checkout is not a merge commit
+- **THEN** no classification happens and every suite runs
+
+Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `source`, `test_shards`, `container_tests`, `test`, `quality`, `image_sbom`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `.github/scripts/ci_changes.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`; `tests/test_ci_contracts.py::test_pull_request_merge_commit_is_classified_and_every_other_event_is_not`; `tests/test_ci_contracts.py::test_workflow_skips_suites_only_on_a_classified_pull_request`. No test pins the SBOM retry.
 
 ### Requirement: Immutable release source and version agreement
 

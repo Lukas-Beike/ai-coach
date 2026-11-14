@@ -4,6 +4,7 @@ import fnmatch
 import functools
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -22,6 +23,20 @@ SPEC = importlib.util.spec_from_file_location(
 )
 release_source = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_source)
+CHANGES_SPEC = importlib.util.spec_from_file_location(
+    "ci_changes",
+    Path(__file__).resolve().parents[1] / ".github/scripts/ci_changes.py",
+)
+assert CHANGES_SPEC is not None and CHANGES_SPEC.loader is not None
+ci_changes = importlib.util.module_from_spec(CHANGES_SPEC)
+CHANGES_SPEC.loader.exec_module(ci_changes)
+WORKFLOW = (
+    Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml"
+)
+
+
+def _job(workflow, name, following):
+    return workflow.split(f"  {name}:\n", 1)[1].split(f"  {following}:\n", 1)[0]
 
 
 class WorkflowSourceTests(unittest.TestCase):
@@ -401,7 +416,7 @@ class WorkflowSourceTests(unittest.TestCase):
         browser = workflow.split("  browser:\n", 1)[1].split("  build-and-push:\n", 1)[
             0
         ]
-        self.assertIn("needs: e2e", browser)
+        self.assertIn("needs: [source, e2e]", browser)
         self.assertIn(
             "name: browser-run-summary-${{ matrix.project }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
             workflow,
@@ -1024,6 +1039,160 @@ class ReleaseSourceTests(unittest.TestCase):
         release_source.git(clone, "fetch", "--unshallow", "--tags", "origin")
         release_source.git(clone, "fetch", "origin", "main:refs/remotes/origin/main")
         release_source.verify(clone, self.sha, "1.7.2")
+
+
+class DocsOnlyClassifierTests(unittest.TestCase):
+    """A docs-only pull request skips the suites; nothing else ever does (#2747)."""
+
+    def test_only_documentation_paths_are_docs(self):
+        docs = (
+            "docs/testing.md",
+            "docs/notes.txt",
+            ".agents/skills/pr/SKILL.md",
+            ".agents/skills/pr/references/review.md",
+            "README.md",
+            "AGENTS.md",
+            "backend/AGENTS.md",
+            ".github/AGENTS.md",
+            "REVIEW.md",
+            "openspec/specs/coach/spec.md",
+        )
+        not_docs = (
+            ".agents/skills/pr/scripts/pr.py",
+            ".agents/skills/pr/scripts/notes.md",
+            ".agents/skills/pr/evals/evals.json",
+            "docs/diagram.png",
+            "openspec/config.yaml",
+            "public/AGENTS.md",
+            "public/InterVariable-LICENSE.md",
+            "backend/sync/AGENTS.md",
+            "tests/fixtures/providers/README.md",
+            ".github/workflows/publish-container.yml",
+            "tests/test_ci_contracts.py",
+            "scripts/release_dispatch.py",
+            "server.py",
+            "CHANGELOG.md",
+            "package.json",
+        )
+        for path in docs:
+            with self.subTest(path=path):
+                self.assertTrue(ci_changes.is_doc(path))
+                self.assertTrue(ci_changes.docs_only([path]))
+        for path in not_docs:
+            with self.subTest(path=path):
+                self.assertFalse(ci_changes.is_doc(path))
+                self.assertFalse(ci_changes.docs_only(["docs/testing.md", path]))
+        self.assertFalse(ci_changes.docs_only([]))
+
+    @unittest.skipUnless(shutil.which("git"), "needs Git for a merge-commit fixture")
+    def test_pull_request_merge_commit_is_classified_and_every_other_event_is_not(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-C", str(root), *args], text=True, stderr=subprocess.PIPE
+            ).strip()
+
+        def commit(path, message):
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(message, encoding="utf-8")
+            git("add", path)
+            git("commit", "-m", message)
+
+        git("init", "--initial-branch=develop")
+        git("config", "user.name", "Fixture")
+        git("config", "user.email", "fixture@example.invalid")
+        commit("server.py", "base")
+        for branch, path, expected in (
+            ("docs", "docs/testing.md", "true"),
+            ("code", "server.py", "false"),
+        ):
+            with self.subTest(branch=branch):
+                git("switch", "-c", branch, "develop")
+                commit(path, f"change {branch}")
+                git("switch", "--detach", "develop")
+                git("merge", "--no-ff", "-m", "merge", branch)
+                for event, want in (
+                    ("pull_request", expected),
+                    ("push", "false"),
+                    ("release", "false"),
+                    ("workflow_dispatch", "false"),
+                ):
+                    self.assertEqual(self._classify(root, event), want, event)
+                # A single-parent checkout is no pull request merge commit.
+                git("switch", "--detach", branch)
+                self.assertEqual(self._classify(root, "pull_request"), "false")
+
+    def _classify(self, root, event):
+        output = root.parent / f"{root.name}-output"
+        output.write_text("", encoding="utf-8")
+        self.addCleanup(output.unlink, missing_ok=True)
+        subprocess.run(
+            [sys.executable, Path(ci_changes.__file__).resolve()],
+            cwd=root,
+            env={**os.environ, "EVENT_NAME": event, "GITHUB_OUTPUT": str(output)},
+            check=True,
+            capture_output=True,
+        )
+        return output.read_text(encoding="utf-8").removeprefix("docs_only=").strip()
+
+    def test_workflow_skips_suites_only_on_a_classified_pull_request(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        source = _job(workflow, "source", "image")
+        self.assertIn("docs_only: ${{ steps.changes.outputs.docs_only }}", source)
+        classify = source.split("- name: Classify changed files\n", 1)[1]
+        self.assertIn("if: github.event_name == 'pull_request'\n", classify)
+        self.assertIn("python .github/scripts/ci_changes.py", classify)
+        skip = "if: needs.source.outputs.docs_only != 'true'\n"
+        self.assertIn(skip, _job(workflow, "container_tests", "test"))
+        self.assertIn(skip, _job(workflow, "e2e", "browser"))
+        self.assertIn(
+            "if: needs.test.result == 'success' && needs.source.outputs.docs_only != 'true'\n",
+            _job(workflow, "quality", "image_sbom"),
+        )
+        # Required "Test shard N/4" names need the matrix job itself to run.
+        shards = _job(workflow, "test_shards", "syntax")
+        self.assertNotRegex(shards.split("steps:", 1)[0], r"\n    if:")
+        self.assertIn(
+            "MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' "
+            "|| matrix.shard == 1 && 'docs' || 'idle' }}",
+            shards,
+        )
+        for mode, command in (
+            ("full", "coverage run tests/run_tests.py --shard"),
+            ("docs", "python tests/run_tests.py --changed --base HEAD^1 --with-heavy"),
+            # The skipped e2e job runs them otherwise; docs-only runs need them.
+            ("docs", "node --test tests/*.cjs"),
+        ):
+            self.assertIn(f"if: env.MODE == '{mode}'\n        run: {command}", shards)
+        # The scripts may use Python 3.14 syntax; the runner's own Python is older.
+        self.assertLess(
+            source.index("python-version: '3.14'"),
+            source.index("run: python .github/scripts/release_source.py"),
+        )
+        # Aggregators accept a skip only when the run is docs-only.
+        test = _job(workflow, "test", "quality")
+        self.assertIn(
+            'if [[ "$DOCS_ONLY" == "true" ]]; then\n            container_expected=skipped',
+            test,
+        )
+        self.assertIn('"$CONTAINER_TESTS_RESULT" != "$container_expected"', test)
+        self.assertIn("docs-only: suites skipped", test)
+        browser = _job(workflow, "browser", "build-and-push")
+        self.assertIn(
+            'if [[ "$DOCS_ONLY" == "true" && "$E2E_RESULT" == "skipped" ]]', browser
+        )
+        # Image, syntax, SBOM and publishing never skip.
+        never_skip = (
+            _job(workflow, "image", "test_shards"),
+            _job(workflow, "syntax", "container_tests"),
+            _job(workflow, "image_sbom", "e2e"),
+            workflow.split("  build-and-push:\n", 1)[1],
+        )
+        for job in never_skip:
+            self.assertNotIn("docs_only", job.lower())
 
 
 class ReleaseWorkflowTests(unittest.TestCase):

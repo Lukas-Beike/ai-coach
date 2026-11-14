@@ -1,5 +1,6 @@
 """Changed-test selection: affected modules in, unrelated modules out."""
 
+import io
 import os
 import subprocess
 import sys
@@ -266,6 +267,34 @@ class ChangedPathsTests(unittest.TestCase):
             mock.patch("sys.stdout"),
         ):
             self.assertEqual(run_tests.main(), 0)
+
+    def test_with_heavy_keeps_the_selected_slow_modules_for_ci(self):
+        import run_tests
+
+        # The runner pops skipped modules from the selection: a fresh one per run.
+        def selection(_paths):
+            return {"test_changed_tests": "names docs/x.md"}, "1 module"
+
+        heavy = {"test_changed_tests": "slow tooling module"}
+        for flags, listed in (([], False), (["--with-heavy"], True)):
+            with (
+                self.subTest(flags=flags),
+                mock.patch.object(
+                    sys, "argv", ["run_tests.py", "--changed", "--list", *flags]
+                ),
+                mock.patch.object(
+                    changed_tests, "changed_paths", return_value=["docs/x.md"]
+                ),
+                mock.patch.object(
+                    changed_tests, "select_modules", side_effect=selection
+                ),
+                mock.patch.object(changed_tests, "heavy_skips", return_value=heavy),
+                mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            ):
+                self.assertEqual(run_tests.main(), 0)
+                self.assertEqual(
+                    "test_changed_tests.ChangedPathsTests" in output.getvalue(), listed
+                )
 
     def test_reports_committed_uncommitted_and_untracked_paths(self):
         with tempfile.TemporaryDirectory() as directory:

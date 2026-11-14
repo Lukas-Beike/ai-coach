@@ -36,7 +36,7 @@ across the repository. The slow tooling modules
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if
 an imported backend module changed; the run prints why it skipped them. CI
-always runs everything:
+runs everything, except on a documentation-only pull request (below):
 ```powershell
 python tests/run_tests.py --changed
 python tests/run_tests.py --changed --list
@@ -56,6 +56,18 @@ IDs without running them:
 python tests/run_tests.py --shard 1 --total 4
 python tests/run_tests.py --shard 1 --total 4 --list
 ```
+A pull request that changes documentation alone skips the suites (#2747).
+`.github/scripts/ci_changes.py` diffs the merge commit against its base parent;
+documentation is Markdown or text under `docs/`, `.agents/skills/` (outside
+`scripts/`) or `openspec/`, plus `README.md`, `REVIEW.md`, `AGENTS.md` and
+first-level `AGENTS.md` files outside `public/`. Shard 1 then runs
+`--changed --base HEAD^1 --with-heavy` (slow tooling modules stay in when
+selected) and the Node unit tests, the other shards report without tests, and
+the container, browser and quality jobs are skipped; image, syntax and SBOM
+still run. The `test` and `Browser checks` aggregates print "docs-only: suites
+skipped". Push, release and dispatch runs never classify and always run
+everything.
+
 Refresh the recording when shard times drift apart, with a full unsharded run in
 the image. The Windows runner uses the same read-only mounts and writes the file
 into the given directory, which then replaces `tests/test_durations.json`:
