@@ -166,7 +166,7 @@ test.describe("colour contrast sweep", () => {
           await expectContrast(page, view, theme);
           if (route === "analysis/running") {
             // One opened explanation popover, named so a new chart legend cannot change it (#2766).
-            await page.locator(".panel.active").getByRole("button", { name: "Entwicklung: Informationen" }).click();
+            await page.locator(".panel.active").getByRole("button", { name: "Entwicklung: Informationen", exact: true }).click();
             await expect(page.locator(".analysis-info-tooltip:popover-open")).toHaveCount(1);
             await expectContrast(page, `${view} Erklärung`, theme);
             await page.keyboard.press("Escape");
