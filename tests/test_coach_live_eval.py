@@ -898,6 +898,7 @@ def product_id(name):
 
 
 SETTINGS = {
+    "provider": "openai",
     "base_url": "http://127.0.0.1:1/v1",
     "model": "m",
     "thinking": "low",
@@ -931,7 +932,9 @@ class ScriptedLoopTests(unittest.TestCase):
         ):
             with (
                 self.subTest(seeded=case_id),
-                live.case_server(SETTINGS["base_url"], "m", "low", "k") as seeded,
+                live.case_server(
+                    SETTINGS["base_url"], "m", "low", "k", provider="openai"
+                ) as seeded,
             ):
                 setup = CASES[case_id]["setup"]
                 live._seed(seeded, CASES[case_id])
@@ -1388,6 +1391,37 @@ class ScriptedLoopTests(unittest.TestCase):
         )
         self.assertEqual((result["safety"], result["misses"]), ([], []), result)
 
+    def test_an_anthropic_run_reaches_only_the_messages_api_and_is_counted(self):
+        from backend.providers.claude_requests import ClaudeMessagesClient
+        from backend.providers.openai_requests import OpenAIResponsesClient
+        from backend.providers.openai_stream import OpenAIStreamClient
+
+        models = []
+
+        def claude_stream(_self, request, *args, **kwargs):
+            models.append(request.model)
+            if request.output_schema:
+                text = json.dumps({"requests": [], "accepts_proposal": False})
+            else:
+                text = "Ein lockerer Lauf am Mittwoch passt gut."
+            return ModelTurn(text=text, usage={"input_tokens": 10, "output_tokens": 5})
+
+        listing = {"data": [{"id": "claude-sonnet-5-5", "created_at": "2026-11-01"}]}
+        settings = {**SETTINGS, "provider": "anthropic", "model": "claude-sonnet"}
+        counter = live.CallCounter(50)
+        refused = AssertionError("no OpenAI request")
+        with (
+            patch.object(ClaudeMessagesClient, "list_models", return_value=listing),
+            patch.object(ClaudeMessagesClient, "stream", claude_stream),
+            patch.object(OpenAIResponsesClient, "complete", side_effect=refused),
+            patch.object(OpenAIStreamClient, "stream", side_effect=refused),
+        ):
+            result = live.run_case(CASES["c10-advice-only"], counter, settings)
+        self.assertTrue(result["passed"], result)
+        self.assertTrue(models)
+        self.assertEqual(set(models), {"claude-sonnet-5-5"})
+        self.assertEqual(counter.calls, len(models))
+
     def test_the_call_cap_stops_a_case_half_way(self):
         counter = live.CallCounter(0)
         with scripted(["x"]), self.assertRaises(live.CapReached):
@@ -1403,7 +1437,14 @@ def run_main(*argv):
 
 
 class CommandLineTests(unittest.TestCase):
-    ARGS = ("--base-url", "http://127.0.0.1:8317/v1", "--model", "m")
+    ARGS = (
+        "--provider",
+        "openai",
+        "--base-url",
+        "http://127.0.0.1:8317/v1",
+        "--model",
+        "m",
+    )
 
     def test_an_unreachable_proxy_stops_with_one_line_and_runs_nothing(self):
         with (
@@ -1447,7 +1488,9 @@ class CommandLineTests(unittest.TestCase):
             code, text = run_main(*self.ARGS)
             self.assertEqual(code, 2)
             self.assertIn("not listed", text)
-            code, text = run_main("--base-url", "http://example.com/v1", "--model", "m")
+            code, text = run_main(
+                *self.ARGS[:2], "--base-url", "http://example.com/v1", "--model", "m"
+            )
             self.assertEqual(code, 2)
             self.assertIn("loopback", text)
             code, text = run_main(*self.ARGS, "--cases", "nope")
@@ -1494,7 +1537,13 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("1 passed, 0 failed, 3 not run", text)
 
     def test_the_openai_api_needs_the_key_and_prices_and_no_other_host_is_used(self):
-        openai = ("--base-url", "https://api.openai.com/v1", "--model", "m")
+        openai = (
+            *self.ARGS[:2],
+            "--base-url",
+            "https://api.openai.com/v1",
+            "--model",
+            "m",
+        )
         with (
             patch.object(live, "fetch_model_ids", return_value=["m"]) as models,
             patch.object(live, "run_case") as run_case,
@@ -1504,7 +1553,7 @@ class CommandLineTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("COACH_EVAL_API_KEY", text)
             code, text = run_main(
-                "--base-url", "https://example.com/v1", "--model", "m"
+                *self.ARGS[:2], "--base-url", "https://example.com/v1", "--model", "m"
             )
             self.assertEqual(code, 2)
             self.assertIn("loopback endpoint or the OpenAI API", text)
@@ -1536,8 +1585,110 @@ class CommandLineTests(unittest.TestCase):
                 "1",
             )
         self.assertEqual(code, 0)
-        models.assert_called_with("https://api.openai.com/v1", "sk-synthetic")
+        models.assert_called_with("https://api.openai.com/v1", "sk-synthetic", "openai")
         self.assertNotIn("sk-synthetic", text)
+
+    def test_the_provider_is_named_explicitly(self):
+        # No default and no fallback (#2429): a missing or unknown provider stops
+        # in argument parsing, before any request.
+        for argv in (self.ARGS[2:], ("--provider", "gemini", *self.ARGS[2:])):
+            with (
+                self.subTest(argv=argv),
+                patch.object(live, "fetch_model_ids") as models,
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                run_main(*argv)
+            self.assertEqual(stopped.exception.code, 2)
+            models.assert_not_called()
+
+    def test_the_anthropic_api_needs_a_family_the_key_and_prices(self):
+        anthropic = (
+            "--provider",
+            "anthropic",
+            "--base-url",
+            "https://api.anthropic.com",
+        )
+        priced = ("--price-input", "3", "--price-output", "15")
+        with (
+            patch.object(live, "fetch_model_ids", return_value=["claude-sonnet-5-5"]),
+            patch.object(live, "run_case") as run_case,
+            patch.dict(live.os.environ, {"COACH_EVAL_API_KEY": "sk-ant-synthetic"}),
+        ):
+            for argv, expected in (
+                (
+                    (*anthropic, "--model", "m", *priced),
+                    "claude-sonnet or claude-haiku",
+                ),
+                (
+                    (
+                        "--provider",
+                        "anthropic",
+                        "--base-url",
+                        "https://api.openai.com/v1",
+                        "--model",
+                        "claude-sonnet",
+                        *priced,
+                    ),
+                    "loopback endpoint or the Anthropic API",
+                ),
+                ((*anthropic, "--model", "claude-sonnet"), "--price-input"),
+                ((*anthropic, "--model", "claude-haiku", *priced), "not listed"),
+            ):
+                with self.subTest(expected=expected):
+                    code, text = run_main(*argv)
+                    self.assertEqual(code, 2)
+                    self.assertIn(expected, text)
+            run_case.assert_not_called()
+            run_case.return_value = {
+                "id": "c10-advice-only",
+                "passed": True,
+                "safety": [],
+                "misses": [],
+                "unnecessary_clarifications": 0,
+                "turns": [{"tools": [], "text": "ok"}],
+            }
+            code, text = run_main(
+                *anthropic,
+                "--model",
+                "claude-sonnet",
+                *priced,
+                "--cases",
+                "c10-advice-only",
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("- Provider: anthropic\n", text)
+        self.assertNotIn("sk-ant-synthetic", text)
+        _case, counter, settings = run_case.call_args.args
+        self.assertEqual(
+            (settings["provider"], settings["model"], settings["base_url"]),
+            ("anthropic", "claude-sonnet", "https://api.anthropic.com"),
+        )
+        # Cache writes count as input at 1.25 times the base price.
+        self.assertEqual(counter.prices, (3.75, 15.0))
+
+    def test_the_anthropic_model_list_uses_its_headers_and_never_a_bearer_token(self):
+        response = Mock()
+        response.read.return_value = json.dumps(
+            {"data": [{"id": "claude-sonnet-5-5"}]}
+        ).encode()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        with patch.object(
+            live.urllib.request, "urlopen", return_value=response
+        ) as opened:
+            models = live.fetch_model_ids(
+                "https://api.anthropic.com/", "sk-ant-synthetic", "anthropic"
+            )
+        self.assertEqual(models, ["claude-sonnet-5-5"])
+        request = opened.call_args.args[0]
+        self.assertEqual(
+            request.full_url, "https://api.anthropic.com/v1/models?limit=100"
+        )
+        headers = {key.lower(): value for key, value in request.header_items()}
+        self.assertEqual(headers["x-api-key"], "sk-ant-synthetic")
+        self.assertIn("anthropic-version", headers)
+        self.assertNotIn("authorization", headers)
 
     def test_an_unexpected_error_fails_its_case_and_keeps_the_report(self):
         secret_text = "raw upstream detail"
