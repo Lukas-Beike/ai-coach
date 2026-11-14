@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import io
 import json
-import os
 import re
 import socket
 import subprocess
@@ -77,8 +76,8 @@ class FakeProcesses:
         self.stopped = False
         self.overlap = None
         self.errors = threading.local()
-        # Containers of other runs, as "<id> <owner pid>" rows (#2721).
-        self.other_runs = ""
+        # Containers of other runs by run id, as "<id> <name>" rows (#2721).
+        self.other_runs = {}
 
     def stop_all(self):
         self.stopped = True
@@ -105,7 +104,8 @@ class FakeProcesses:
             self.removed.append(command[-1])
             return 0, ""
         if command[:2] == ["docker", "ps"]:
-            return 0, self.other_runs
+            run_id = command[command.index("--filter") + 1].rsplit("=", 1)[1]
+            return 0, self.other_runs.get(run_id, "")
         if command[:2] == ["docker", "start"]:
             return 0, ""
         if command[:2] == ["docker", "logs"]:
@@ -261,6 +261,7 @@ class BrowserRunnerTests(unittest.TestCase):
             args.append("--list")
         with (
             mock.patch.object(runner, "Processes", return_value=fake),
+            mock.patch.object(runner, "LOCK_DIR", Path(temporary.name) / "locks"),
             mock.patch.object(
                 runner,
                 "toolchain",
@@ -282,6 +283,14 @@ class BrowserRunnerTests(unittest.TestCase):
         manifests = list(Path(temporary.name).glob("*/manifest.json"))
         self.assertEqual(len(manifests), 1)
         return code, json.loads(manifests[0].read_text()), manifests[0]
+
+    def test_a_run_holds_its_lock_during_the_run_and_removes_it_after(self):
+        fake = FakeProcesses()
+        code, value, manifest = self.run_main(fake)
+        self.assertEqual(code, 0, self.stderr)
+        self.assertEqual(value["stale_containers_removed"], 0)
+        locks = manifest.parent.parent / "locks"
+        self.assertEqual(list(locks.glob("*.lock")), [])
 
     def test_list_does_not_start_containers_and_never_reports_passed(self):
         fake = FakeProcesses()
@@ -1158,35 +1167,64 @@ class BrowserRunnerTests(unittest.TestCase):
             self.assertNotIn("docker.sock", source)
             self.assertFalse(source.startswith(str(ROOT) + ":"))
 
-    def test_a_run_removes_only_containers_whose_runner_is_gone(self):
-        # A runner killed before its own cleanup leaves labelled containers (#2721).
+
+class StaleRunTests(unittest.TestCase):
+    """A run killed before its own cleanup leaves containers (#2721)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.locks = Path(temporary.name)
+        patcher = mock.patch.object(runner, "LOCK_DIR", self.locks)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_only_runs_whose_lock_nobody_holds_are_removed(self):
+        dead, live, unknown = "a" * 32, "b" * 32, "c" * 32
+        (self.locks / f"{dead}.lock").write_bytes(b"")
+        held = runner.hold_run_lock(live)
+        self.addCleanup(runner.release_run_lock, held, live)
         fake = FakeProcesses()
-        dead, alive, own = "a" * 12, "b" * 12, "c" * 12
-        fake.other_runs = (
-            f"{dead} 4242\n{alive} 4343\n{own} {os.getpid()}\n"
-            "dddddddddddd \nnot-an-id 4242\n"
-        )
-        with mock.patch.object(
-            runner, "process_alive", side_effect=lambda pid: pid != 4242
-        ):
-            code, value, _ = self.run_main(fake)
-        self.assertEqual(code, 0, self.stderr)
-        self.assertEqual(value["stale_containers_removed"], 1)
-        swept = [c[-1] for c in fake.commands if c[:3] == ["docker", "rm", "--force"]]
-        self.assertIn(dead, swept)
-        for kept in (alive, own, "dddddddddddd", "not-an-id"):
-            self.assertNotIn(kept, swept)
-        created = [c for c in fake.commands if c[:2] == ["docker", "create"]]
-        self.assertTrue(created)
-        for command in created:
-            self.assertIn(f"{runner.OWNER_LABEL}={os.getpid()}", command)
+        fake.other_runs = {
+            dead: f"{'1' * 12} acb-{dead}-net-0\n{'2' * 12} acb-{dead}-fixture-0-0\n",
+            live: f"{'3' * 12} acb-{live}-fixture-0-0\n",
+            unknown: f"{'4' * 12} acb-{unknown}-fixture-0-0\n",
+        }
+        self.assertEqual(runner.sweep_stale(fake), 2)
+        removals = [c for c in fake.commands if c[:2] == ["docker", "rm"]]
+        # One call, the network namespace last, like Containers.cleanup.
+        self.assertEqual(removals, [["docker", "rm", "--force", "2" * 12, "1" * 12]])
+        self.assertFalse((self.locks / f"{dead}.lock").exists())
+        self.assertTrue((self.locks / f"{live}.lock").exists())
+        queried = [c for c in fake.commands if c[:2] == ["docker", "ps"]]
+        self.assertEqual(len(queried), 1)  # no lock file, no query: never touched
+
+    def test_a_failed_removal_keeps_the_lock_for_the_next_sweep(self):
+        dead = "d" * 32
+        (self.locks / f"{dead}.lock").write_bytes(b"")
+        fake = FakeProcesses()
+        fake.other_runs = {dead: f"{'5' * 12} acb-{dead}-fixture-0-0\n"}
+        with mock.patch.object(fake, "run", side_effect=runner.RunnerError("busy")):
+            self.assertEqual(runner.sweep_stale(fake), 0)
+        self.assertTrue((self.locks / f"{dead}.lock").exists())
+
+    def test_a_run_holds_its_lock_and_releases_it(self):
+        run_id = "e" * 32
+        handle = runner.hold_run_lock(run_id)
+        with (self.locks / f"{run_id}.lock").open("a+b") as other:
+            self.assertFalse(runner._lock(other))
+        with self.assertRaises(runner.RunnerError):
+            runner.hold_run_lock(run_id)
+        runner.release_run_lock(handle, run_id)
+        self.assertFalse((self.locks / f"{run_id}.lock").exists())
 
     def test_cleanup_stale_only_sweeps_and_exits(self):
+        dead = "f" * 32
+        (self.locks / f"{dead}.lock").write_bytes(b"")
         fake = FakeProcesses()
-        fake.other_runs = "eeeeeeeeeeee 4242\n"
+        fake.other_runs = {dead: f"{'6' * 12} acb-{dead}-fixture-0-0\n"}
         with (
             mock.patch.object(runner, "Processes", return_value=fake),
-            mock.patch.object(runner, "process_alive", return_value=False),
             mock.patch("sys.stdout", new_callable=io.StringIO) as out,
         ):
             self.assertEqual(runner.main(["--cleanup-stale"]), 0)
@@ -1194,27 +1232,6 @@ class BrowserRunnerTests(unittest.TestCase):
         self.assertEqual(
             [c[:2] for c in fake.commands], [["docker", "ps"], ["docker", "rm"]]
         )
-
-    def test_a_run_whose_parent_is_gone_interrupts_itself(self):
-        stop = threading.Event()
-        with (
-            mock.patch.object(runner, "process_alive", return_value=False),
-            mock.patch.object(runner._thread, "interrupt_main") as interrupt,
-        ):
-            runner.watch_parent(stop, 4242, interval=0.01)
-        self.assertTrue(stop.is_set())
-        interrupt.assert_called_once_with()
-        stop.clear()
-        with mock.patch.object(runner._thread, "interrupt_main") as interrupt:
-            threading.Timer(0.05, stop.set).start()
-            runner.watch_parent(stop, os.getpid(), interval=0.01)
-        interrupt.assert_not_called()
-
-    def test_process_alive_reports_this_process_and_a_finished_one(self):
-        self.assertTrue(runner.process_alive(os.getpid()))
-        child = subprocess.Popen([sys.executable, "-c", "pass"])
-        child.wait()
-        self.assertFalse(runner.process_alive(child.pid))
 
 
 if __name__ == "__main__":

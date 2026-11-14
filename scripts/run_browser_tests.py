@@ -7,9 +7,7 @@ traces are disabled. Durations v1: {version:1, environment:{}, projects:{project
 
 from __future__ import annotations
 
-import _thread
 import argparse
-import ctypes
 import hashlib
 import inspect
 import json
@@ -35,9 +33,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
-# The runner's process id: a later run or --cleanup-stale removes the
-# containers of a runner that was killed before its own cleanup (#2721).
-OWNER_LABEL = LABEL + ".owner"
+# Each run holds an OS lock on <run id>.lock here for its whole life; the OS
+# releases it even when the runner is killed, so a lock file nobody holds marks
+# a run whose containers a later run may remove (#2721).
+LOCK_DIR = Path(tempfile.gettempdir()) / "pacecraft-browser-runs"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 # The fixture's other fake credential (e2e/fixture_runtime.py); redacted like the password.
 FAKE_OPENAI_KEY = "e2e-fixture-openai-key"
@@ -544,8 +543,6 @@ class Containers:
                     name,
                     "--label",
                     LABEL + "=" + self.run_id,
-                    "--label",
-                    f"{OWNER_LABEL}={os.getpid()}",
                     "--cidfile",
                     str(cidfile),
                     *arguments,
@@ -609,64 +606,78 @@ class Containers:
         return errors
 
 
-def process_alive(pid):
-    """Whether a local process id is running; unsure answers count as alive."""
-    if pid <= 0:
-        return True
-    if sys.platform == "win32":
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # query limited information
-        if not handle:
-            return ctypes.get_last_error() != 87  # 87: no such process
-        try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return True
-            return code.value == 259  # STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
+def _lock(handle, take=True):
+    """Take (non-blocking) or drop the exclusive lock of an open run lock file."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            mode = msvcrt.LK_NBLCK if take else msvcrt.LK_UNLCK
+            msvcrt.locking(handle.fileno(), mode, 1)
+        else:
+            import fcntl
+
+            flags = fcntl.LOCK_EX | fcntl.LOCK_NB if take else fcntl.LOCK_UN
+            fcntl.flock(handle.fileno(), flags)
+    except OSError:
         return False
-    except PermissionError:
-        return True
     return True
 
 
+def hold_run_lock(run_id):
+    """Hold this run's lock file until release_run_lock or the process ends."""
+    LOCK_DIR.mkdir(exist_ok=True)
+    handle = (LOCK_DIR / f"{run_id}.lock").open("a+b")
+    if not _lock(handle):
+        handle.close()
+        raise RunnerError("Browser run lock unavailable")
+    return handle
+
+
+def release_run_lock(handle, run_id):
+    _lock(handle, take=False)
+    handle.close()
+    (LOCK_DIR / f"{run_id}.lock").unlink(missing_ok=True)
+
+
 def sweep_stale(processes):
-    """Remove the labelled containers whose runner process is gone (#2721).
+    """Remove the containers of runs whose lock nobody holds any more (#2721).
 
-    Only containers carrying an owner process id are considered; another
-    running lane's containers and those of older runners are never touched.
+    Best effort: a failure leaves the lock file for the next sweep and never
+    stops the calling run. Runs without a lock file (older runners, another
+    host or namespace) are never touched; network namespaces go last.
     """
-    rows = checked(
-        processes,
-        ["docker", "ps", "-a", "--filter", f"label={OWNER_LABEL}", "--format",
-         "{{.ID}} {{.Label \"" + OWNER_LABEL + "\"}}"],
-    )  # fmt: skip
-    stale = []
-    for row in rows.splitlines():
-        cid, _, owner = row.strip().partition(" ")
-        if (
-            re.fullmatch(r"[a-f0-9]{12,64}", cid)
-            and owner.isdigit()
-            and int(owner) != os.getpid()
-            and not process_alive(int(owner))
-        ):
-            stale.append(cid)
-    for cid in stale:
-        checked(processes, ["docker", "rm", "--force", cid])
-    return len(stale)
-
-
-def watch_parent(stop, parent, interval=2.0):
-    """Interrupt the run once the process that started it is gone (#2721)."""
-    while not stop.wait(interval):
-        if not process_alive(parent):
-            stop.set()
-            _thread.interrupt_main()
-            return
+    removed = 0
+    for path in sorted(LOCK_DIR.glob("*.lock")) if LOCK_DIR.is_dir() else []:
+        if not re.fullmatch(r"[a-f0-9]{32}", path.stem):
+            continue
+        with path.open("a+b") as handle:
+            if not _lock(handle):
+                continue  # a live run holds it
+            try:
+                code, rows = processes.run(
+                    ["docker", "ps", "-a", "--filter", f"label={LABEL}={path.stem}",
+                     "--format", "{{.ID}} {{.Names}}"],
+                    cleanup=True,
+                )  # fmt: skip
+                found = sorted(
+                    (name.find("-net-") >= 0, name, cid)
+                    for cid, _, name in (row.partition(" ") for row in rows.split("\n"))
+                    if re.fullmatch(r"[a-f0-9]{12,64}", cid)
+                )
+                if code == 0 and found:
+                    code, _ = processes.run(
+                        ["docker", "rm", "--force", *(cid for *_, cid in found)],
+                        cleanup=True,
+                    )
+            except RunnerError, OSError:
+                code = 1
+            _lock(handle, take=False)
+        if code == 0:
+            removed += len(found)
+            path.unlink(missing_ok=True)
+    return removed
 
 
 def image_identity(processes, image):
@@ -1359,6 +1370,7 @@ def main(argv=None):
         flush=True,
     )
     processes = Processes()
+    run_lock = hold_run_lock(run_id)
     started = time.monotonic()
     old_handlers = {}
 
@@ -1368,9 +1380,6 @@ def main(argv=None):
 
     for number in (signal.SIGINT, signal.SIGTERM):
         old_handlers[number] = signal.signal(number, interrupt)
-    threading.Thread(
-        target=watch_parent, args=(processes.stop, os.getppid()), daemon=True
-    ).start()
     code, containers = 1, None
     try:
         with tempfile.TemporaryDirectory(
@@ -1540,6 +1549,7 @@ def main(argv=None):
         if isinstance(error, RunnerError):
             print("Browser run failed: " + str(error), file=sys.stderr, flush=True)
     finally:
+        release_run_lock(run_lock, run_id)
         for number, handler in old_handlers.items():
             signal.signal(number, handler)
         if evidence.data["status"] != "interrupted":

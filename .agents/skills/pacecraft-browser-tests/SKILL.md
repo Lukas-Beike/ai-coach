@@ -30,10 +30,11 @@ python scripts/run_browser_tests.py --project all --keep-going
   stale (no reports; rebuild as the message says); the output says which and how
   to rerun. Report what was not run.
 - Reports and traces can hold fixture data: never publish them.
-- A stopped or killed run cannot clean up after itself. The next run removes
-  the containers of runs whose runner process is gone, and so does
-  `python scripts/run_browser_tests.py --cleanup-stale`; another lane's live
-  run is never touched. A run whose starting process ends stops itself (#2721).
+- A stopped or killed run cannot clean up after itself. Each run holds a lock
+  file in the system temp directory; the next run, or
+  `python scripts/run_browser_tests.py --cleanup-stale`, removes the containers
+  of runs whose lock nobody holds. Live runs and runs without a lock file on
+  this host are never touched (#2721).
 - Long runs: the complete selection takes about 24 min with `--jobs 1` and
   15 min with `--jobs 2` (#2149); one project with `--jobs 2` took 15-19 min on
   a loaded host (#2515). Start such a run with the long-run rule of
