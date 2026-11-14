@@ -127,7 +127,7 @@ Detailed contract: The report `observed_at` SHALL be the activity sync time defi
 Evidence: `backend/performance/training_report.py:training_report`; `tests/test_training_report.py`. Added evidence: `backend/performance/report_service.py:TrainingReportReadService.read`, `backend/performance/report_service.py:report_sport`, `tests/test_report_sport_filter.py`.
 
 ### Requirement: Training focus and recorded sensor zones
-The system SHALL summarize the supported 28-day training focus from recorded heart-rate and power zones and Garmin activity training-effect categories with source freshness and classification coverage. Heart-rate and power zones SHALL remain separate and bounded by session coverage. Unknown categories, missing identities/load, and unsupported strength classification SHALL remain unclassified rather than becoming assumed endurance training.
+The system SHALL summarize the supported 28-day training focus from recorded heart-rate, power and run pace zones and Garmin activity training-effect categories with source freshness and classification coverage. Heart-rate, power and pace zones SHALL remain separate and bounded by session coverage. Unknown categories, missing identities/load, and unsupported strength classification SHALL remain unclassified rather than becoming assumed endurance training.
 
 #### Scenario: Known Garmin category and load
 - **WHEN** an identified activity has a supported recorded primary-effect category and usable load
@@ -141,11 +141,15 @@ The system SHALL summarize the supported 28-day training focus from recorded hea
 - **WHEN** the training focus is composed
 - **THEN** the categories come only from the canonical activity summaries: each session with a Garmin Connect record in the window counts once, dated in the profile zone like the zone distribution and classified by its `training_effect_label` and `training_effect_load` (Garmin activity mapper version 8; at ingest and at re-projection the stored, accumulated dedicated training-load row of the activity is merged in, the same payload's rows winning, so the values do not depend on which sections a sync fetched); the Garmin sync status supplies only the category freshness and whether dedicated training-load rows are stored, and the raw Garmin view is not read.
 
+#### Scenario: Zone cards in the Analysis view
+- **WHEN** the training focus holds zone seconds
+- **THEN** the PWA draws one card per sensor and zone model, highest zone on top, in the order HF-Zonen, Power-Zonen, Pace-Zonen, device zones as a separate "(Gerät)" card.
+
 #### Scenario: Category map and periods
 - **WHEN** a session's `training_effect_label` is read
 - **THEN** `RECOVERY`, `AEROBIC_BASE` and `LOW_AEROBIC` count as `low_aerobic`; `TEMPO`, `THRESHOLD`, `LACTATE_THRESHOLD`, `VO2_MAX`, `VO2MAX` and `HIGH_AEROBIC` as `high_aerobic`; `ANAEROBIC_CAPACITY`, `SPEED` and `ANAEROBIC` as `anaerobic`; any other label, or a missing load, stays unclassified; the focus is served for 28 days in the performance context and for 14 and 84 days in `/api/performance` as `training_focus_periods.fortnight` and `.twelveWeeks`.
 
-Evidence: `backend/performance/training_focus.py:training_focus`, `backend/performance/training_report.py:zone_distribution`; `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`, `tests/test_training_focus.py:test_activity_without_identity_is_not_a_session`, `tests/test_training_report.py:test_sensor_zones_stay_separate_and_strength_is_not_classified_as_endurance`. Added evidence: `tests/test_training_focus.py:test_focus_uses_exactly_four_weeks_including_today`.
+Evidence: `backend/performance/training_focus.py:training_focus`, `backend/performance/training_report.py:zone_distribution`; `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`, `tests/test_training_focus.py:test_activity_without_identity_is_not_a_session`, `tests/test_training_report.py:test_sensor_zones_stay_separate_and_strength_is_not_classified_as_endurance`. Added evidence: `tests/test_training_focus.py:test_focus_uses_exactly_four_weeks_including_today`, `tests/analysis-presentation.test.cjs` (zone distributions list the highest zone first and draw pace zones after power), `e2e/training-feature-panels.spec.js` (training focus draws pace-zone time after power zones).
 
 ### Requirement: Dated history and comparisons
 The system SHALL provide bounded dated performance and provider-metric histories, current-versus-previous period comparisons, and observed best-effort windows with provider/source labels. Current settings SHALL never be backdated into historical gaps.
