@@ -20,12 +20,32 @@ import sys
 from gh_cli import CliError, git
 
 
+def resolve(name: str) -> str:
+    return git(
+        "rev-parse", "--verify", "--end-of-options", f"{name}^{{commit}}"
+    ).strip()
+
+
+def is_ancestor(commit: str, of: str) -> bool:
+    done = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, of],
+        capture_output=True,
+        check=False,
+    )
+    if done.returncode not in (0, 1):
+        raise CliError("git merge-base failed")
+    return done.returncode == 0
+
+
 def release_base(tag: str, branch: str) -> str | None:
-    """The newest branch commit whose tree is the tag's tree."""
-    tree = git("rev-parse", f"{tag}^{{tree}}").strip()
-    for line in git("log", branch, "--format=%H %T").splitlines():
-        commit, _, candidate = line.partition(" ")
-        if candidate == tree:
+    """The newest branch commit with the tag's tree, not newer than the tag.
+
+    A later revert can bring the same tree back; it came after the promotion.
+    """
+    tree, when = git("log", "-1", "--format=%T %ct", tag).split()
+    for line in git("log", branch, "--format=%H %T %ct").splitlines():
+        commit, candidate, stamp = line.split()
+        if candidate == tree and int(stamp) <= int(when):
             return commit
     return None
 
@@ -37,8 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branch", default="origin/develop")
     args = parser.parse_args(argv)
     try:
-        commit = git("rev-parse", "--verify", f"{args.commit}^{{commit}}").strip()
-        base = release_base(args.tag, args.branch)
+        commit, tag = resolve(args.commit), resolve(args.tag)
+        # A tag on the branch history needs no tree match.
+        base = (
+            tag if is_ancestor(commit, tag) else release_base(tag, resolve(args.branch))
+        )
+        contained = base is not None and is_ancestor(commit, base)
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -48,15 +72,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    code = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", commit, base], check=False
-    ).returncode
-    if code not in (0, 1):
-        print("error: git merge-base failed", file=sys.stderr)
-        return 2
-    verdict = "not contained in" if code else "contained in"
+    verdict = "contained in" if contained else "not contained in"
     print(f"{commit[:10]} {verdict} {args.tag} (promoted from {base[:10]})")
-    return code
+    return 0 if contained else 1
 
 
 if __name__ == "__main__":
