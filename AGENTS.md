@@ -157,6 +157,9 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Never relax a guard, test, or check to make something pass. Report behavior,
   evidence, and unrun checks. Keep temporary plans and reports out of tracked
   source.
+- On the Windows host the shell tool collapses `\\` to `\` even inside a quoted
+  heredoc, so write file content and multi-line edit scripts with Write or
+  Edit, never through a Bash heredoc (#2723).
 - Stop line growth: answer a static-analysis finding without splitting a module
   into more files, pass-through classes, or wrapper functions; if it cannot be
   fixed without new indirection, say so in the PR. Every PR description states
