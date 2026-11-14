@@ -12,7 +12,8 @@ full run, for example inside the image used by run_sqlcipher_tests.ps1.
 CONTAINER_SUITE_PATTERNS. The default ``--suite all`` runs everything.
 ``--changed`` keeps only the modules changed_tests.py finds affected by the
 diff against ``--base``; it falls back to the whole suite where that selector
-says so, and CI never uses it. ``--module`` (repeatable) runs only the named
+says so; CI uses it, with ``--with-heavy``, only on a documentation-only pull
+request. ``--module`` (repeatable) runs only the named
 test modules, for focused runs in the SQLCipher container.
 """
 
@@ -219,6 +220,11 @@ def parse_args() -> argparse.Namespace:
         help="ref whose merge base --changed compares against",
     )
     parser.add_argument(
+        "--with-heavy",
+        action="store_true",
+        help="keep the slow tooling modules --changed selects (CI docs-only runs)",
+    )
+    parser.add_argument(
         "--module",
         action="append",
         default=[],
@@ -286,7 +292,7 @@ def main() -> int:
         modules, reason = changed_tests.select_modules(paths)
         evidence.update(changed_paths=paths, changed_selection=reason)
         print(f"Changed-test selection against {args.base}: {reason}", flush=True)
-        skipped = changed_tests.heavy_skips(paths)
+        skipped = {} if args.with_heavy else changed_tests.heavy_skips(paths)
         for module in skipped:
             (modules or {}).pop(module, None)
         for module, why in sorted((modules or {}).items()):

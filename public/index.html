@@ -286,14 +286,6 @@
           <div class="save-bar"><span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span><span class="save-clean">Gespeichert</span><button type="submit">Athletenkontext speichern</button></div>
         </form>
         <form id="zoneForm" hidden></form>
-        <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
-          <div class="context-preview-heading">
-            <div><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
-            <button type="button" id="contextPreviewButton" class="secondary-button">Kontext laden</button>
-          </div>
-          <div id="contextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
-          <div id="contextPreviewContent" class="context-preview-content" hidden></div>
-        </section>
       </section>
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
@@ -566,7 +558,8 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="task-model">
-              <h3>Gespräch</h3>
+              <div class="task-model-heading"><h3>Gespräch</h3><button type="button" class="analysis-legend-info analysis-info-icon" data-model-info aria-label="Gespräch: Wann dieses Modell genutzt wird" popovertarget="modelInfoConversation">i</button></div>
+              <div id="modelInfoConversation" class="analysis-info-tooltip" popover="auto" role="tooltip">Für alles, was du im Chat schreibst, auch den Morgen-Check-in, und für „Besprechen“, „Lösen“ und „Strukturieren“ im Kalender.</div>
               <div class="task-model-pair">
                 <label for="modelSelect">Modell<select id="modelSelect" data-task="conversation"></select></label>
                 <label for="thinkingLevelSelect">Thinking<select id="thinkingLevelSelect" data-task="conversation"></select></label>
@@ -574,7 +567,8 @@
               <small id="modelNotice" class="model-notice" hidden></small>
             </div>
             <div class="task-model">
-              <h3>Planen &amp; Analysieren</h3>
+              <div class="task-model-heading"><h3>Planen &amp; Analysieren</h3><button type="button" class="analysis-legend-info analysis-info-icon" data-model-info aria-label="Planen und Analysieren: Wann dieses Modell genutzt wird" popovertarget="modelInfoPlanning">i</button></div>
+              <div id="modelInfoPlanning" class="analysis-info-tooltip" popover="auto" role="tooltip">Für die Schnellaktionen unter „Analyse &amp; Plan“ und im „+“-Menü sowie „Mit dem Coach analysieren“ im Kalender.</div>
               <div class="task-model-pair">
                 <label for="planningModelSelect">Modell<select id="planningModelSelect" data-task="planning"></select></label>
                 <label for="planningThinkingLevelSelect">Thinking<select id="planningThinkingLevelSelect" data-task="planning"></select></label>
@@ -582,7 +576,8 @@
               <small id="planningModelNotice" class="model-notice" hidden></small>
             </div>
             <div class="task-model">
-              <h3>Ernährung</h3>
+              <div class="task-model-heading"><h3>Ernährung</h3><button type="button" class="analysis-legend-info analysis-info-icon" data-model-info aria-label="Ernährung: Wann dieses Modell genutzt wird" popovertarget="modelInfoNutrition">i</button></div>
+              <div id="modelInfoNutrition" class="analysis-info-tooltip" popover="auto" role="tooltip">Für „Nährwerttabelle fotografieren“ und die Websuche nach fehlenden Nährwerten, die der Coach startet.</div>
               <div class="task-model-pair">
                 <label for="nutritionModelSelect">Modell<select id="nutritionModelSelect" data-task="nutrition"></select></label>
                 <label for="nutritionThinkingLevelSelect">Thinking<select id="nutritionThinkingLevelSelect" data-task="nutrition"></select></label>

@@ -17,7 +17,6 @@ import dataclasses
 import json
 import logging
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -274,7 +273,6 @@ class ProviderCredentialService:
         *,
         env_config: Config,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Callable[[], AbstractContextManager[Any]],
         key_values: KeyValueRepository,
         apply_config: Callable[[Config], None],
         garmin_connection: Callable[[], dict[str, Any]] | None = None,
@@ -286,7 +284,6 @@ class ProviderCredentialService:
         # Fields a previous refresh overrode from the database.
         self._overridden: frozenset[str] = frozenset()
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._apply_config = apply_config
         self._garmin_connection = garmin_connection
@@ -332,7 +329,7 @@ class ProviderCredentialService:
         credential fields change: a field no longer stored returns to its
         environment value, and every other runtime setting is kept.
         """
-        with self._database_lock(), self._database_manager().unit_of_work():
+        with self._database_manager().unit_of_work():
             stored = self._read_stored()
             current = self._current_config()
             base = _with_values(
@@ -379,7 +376,7 @@ class ProviderCredentialService:
         """Apply a validated submission; null or empty clears a field."""
         changes = validated_changes(values)
         if changes:
-            with self._database_lock(), self._database_manager().unit_of_work() as db:
+            with self._database_manager().unit_of_work() as db:
                 current = stored_credentials(
                     self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
                 )

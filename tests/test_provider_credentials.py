@@ -9,10 +9,9 @@ import dataclasses
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -72,7 +71,6 @@ class ProviderCredentialTests(unittest.TestCase):
             database_manager=lambda: cast(
                 DatabaseManager, FakeManager(self.connection)
             ),
-            database_lock=nullcontext,
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
             apply_config=self._apply,
             current_config=lambda: self.holder["config"],
@@ -342,31 +340,32 @@ class ProviderCredentialTests(unittest.TestCase):
         self.service.refresh()
         self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
 
-    def test_refresh_applies_the_configuration_under_the_database_lock(self):
+    def test_refresh_applies_the_configuration_inside_the_unit_of_work(self):
         held: list[bool] = []
-        applied_under_lock: list[bool] = []
+        applied_in_unit_of_work: list[bool] = []
 
-        @contextmanager
-        def lock() -> Iterator[None]:
-            held.append(True)
-            try:
-                yield
-            finally:
-                held.pop()
+        class TrackingManager(FakeManager):
+            @contextmanager
+            def unit_of_work(self) -> Iterator[sqlite3.Connection]:
+                held.append(True)
+                try:
+                    with super().unit_of_work() as db:
+                        yield db
+                finally:
+                    held.pop()
 
         service = ProviderCredentialService(
             env_config=self.env_config,
-            database_manager=lambda: FakeManager(self.connection),
-            database_lock=lock,
+            database_manager=lambda: TrackingManager(self.connection),
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
-            apply_config=lambda config: applied_under_lock.append(bool(held)),
+            apply_config=lambda config: applied_in_unit_of_work.append(bool(held)),
         )
         self.connection.execute(
             "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
             (PROVIDER_CREDENTIALS_KEY, '{"openai_api_key":"db-key"}', "now"),
         )
         service.refresh()
-        self.assertEqual(applied_under_lock, [True])
+        self.assertEqual(applied_in_unit_of_work, [True])
 
     def test_environment_secret_stays_redacted_while_a_stored_value_overrides_it(
         self,
@@ -418,7 +417,6 @@ class ProviderCredentialTests(unittest.TestCase):
 
         auth = auth or SessionAuthService(
             object(),
-            threading.RLock(),
             self.env_config,
             True,
             RateLimiter(),
@@ -504,9 +502,7 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(self.holder["config"].intervals_athlete_id, "i7")
 
     def test_repeated_wrong_passwords_are_rate_limited(self):
-        auth = SessionAuthService(
-            object(), threading.RLock(), self.env_config, True, RateLimiter()
-        )
+        auth = SessionAuthService(object(), self.env_config, True, RateLimiter())
         statuses = []
         for _attempt in range(11):
             route, handler, _seen = self.route(

@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,19 +38,17 @@ class DatabaseBackupService:
     def __init__(
         self,
         manager: DatabaseManager,
-        database_lock: AbstractContextManager[Any],
         config: DatabaseBackupConfig,
         logger: logging.Logger,
     ) -> None:
         self._manager = manager
-        self._database_lock = database_lock
         self._config = config
         self._logger = logger
 
     def checkpoint(self) -> None:
         """Checkpoint before restore swaps the active database file."""
         try:
-            with self._database_lock, self._manager.unit_of_work() as db:
+            with self._manager.unit_of_work() as db:
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception as exc:  # noqa: BLE001 - a failed checkpoint must not block a validated restore.
             self._logger.warning(

@@ -1,7 +1,6 @@
 """Provider-fake tests for Coach conversation ID provisioning."""
 
 import sqlite3
-import threading
 import unittest
 import uuid
 from contextlib import contextmanager
@@ -12,17 +11,6 @@ from support import temp_database
 from backend.coach.conversation import CoachConversationProvisionService
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-
-
-class _TrackingLock:
-    def __init__(self):
-        self.held = False
-
-    def __enter__(self):
-        self.held = True
-
-    def __exit__(self, *_args):
-        self.held = False
 
 
 class CoachConversationProvisionTests(unittest.TestCase):
@@ -43,7 +31,6 @@ class CoachConversationProvisionTests(unittest.TestCase):
             self.database_manager,
             self.key_values,
             self.openai,
-            threading.RLock(),
             lambda: self.uuid,
         )
 
@@ -70,9 +57,8 @@ class CoachConversationProvisionTests(unittest.TestCase):
             {"app": "intervals-coach", "purpose": "personal-coach"}
         )
 
-    def test_openai_request_holds_neither_database_transaction_nor_db_lock(self):
-        lock = _TrackingLock()
-        with self.outside_lock(lock) as service:
+    def test_openai_request_holds_no_database_transaction(self):
+        with self.outside_transaction() as service:
             self.assertEqual(service.ensure(), "conv-outside-lock")
 
     def _command(self, client_turn_id, conversation_id):
@@ -96,12 +82,11 @@ class CoachConversationProvisionTests(unittest.TestCase):
             ).fetchone()
         return row["flag"], row["conversation_id"]
 
-    def _service(self, lock=None, logger=None):
+    def _service(self, logger=None):
         return CoachConversationProvisionService(
             self.database_manager,
             self.key_values,
             self.openai,
-            lock or threading.RLock(),
             lambda: self.uuid,
             logger=logger,
         )
@@ -114,8 +99,8 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.openai.create_conversation.return_value = "conv-new"
 
     @contextmanager
-    def outside_lock(self, lock):
-        """Yield a service whose provider call holds neither the lock nor a transaction."""
+    def outside_transaction(self):
+        """Yield a service whose provider call holds no transaction."""
         transaction_depth = 0
         original_unit_of_work = self.database_manager.unit_of_work
 
@@ -130,13 +115,12 @@ class CoachConversationProvisionTests(unittest.TestCase):
                 transaction_depth -= 1
 
         def create_conversation(*_args):
-            self.assertFalse(lock.held)
             self.assertEqual(transaction_depth, 0)
             return "conv-outside-lock"
 
         self.openai.create_conversation.side_effect = create_conversation
         with patch.object(self.database_manager, "unit_of_work", tracked_unit_of_work):
-            yield self._service(lock)
+            yield self._service()
         self.assertEqual(transaction_depth, 0)
 
     def test_binding_is_local_per_chat_generation_without_provider_call(self):
@@ -231,10 +215,9 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.assertEqual(self.stored("openai_conversation_id"), "conv-old")
         self.assertEqual(self._receipt_flag("turn-1"), (None, "conv-old"))
 
-    def test_rotate_creates_conversation_outside_database_lock(self):
+    def test_rotate_creates_conversation_outside_a_transaction(self):
         self._used_conversation()
-        lock = _TrackingLock()
-        with self.outside_lock(lock) as service:
+        with self.outside_transaction() as service:
             self.assertEqual(service.rotate("turn-1", "conv-old"), "conv-outside-lock")
             service.remote_delete_thread.join(timeout=5)
 

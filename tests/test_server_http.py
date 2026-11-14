@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, call, patch
+from urllib.parse import urlencode
 
 import snapshot_seed
 from server_test_support import (
@@ -30,6 +31,7 @@ from backend.coach import streams as coach_streams
 from backend.errors import AppError, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import response_transport, responses
+from backend.http_api import server as http_server_module
 from backend.http_api.handler import create_request_handler
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
@@ -39,6 +41,7 @@ from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
 from backend.providers.model_seam import ModelRequest
 from backend.providers.openai_responses_adapter import request_payload
+from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -88,7 +91,6 @@ class ServerHttpTests(ServerTestCase):
     def test_every_api_route_rejects_a_request_without_session(self):
         auth = http_auth.SessionAuthService(
             Mock(),
-            threading.RLock(),
             replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
             True,
             RateLimiter(),
@@ -164,10 +166,10 @@ class ServerHttpTests(ServerTestCase):
             server.CONFIG_HOLDER.value, app_password="synthetic-password-123"
         )
         without_session = http_auth.SessionAuthService(
-            Mock(), threading.RLock(), config, True, RateLimiter()
+            Mock(), config, True, RateLimiter()
         )
         with_session = http_auth.SessionAuthService(
-            server.database_manager(), server.DB_LOCK, config, True, RateLimiter()
+            server.database_manager(), config, True, RateLimiter()
         )
         cookie = {"Cookie": f"{http_auth.SESSION_COOKIE}={create_test_session(server)}"}
 
@@ -196,7 +198,7 @@ class ServerHttpTests(ServerTestCase):
         # handler; GET routes and the ungated POST routes still reach theirs.
         during_restore = statuses(
             http_auth.SessionAuthService(
-                server.database_manager(), server.DB_LOCK, config, True, RateLimiter()
+                server.database_manager(), config, True, RateLimiter()
             ),
             None,
             {**cookie, "X-CSRF-Token": "csrf"},
@@ -262,7 +264,6 @@ class ServerHttpTests(ServerTestCase):
         self.addCleanup(httpd.shutdown)
         auth = http_auth.SessionAuthService(
             server.database_manager(),
-            server.DB_LOCK,
             replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
             True,
             RateLimiter(),
@@ -489,7 +490,7 @@ class ServerHttpTests(ServerTestCase):
         auth = server.session_auth_service()
         token_hash = auth.session_token_hash(token)
         old_seen = "2020-01-01T00:00:00+00:00"
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             original = db.execute(
                 "SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)
             ).fetchone()["expires_at"]
@@ -499,13 +500,13 @@ class ServerHttpTests(ServerTestCase):
             )
 
         first = auth.authenticated_session(Handler(f"ic_session={token}"))
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             touched = db.execute(
                 "SELECT expires_at, last_seen FROM sessions WHERE token_hash=?",
                 (token_hash,),
             ).fetchone()
         second = auth.authenticated_session(Handler(f"ic_session={token}"))
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             unchanged = db.execute(
                 "SELECT expires_at, last_seen FROM sessions WHERE token_hash=?",
                 (token_hash,),
@@ -527,13 +528,13 @@ class ServerHttpTests(ServerTestCase):
 
         token = create_test_session(server)
         auth = server.session_auth_service()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE sessions SET expires_at=? WHERE token_hash=?",
                 (time.time() - 1, auth.session_token_hash(token)),
             )
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertIsNone(
                 db.execute(
                     "SELECT token_hash FROM sessions WHERE token_hash=?",
@@ -542,7 +543,7 @@ class ServerHttpTests(ServerTestCase):
             )
 
     def test_expired_session_cleanup_is_bounded_and_periodic(self):
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             for index in range(http_auth.SESSION_CLEANUP_BATCH_SIZE + 1):
                 db.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
@@ -704,6 +705,13 @@ class ServerHttpTests(ServerTestCase):
                     [item["content"] for item in page["messages"]], [expected]
                 )
 
+    def test_chat_reset_changes_history_generation(self):
+        before = server.HTTP_API.chat_history_page_service().page()["generation"]
+        server.APP.coach_conversation.reset_service().reset()
+        self.assertNotEqual(
+            server.HTTP_API.chat_history_page_service().page()["generation"], before
+        )
+
     def test_coach_and_http_library_views_include_the_same_active_templates(self):
         with server.database_manager().unit_of_work() as db:
             db.executemany(
@@ -752,6 +760,66 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(
             [entry["id"] for entry in coach_entries], ["active-after-limit"]
         )
+
+    def test_library_http_pagination_reaches_every_active_template_beyond_1000(self):
+        records = [
+            {"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"}
+            for i in range(1001)
+        ]
+        records += [
+            {"id": "archived", "name": "Archived", "archived": True},
+            {"id": "dated", "name": "Dated", "date": "2026-09-09"},
+        ]
+        with server.database_manager().unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                [
+                    (item["id"], item["id"], json.dumps(item), runtime_clock.utc_now())
+                    for item in records
+                ],
+            )
+        token = create_test_session(server)
+        # This temporary SQLite fixture exercises pagination and real session
+        # authentication; secure startup has separate SQLCipher integration tests.
+        startup = patch.object(
+            server.app_config, "security_configuration_error", return_value=None
+        )
+        startup.start()
+        self.addCleanup(startup.stop)
+        httpd = http_server_module.CoachHTTPServer(
+            ("127.0.0.1", 0), server.HTTP_API.request_handler_class()
+        )
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", httpd.server_port, timeout=5
+        )
+        ids, cursor = [], None
+        try:
+            for _ in range(12):
+                query = {"limit": 100}
+                if cursor:
+                    query["cursor"] = cursor
+                connection.request(
+                    "GET",
+                    "/api/library?" + urlencode(query),
+                    headers={"Cookie": f"ic_session={token}"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                page = json.loads(response.read())
+                self.assertLessEqual(len(page["workouts"]), 100)
+                ids.extend(item["id"] for item in page["workouts"])
+                cursor = page["next_cursor"]
+                if not cursor:
+                    break
+        finally:
+            connection.close()
+            httpd.shutdown()
+            worker.join(5)
+            httpd.server_close()
+        self.assertIsNone(cursor)
+        self.assertEqual(ids, [f"template-{i:04}" for i in range(1001)])
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
@@ -1199,7 +1267,7 @@ class ServerHttpTests(ServerTestCase):
             ),
             {"status": "idle", "operation_id": None},
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             command = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-persisted'"
             ).fetchone()
@@ -1259,7 +1327,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], AppError)
         self.assertEqual(errors[0].reason, "chat_already_running")
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             commands = db.execute(
                 "SELECT client_turn_id, status FROM coach_commands "
                 "WHERE client_turn_id IN (?, ?)",
@@ -1603,82 +1671,58 @@ class ServerHttpTests(ServerTestCase):
         )
 
     def test_public_state_and_usage_workers_do_not_deadlock(self):
-        # Reproduce the AB/BA ordering: a state request owns DB_LOCK while a
-        # worker starts reading/updating usage, then the request reads usage.
-        # Bound the worker's lock wait so a regression fails without leaving
-        # either thread or the test database permanently locked.
-        request_thread = threading.get_ident()
+        # A state request owns the writer while a worker starts reading/updating
+        # usage, then the request reads the state: the read must not queue
+        # behind the worker, and the worker finishes once the writer is free.
+        gate = server.database_manager()._writer_lock
+        for update in (False, True):
+            with self.subTest(update=update):
+                errors = []
 
-        class ObservedDatabaseLock:
-            def __init__(self):
-                self.lock = threading.RLock()
-                self.worker_waiting = threading.Event()
+                with patch.object(
+                    provider_http,
+                    "urlopen",
+                    side_effect=AssertionError("State must stay local"),
+                ):
+                    state = server.provider_state_service()
 
-            def __enter__(self):
-                if threading.get_ident() != request_thread:
-                    self.worker_waiting.set()
-                if not self.lock.acquire(timeout=3):
-                    raise TimeoutError("State request and usage worker deadlocked")
-                return self
-
-            def __exit__(self, *args):
-                self.lock.release()
-
-        for state_reader in (lambda: server.PUBLIC_STATE.bootstrap_service().read(),):
-            for update in (False, True):
-                with self.subTest(state=state_reader.__name__, update=update):
-                    database_lock = ObservedDatabaseLock()
-                    errors = []
-
-                    with (
-                        patch.object(server, "DB_LOCK", database_lock),
-                        patch.object(
-                            provider_http,
-                            "urlopen",
-                            side_effect=AssertionError("State must stay local"),
-                        ),
-                    ):
-                        state = server.provider_state_service()
-
-                        def worker(update=update, state=state, errors=errors):
-                            try:
-                                if update:
-                                    state.record_usage(
-                                        "openai",
-                                        {"usage": {"output_tokens": 2}},
-                                        "test",
-                                    )
-                                else:
-                                    state.summary("openai")
-                            except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
-                                errors.append(exc)
-
-                        thread = threading.Thread(target=worker)
+                    def worker(update=update, state=state, errors=errors):
                         try:
-                            with (
-                                server.DB_LOCK,
-                                server.database_manager().unit_of_work(),
-                            ):
-                                thread.start()
-                                if update:
-                                    self.assertTrue(
-                                        database_lock.worker_waiting.wait(timeout=3)
-                                    )
-                                else:
-                                    # The usage summary is a pure reader read:
-                                    # it finishes while this thread owns both
-                                    # DB_LOCK and the writer, never queueing.
-                                    thread.join(timeout=3)
-                                    self.assertFalse(thread.is_alive())
-                                    self.assertFalse(
-                                        database_lock.worker_waiting.is_set()
-                                    )
-                                state = state_reader()
-                                self.assertIn("usage", state)
-                        finally:
-                            thread.join(timeout=5)
-                        self.assertFalse(thread.is_alive())
-                        self.assertEqual(errors, [])
+                            if update:
+                                state.record_usage(
+                                    "openai", {"usage": {"output_tokens": 2}}, "test"
+                                )
+                            else:
+                                state.summary("openai")
+                        except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
+                            errors.append(exc)
+
+                    thread = threading.Thread(target=worker)
+                    try:
+                        with server.database_manager().unit_of_work():
+                            thread.start()
+                            if update:
+                                deadline = time.monotonic() + 3
+                                while (
+                                    gate._foreground_waiting == 0
+                                    and time.monotonic() < deadline
+                                ):
+                                    time.sleep(0.005)
+                                self.assertEqual(gate._foreground_waiting, 1)
+                            else:
+                                # The usage summary is a pure reader read: it
+                                # finishes while this thread owns the writer,
+                                # never queueing.
+                                thread.join(timeout=3)
+                                self.assertFalse(thread.is_alive())
+                                self.assertEqual(gate._foreground_waiting, 0)
+                            self.assertIn(
+                                "usage", server.PUBLIC_STATE.bootstrap_service().read()
+                            )
+                    finally:
+                        thread.join(timeout=5)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(errors, [])
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()

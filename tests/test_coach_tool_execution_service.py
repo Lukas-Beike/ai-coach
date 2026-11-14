@@ -9,7 +9,7 @@ import unittest
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 from unittest.mock import Mock
 
 from backend.coach.clarification import CoachClarificationService
@@ -22,39 +22,25 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 
 
-class TrackingLock:
-    def __init__(self) -> None:
-        self.held = False
-        self.enter_count = 0
-
-    def __enter__(self) -> Self:
-        if self.held:
-            raise AssertionError("execution lock must not be re-entered")
-        self.held = True
-        self.enter_count += 1
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.held = False
-
-
-class LockCheckingDatabaseManager(DatabaseManager):
-    def __init__(self, path: Path, lock: TrackingLock) -> None:
+class TrackingDatabaseManager(DatabaseManager):
+    def __init__(self, path: Path) -> None:
         super().__init__(
             path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
         )
-        self._tracking_lock = lock
+        self.held = False
         self.uow_count = 0
 
     @contextmanager
     def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
-        if not self._tracking_lock.held:
-            raise AssertionError(
-                "database unit of work must run under the injected lock"
-            )
         self.uow_count += 1
-        with super().unit_of_work(timeout=timeout) as db:
-            yield db
+        outermost = not self.held
+        self.held = True
+        try:
+            with super().unit_of_work(timeout=timeout) as db:
+                yield db
+        finally:
+            if outermost:
+                self.held = False
 
 
 class StructuredToolExecutionTests(unittest.TestCase):
@@ -62,8 +48,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="coach-tool-execution-")
         self.addCleanup(self.temporary.cleanup)
         path = Path(self.temporary.name) / "coach.sqlite3"
-        self.lock = TrackingLock()
-        self.database_manager = LockCheckingDatabaseManager(path, self.lock)
+        self.database_manager = TrackingDatabaseManager(path)
         self.addCleanup(self.database_manager.close)
         with closing(sqlite3.connect(path)) as db, db:
             db.execute(
@@ -77,7 +62,6 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.tool_dispatch = Mock(spec=CoachToolDispatchService)
         self.service = CoachStructuredToolExecutionService(
             self.database_manager,
-            self.lock,
             self.key_values,
             self.clarification,
             self.training_patch,
@@ -115,10 +99,9 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.execute("clarify_coach_request", arguments, context=context), expected
         )
         self.clarification.save_question.assert_called_once_with(arguments, context)
-        self.assertEqual(self.lock.enter_count, 1)
         self.assertEqual(self.database_manager.uow_count, 1)
 
-    def test_cancel_persists_null_inside_locked_unit_of_work(self) -> None:
+    def test_cancel_persists_null_inside_a_unit_of_work(self) -> None:
         self.assertEqual(
             self.execute("cancel_coach_request"), {"ok": True, "status": "cancelled"}
         )
@@ -129,10 +112,9 @@ class StructuredToolExecutionTests(unittest.TestCase):
                 ).fetchone()[0],
                 "null",
             )
-        self.assertEqual(self.lock.enter_count, 1)
         self.assertEqual(self.database_manager.uow_count, 1)
 
-    def test_training_patch_failure_rolls_back_and_releases_lock(self) -> None:
+    def test_training_patch_failure_rolls_back_and_releases_the_writer(self) -> None:
         arguments = {"changes": [{"local_id": "unit-1", "action": "update"}]}
         action = {
             "operation": "apply_training_patch",
@@ -156,8 +138,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT COUNT(*) FROM synthetic_writes").fetchone()[0], 0
             )
-        self.assertFalse(self.lock.held)
-        self.assertEqual(self.lock.enter_count, 1)
+        self.assertFalse(self.database_manager.held)
         self.assertEqual(self.database_manager.uow_count, 2)
         self.training_patch.apply.assert_called_once_with(arguments, action)
 
@@ -194,14 +175,12 @@ class StructuredToolExecutionTests(unittest.TestCase):
             sync_job_ids=["sync-x"],
             cancel_event=cancel_event,
         )
-        self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
     def test_adaptive_apply_is_also_outside_local_database_transaction(self) -> None:
         self.tool_dispatch.execute.return_value = {"ok": True}
 
         self.assertEqual(self.execute("apply_adaptive_replan"), {"ok": True})
-        self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
     def test_a_named_illness_sync_runs_the_bound_payload_with_accepted_findings(
@@ -238,14 +217,13 @@ class StructuredToolExecutionTests(unittest.TestCase):
 
     def test_food_lookups_do_not_hold_a_local_database_transaction(self) -> None:
         self.tool_dispatch.execute.side_effect = lambda *_args, **_kwargs: (
-            self.assertFalse(self.lock.held) or {"ok": True}
+            self.assertFalse(self.database_manager.held) or {"ok": True}
         )
 
         for name in ("lookup_food", "calculate_food_nutrition"):
             with self.subTest(name=name):
                 self.assertEqual(self.execute(name), {"ok": True})
 
-        self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
 

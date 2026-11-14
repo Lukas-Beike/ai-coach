@@ -87,14 +87,18 @@ class AthleteGetRoutes:
         Request: no query, no body.
 
         Response: 200 with `performance` (the current performance context, with
-        `history` and `training_focus_periods` added; built by
+        `history` (with `first_thresholds`, the LT1 chart history) and
+        `training_focus_periods` added; built by
         `PublicPerformanceStateService.performance_state`) and `garmin` (the public
         Garmin projection).
 
         Errors: none beyond the common ones.
         """
         handler.send_json(
-            200, self._public_performance_state_service().performance_state()
+            200,
+            self._public_performance_state_service().performance_state(
+                first_thresholds=True
+            ),
         )
 
     def _profile(self, handler: Any, _request: RouteRequest) -> None:

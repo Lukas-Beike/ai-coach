@@ -353,7 +353,7 @@ class StageCase(unittest.TestCase):
             batch_size=self.batch_size,
         )
         self.service = route_store.ActivityRouteService(
-            lambda: self.manager, nullcontext(), self.key_values
+            lambda: self.manager, self.key_values
         )
 
     def _run_stage(self) -> Any:
@@ -570,7 +570,6 @@ class PrivacyDeleteTests(StageCase):
         return PrivacyDeleteService(
             SimpleNamespace(
                 database_manager=self.manager,
-                database_lock=nullcontext(),
                 maintenance_gate=SimpleNamespace(
                     restore=lambda _hook=None: nullcontext()
                 ),

@@ -18,11 +18,9 @@ class PlannedUnitFocusPostRoutes:
         self,
         planned_unit_service: Callable[[], Any],
         database_manager: Callable[[], Any],
-        database_lock: Any,
     ):
         self._planned_unit_service = planned_unit_service
         self._database_manager = database_manager
-        self._database_lock = database_lock
 
     def routes(self) -> list[Route]:
         return [
@@ -72,7 +70,6 @@ class PlannedUnitFocusPostRoutes:
         payload = _read_object(handler)
         with (
             change_history.collect_changes() as changes,
-            self._database_lock,
             self._database_manager().unit_of_work(),
         ):
             result = self._planned_unit_service().move(
@@ -105,7 +102,7 @@ class PlannedUnitFocusPostRoutes:
         Garmin-Übung: ..." with suggestions for a name the catalogue does not know.
         """
         payload = _read_object(handler)
-        with self._database_lock, self._database_manager().unit_of_work():
+        with self._database_manager().unit_of_work():
             result = self._planned_unit_service().assign_garmin_exercise(
                 request.params["id"],
                 payload.get("exercise_index"),
@@ -135,7 +132,7 @@ class PlannedUnitFocusPostRoutes:
         """
         payload = _read_object(handler)
         values = {key: payload.get(key) for key in FOCUS_ONLY_KEYS}
-        with self._database_lock, self._database_manager().unit_of_work():
+        with self._database_manager().unit_of_work():
             result = self._planned_unit_service().update(request.params["id"], values)
         handler.send_json(200, result)
 

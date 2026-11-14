@@ -490,7 +490,7 @@ The calendar card of a completed session SHALL carry its single-session analysis
 
 #### Scenario: Feedback and Coach actions
 - **WHEN** the athlete taps "Feedback" or "Mit dem Coach analysieren" on an opened completed session
-- **THEN** "Feedback" opens the dialog with the session type, session RPE, deviation reason, notes and the confirm, split and delete actions, and the Coach button starts one turn that names the session by date, sport, time, duration and id, never by its stored name.
+- **THEN** "Feedback" opens the dialog with the session type, session RPE, deviation reason, notes and the confirm, split and delete actions, and the Coach button starts one session-analysis turn (`session_analysis`, on the planning model; off without that model's key) that names the session by date, sport, time, duration and id, never by its stored name.
 
 #### Scenario: No sessions segment in Analyse
 - **WHEN** the athlete opens the Analyse tab or an old `#analysis/sessions` link
@@ -522,11 +522,11 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 
 #### Scenario: Laufen
 - **WHEN** the athlete opens Analyse › Laufen
-- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace, VO2max, running tolerance), the all-time best efforts under the title "Bestwerte" (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date in its own column and its source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
+- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace with the LT1 pace line, VO2max, running tolerance), the all-time best efforts under the title "Bestwerte" (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date in its own column and its source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
 
 #### Scenario: Radfahren
 - **WHEN** the athlete opens Analyse › Radfahren
-- **THEN** it shows the cycling current values (LT2 FTP and heart rate as "Anaerobe Schwelle (LT2) · …", power per weight, LT1 power and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the all-time power profile (each best with its date in its own column) with its coverage note and the experimental critical-power line, and the development charts (FTP, VO2max); no running value appears.
+- **THEN** it shows the cycling current values (LT2 FTP and heart rate as "Anaerobe Schwelle (LT2) · …", power per weight, LT1 power and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the all-time power profile (each best with its date in its own column) with its coverage note and the experimental critical-power line, and the development charts (FTP with the LT1 power line, VO2max); an LT1 point's readout names its heart rate and origin, and a week without three own steady sessions is a gap; no running value appears.
 
 #### Scenario: Cross-sport values
 - **WHEN** the athlete opens Analyse › Belastung or Erholung

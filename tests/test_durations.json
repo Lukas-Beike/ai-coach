@@ -50,7 +50,6 @@
  "test_athlete_planning_assemblies.EquipmentDependencyTests": 0.001,
  "test_athlete_profile.AthleteProfileTests": 0.004,
  "test_athlete_profile_service.ProfileServiceTests": 0.02,
- "test_audit_remediation.AuditRemediationTests": 8.044,
  "test_backend_layer_contracts.BackendLayerContractTests": 10.334,
  "test_calendar_canonical.CanonicalPlannedWorkoutsTests": 0.017,
  "test_calendar_external.ExternalCalendarTests": 0.033,

@@ -62,7 +62,6 @@ class CoachTurnOpeningTests(unittest.TestCase):
         self.clock_values = iter(("command-created", "command-updated"))
         self.service = CoachTurnOpeningService(
             self.manager,
-            self.lock,
             ChatRepository(lambda: "message-created"),
             self.receipt_service,
             lambda: next(self.clock_values),

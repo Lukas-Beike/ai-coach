@@ -194,6 +194,7 @@ def build_public_state(
             now=ctx.clock.now,
             zone_configurations=athlete.zones().configurations,
             lt1_session_records=lambda days: ctx.performance.curve_records(days),
+            lt1_history_records=ctx.performance.all_time_records,
         )
 
     def bootstrap_service() -> PublicBootstrapService:
@@ -204,7 +205,6 @@ def build_public_state(
         return PublicBootstrapService(
             PublicBootstrapDependencies(
                 database_manager=ctx.database,
-                database_lock=ctx.database_lock,
                 config=ctx.config(),
                 app_name=ctx.app_name,
                 app_version=ctx.app_version,
@@ -493,7 +493,6 @@ def _athlete_write_routes(
         AthletePutRoutes(
             athlete.profile,
             ctx.database,
-            ctx.database_lock,
             athlete.zones,
             lambda profile, revision, deadline: ctx.garmin.body_export(
                 athlete.profile()
@@ -505,16 +504,14 @@ def _athlete_write_routes(
         ),
         HistoryUndoPostRoutes(
             history_undo,
-            CoachTurnUndoService(ctx.database, ctx.database_lock, history_undo),
+            CoachTurnUndoService(ctx.database, history_undo),
             rpe_load,
         ),
-        PlannedUnitFocusPostRoutes(
-            ctx.planning.planned_unit, ctx.database, ctx.database_lock
-        ),
+        PlannedUnitFocusPostRoutes(ctx.planning.planned_unit, ctx.database),
         CredentialsPutRoutes(ctx.provider_credential_service, session_auth_service),
         EquipmentPostRoutes(athlete.equipment),
         FirstThresholdPostRoutes(
-            athlete.first_threshold, athlete.profile, ctx.database, ctx.database_lock
+            athlete.first_threshold, athlete.profile, ctx.database
         ),
         ActivityRoutePostRoutes(lambda: ctx.activity_routes),
         CalendarDecisionPostRoutes(lambda: ctx.external_calendar.decisions()),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -21,7 +20,8 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
         self.service = Mock()
         self.service.update.return_value = {"status": "local"}
         self.routes = PlannedUnitFocusPostRoutes(
-            lambda: self.service, lambda: MagicMock(), threading.Lock()
+            lambda: self.service,
+            lambda: MagicMock(),
         )
 
     def handler(self, payload):

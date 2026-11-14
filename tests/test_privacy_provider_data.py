@@ -12,7 +12,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from canonical_domain_support import (
     GEAR_SOURCE,
@@ -666,7 +666,6 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             PrivacyDeleteDependencies(
                 profile_mutation_coordinator=threading.RLock(),
                 database_manager=database,
-                database_lock=_Lock(),
                 key_value_repository=self.key_values,
                 maintenance_gate=_Gate(),
                 planning_revision_service=_PlanningRevision(),
@@ -714,7 +713,6 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             config=lambda: config,
             oauth=lambda: WahooOAuthClient(lambda: config, request),
             database_manager=lambda: _Manager(self.db),
-            database_lock=lambda: MagicMock(),
             key_values=KeyValueRepository(lambda: "2026-11-09T08:00:00+00:00"),
             utc_now=lambda: "2026-11-09T08:00:00+00:00",
             token_factory=lambda: "state-1",

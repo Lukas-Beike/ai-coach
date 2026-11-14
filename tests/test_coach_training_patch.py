@@ -17,7 +17,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         return {"authorization_scope": list(scopes), "request": {"constraints": []}}
 
     def add_plan(self, plan_id: str) -> None:
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db,
                 plan_id,

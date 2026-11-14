@@ -10,7 +10,6 @@ persistence collaborators are doubles. Temporary SQLite storage, no network.
 from __future__ import annotations
 
 import tempfile
-import threading
 import unittest
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -83,11 +82,9 @@ class LiveCredentialHarness:
                 "updated_at) VALUES (?, ?, ?, 'local', ?)",
                 (UNIT, UNIT, LIBRARY_PAYLOAD, NOW.isoformat()),
             )
-        lock = threading.RLock()
         self.credentials = ProviderCredentialService(
             env_config=env_config,
             database_manager=lambda: self.database,
-            database_lock=lambda: lock,
             key_values=KeyValueRepository(NOW.isoformat),
             apply_config=self._apply,
             current_config=lambda: self.config,

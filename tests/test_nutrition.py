@@ -185,7 +185,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             for nutrient in ("carbs_g", "protein_g", "fat_g"):
                 self.assertIsNone(result[nutrient])
 
-    def test_database_component_resolution_happens_before_database_lock(self):
+    def test_database_component_resolution_happens_before_the_writer(self):
         component = {
             "kind": "database",
             "food_id": "bls:C133000",
@@ -195,33 +195,27 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         original_resolve = self.library.food_database.resolve
         calls = []
 
-        def resolve_outside_lock(food_id):
-            self.assertFalse(self.lock.locked())
+        def resolve_outside_writer(food_id):
+            self.assertTrue(self._foreign_writer_proceeds())
             calls.append(food_id)
             return original_resolve(food_id)
 
         with patch.object(
-            self.library.food_database, "resolve", side_effect=resolve_outside_lock
+            self.library.food_database, "resolve", side_effect=resolve_outside_writer
         ):
             self.library.product_catalog.calculate_components([component])
 
         self.assertEqual(calls, ["bls:C133000"])
 
     def _foreign_writer_proceeds(self) -> bool:
-        """Whether another thread gets the database lock and the writer right now."""
+        """Whether another thread gets the writer right now."""
         outcome = []
 
         def other_writer():
-            acquired = self.lock.acquire(blocking=False)
-            if acquired:
-                try:
-                    with self.manager.unit_of_work(timeout=0):
-                        outcome.append(True)
-                except Exception:  # noqa: BLE001 - a busy writer is the failure
-                    outcome.append(False)
-                finally:
-                    self.lock.release()
-            else:
+            try:
+                with self.manager.unit_of_work(timeout=0):
+                    outcome.append(True)
+            except Exception:  # noqa: BLE001 - a busy writer is the failure
                 outcome.append(False)
 
         worker = threading.Thread(target=other_writer)
@@ -229,7 +223,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         worker.join(timeout=10)
         return outcome == [True]
 
-    def test_slow_food_lookup_holds_neither_lock_nor_writer_on_update_and_save(self):
+    def test_slow_food_lookup_holds_no_writer_on_update_and_save(self):
         ingredients = [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]
         entry = self.service.log_meal({"description": "Oats", "kcal": 100})
         original = self.library.food_database.calculate
@@ -367,12 +361,10 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.manager = temp_database(
             self, "test_nutrition.db", row_factory=sqlite3.Row, schema=True
         )
-        self.lock = threading.Lock()
 
         self.fixed_now = "2026-09-24T12:00:00+00:00"
         self.service, self.library = build_nutrition_services(
             self.manager,
-            self.lock,
             lambda: self.fixed_now,
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
@@ -455,7 +447,6 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         clock = AthleteLocalClock(Profile(), now=lambda tz: instant.astimezone(tz))
         service, library = build_nutrition_services(
             self.manager,
-            self.lock,
             lambda: instant.isoformat(),
             clock.now,
         )

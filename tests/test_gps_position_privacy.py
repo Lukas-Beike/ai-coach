@@ -296,7 +296,6 @@ class _Keys:
 class _Dependencies:
     def __init__(self, db):
         self.database_manager = _Manager(db)
-        self.database_lock = _Null()
         self.maintenance_gate = _Gate()
         self.key_value_repository = _Keys()
         self.cancel_coach_turns = Mock()

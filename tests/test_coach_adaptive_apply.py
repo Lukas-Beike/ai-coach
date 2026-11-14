@@ -2,7 +2,6 @@
 
 import sqlite3
 import tempfile
-import threading
 import unittest
 from contextlib import closing, contextmanager
 from datetime import date
@@ -33,7 +32,9 @@ class CoachAdaptiveApplyTests(unittest.TestCase):
 
         self.manager.unit_of_work.side_effect = unit_of_work
         self.service = CoachAdaptiveApplyService(
-            self.preview, self.illness_sync, self.manager, threading.RLock()
+            self.preview,
+            self.illness_sync,
+            self.manager,
         )
         self.intent = {
             "operation": "apply_adaptive_replan",
@@ -164,7 +165,6 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
             preview,
             self.sync,
             self.manager,
-            threading.RLock(),
             lambda: self.guard,
         )
         self.intent = {

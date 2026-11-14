@@ -42,7 +42,7 @@ test("every script and stylesheet of index.html is cached by the service worker"
 test("removed frontend symbols and files are gone from public/", () => {
   assert.ok(!fs.existsSync(path.join(publicDir, "forms.js")));
   const sources = [...scripts, "index.html", "service-worker.js"].map(read).join("\n");
-  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect"]) {
+  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect", "contextPreviewButton", "contextPreviewTitle", "contextPreviewStatus", "contextPreviewContent", "Coach-Kontext prüfen"]) {
     assert.ok(!sources.includes(removed), `${removed} is still referenced`);
   }
   assert.ok(!/id="trainingPlans"/.test(index));
@@ -105,6 +105,20 @@ test("only the kept explanations remain as helper texts", () => {
     assert.ok(!index.includes(text), `${text} was removed`);
   }
   assert.ok(!/class="eyebrow"/.test(index));
+});
+
+// Each Coach model block says when its model is used (#2744); the entry points follow the routing.
+test("the three Coach model blocks name their entry points in an info popover", () => {
+  for (const [task, points] of [
+    ["Conversation", ["im Chat schreibst", "Morgen-Check-in", "„Besprechen“", "„Lösen“", "„Strukturieren“ im Kalender"]],
+    ["Planning", ["„Analyse &amp; Plan“", "„+“-Menü", "„Mit dem Coach analysieren“ im Kalender"]],
+    ["Nutrition", ["„Nährwerttabelle fotografieren“", "Websuche nach fehlenden Nährwerten"]],
+  ]) {
+    assert.ok(index.includes(`popovertarget="modelInfo${task}"`), `${task} info button`);
+    const tooltip = new RegExp(`<div id="modelInfo${task}" class="analysis-info-tooltip" popover="auto" role="tooltip">([^<]*)</div>`).exec(index);
+    assert.ok(tooltip, `${task} popover`);
+    for (const point of points) assert.ok(tooltip[1].includes(point), `${task} names ${point}`);
+  }
 });
 
 test("a Coach link names its host when the label does not, and escapes it", () => {

@@ -50,3 +50,35 @@ test("each task names its rejected model and a keyless planning model locks only
   await page.locator("#messageInput").fill("Wie war mein Schlaf?");
   await expect(page.locator("#sendButton")).toBeEnabled();
 });
+
+test("each task block names in an info popover when its model is used @responsive", async ({ page }, testInfo) => {
+  await page.goto("/");
+  await page.evaluate(() => AppRouter.navigate("more/coach", { historyMode: "replace" }));
+  await page.locator("#modelSettingsTarget").evaluate((el) => { el.closest("details").open = true; });
+  const pair = page.locator(".task-model-pair").first();
+  await expect(page.locator("#modelSelect")).toHaveValue("gpt-6-luna");
+  const offset = () => pair.evaluate((node) => [node.offsetTop, node.offsetHeight]);
+  const before = await offset();
+  for (const [task, text] of [
+    ["Conversation", "auch den Morgen-Check-in, und für „Besprechen“, „Lösen“ und „Strukturieren“ im Kalender"],
+    ["Planning", "„Analyse & Plan“ und im „+“-Menü sowie „Mit dem Coach analysieren“ im Kalender"],
+    ["Nutrition", "„Nährwerttabelle fotografieren“ und die Websuche nach fehlenden Nährwerten"],
+  ]) {
+    const button = page.locator(`[popovertarget="modelInfo${task}"]`);
+    const info = page.locator(`#modelInfo${task}`);
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(info).toBeVisible();
+    await expect(info).toContainText(text);
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    if (task === "Planning") await page.screenshot({ path: testInfo.outputPath("model-info-planning.png") });
+    await page.keyboard.press("Escape");
+    await expect(info).toBeHidden();
+  }
+  // Opening them moves nothing, and the "i" does not make a heading taller than its text.
+  expect(await offset()).toEqual(before);
+  for (const heading of await page.locator(".task-model-heading").all()) {
+    const [row, text] = await heading.evaluate((node) => [node.offsetHeight, node.querySelector("h3").offsetHeight]);
+    expect(row).toBeLessThanOrEqual(text + 1);
+  }
+});

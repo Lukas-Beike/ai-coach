@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -22,14 +21,12 @@ class CoachTurnOpeningService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: threading.RLock,
         chat_repository: ChatRepository,
         receipt_service: CoachCommandReceiptService,
         utc_now: Callable[[], str],
         uuid_factory: Callable[[], Any],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._chat_repository = chat_repository
         self._receipt_service = receipt_service
         self._utc_now = utc_now
@@ -45,7 +42,7 @@ class CoachTurnOpeningService:
         session_csrf_hash: str,
         model: str | None,
     ) -> dict[str, Any]:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = coach_store.command_row(db, client_turn_id)
             receipt = command_receipt(existing["receipt"]) if existing else {}
             if existing:

@@ -186,7 +186,6 @@ class SecretFixture(unittest.TestCase):
         ProviderCredentialService(
             env_config=env,
             database_manager=lambda: cast(Any, FakeManager(self.db)),
-            database_lock=lambda: _Lock(),
             key_values=self.key_values,
             apply_config=apply,
             current_config=lambda: self.live_config,
@@ -494,7 +493,6 @@ class EncryptedBackupSecretTests(unittest.TestCase):
                     )
                 backup = DatabaseBackupService(
                     manager,
-                    Mock(),
                     DatabaseBackupConfig(
                         database_path=database_path,
                         data_dir=root,

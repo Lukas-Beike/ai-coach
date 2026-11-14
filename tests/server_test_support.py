@@ -19,7 +19,6 @@ from support import (
     reset_application_state,
 )
 
-from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance import context as performance_context
 from backend.performance.freshness import GarminSyncStatus
 from backend.sync import garmin_payload_metrics
@@ -176,7 +175,7 @@ class ServerTestCase(unittest.TestCase):
 
     @classmethod
     def _restore_test_config(cls):
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         server.CONFIG_HOLDER.value = cls._original_config
         server.DATA_DIR = cls._original_data_dir
         server.DB_PATH = cls._original_db_path

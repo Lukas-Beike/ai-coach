@@ -130,9 +130,7 @@ class BodyExportTests(unittest.TestCase):
             "retry_body_to_garmin": True,
         }
         send = Mock(return_value="success")
-        routes = AthletePutRoutes(
-            lambda: self.profile, lambda: self.db, threading.RLock(), None, send
-        )
+        routes = AthletePutRoutes(lambda: self.profile, lambda: self.db, None, send)
         dispatch_route(routes, handler, "/api/profile", method="PUT")
         send.assert_called_once()
         self.assertEqual(
@@ -230,7 +228,6 @@ class BodyExportTests(unittest.TestCase):
         routes = AthletePutRoutes(
             lambda: self.profile,
             lambda: self.db,
-            threading.RLock(),
             body_export=self.exporter.export,
         )
         dispatch_route(routes, handler, "/api/profile", method="PUT")

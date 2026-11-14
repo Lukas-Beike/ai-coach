@@ -82,9 +82,15 @@ class PrePushHookTests(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
     def test_quality_regression_blocks_the_push(self):
-        result, _lines = self.run_hook(quality="1")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("quality ratchet", result.stderr)
+        for quality, reason, other in (
+            ("1", "found new findings", "could not run"),
+            ("2", "could not run", "found new findings"),
+        ):
+            with self.subTest(quality=quality):
+                result, _lines = self.run_hook(quality=quality)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(reason, result.stderr)
+                self.assertNotIn(other, result.stderr)
 
     def test_quality_runs_on_committed_head_not_the_working_tree(self):
         result, lines = self.run_hook(dirty_quality=5)

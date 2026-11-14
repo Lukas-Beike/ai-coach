@@ -12,10 +12,8 @@ from support import temp_database
 
 from backend.config import load_config
 from backend.db.manager import (
-    DATABASE_MANAGER_CACHE,
     DatabaseHolder,
     DatabaseManager,
-    DatabaseManagerCache,
     WriterGate,
     background_writer,
 )
@@ -25,6 +23,22 @@ from backend.db.schema import (
     initialize_schema,
 )
 from backend.errors import DATABASE_BUSY_MESSAGE, DatabaseBusyError
+
+
+def make_holder(root: Path) -> tuple[DatabaseHolder, dict[str, Path]]:
+    """A plain-SQLite holder whose database path the test can switch."""
+    state = {"path": root / "first.db"}
+    holder = DatabaseHolder(
+        data_dir=lambda: root,
+        database_path=lambda: state["path"],
+        config=lambda: load_config(root, root, {}),
+        sqlcipher_available=lambda: False,
+        encrypted_backend=None,
+        plain_backend=sqlite3,
+        configure=configure_cipher,
+        row_factory=sqlite3.Row,
+    )
+    return holder, state
 
 
 class DatabaseManagerTests(unittest.TestCase):
@@ -97,82 +111,75 @@ class DatabaseManagerTests(unittest.TestCase):
     def make_manager(self, root: str) -> DatabaseManager:
         return temp_database(self, path=Path(root) / "test.db", reader_count=4)
 
-    def test_cache_reuses_replaces_and_resets_the_active_manager(self):
+    def test_holder_reuses_replaces_and_resets_the_active_manager(self):
         with tempfile.TemporaryDirectory() as root:
-            cache = DatabaseManagerCache()
-            first_signature = (str(Path(root) / "first.db"), "", False)
-            second_signature = (str(Path(root) / "second.db"), "", False)
+            holder, state = make_holder(Path(root))
+            first = holder()
+            self.assertIs(holder(), first)
+            self.assertIs(holder.manager, first)
 
-            first = cache.get(first_signature, first_signature[0], sqlite3)
-            self.assertIs(
-                cache.get(first_signature, first_signature[0], sqlite3), first
-            )
-            self.assertTrue(cache.matches(first_signature))
-
-            second = cache.get(second_signature, second_signature[0], sqlite3)
+            state["path"] = Path(root) / "second.db"
+            second = holder()
             self.assertIsNot(second, first)
-            self.assertFalse(cache.matches(first_signature))
             with (
                 self.assertRaisesRegex(RuntimeError, "database manager is closed"),
                 first.unit_of_work(),
             ):
                 pass
 
-            cache.reset()
-            self.assertFalse(cache.matches(second_signature))
+            holder.reset()
+            self.assertIsNone(holder.manager)
             with (
                 self.assertRaisesRegex(RuntimeError, "database manager is closed"),
                 second.unit_of_work(),
             ):
                 pass
 
-    def test_cache_unit_of_work_uses_the_current_manager_lazily(self):
+    def test_holder_unit_of_work_uses_the_current_manager_lazily(self):
         with tempfile.TemporaryDirectory() as root:
-            cache = DatabaseManagerCache()
+            holder, state = make_holder(Path(root))
             with (
                 self.assertRaisesRegex(RuntimeError, "not initialized"),
-                cache.unit_of_work(),
+                holder.unit_of_work(),
             ):
                 pass
 
-            first_signature = (str(Path(root) / "first.db"), "", False)
-            second_signature = (str(Path(root) / "second.db"), "", False)
-            cache.get(first_signature, first_signature[0], sqlite3)
-            with cache.unit_of_work() as db:
+            holder()
+            with holder.unit_of_work() as db:
                 db.execute("CREATE TABLE records (value TEXT NOT NULL)")
 
-            cache.get(second_signature, second_signature[0], sqlite3)
-            with cache.unit_of_work() as db:
+            state["path"] = Path(root) / "second.db"
+            holder()
+            with holder.unit_of_work() as db:
                 db.execute("CREATE TABLE records (value TEXT NOT NULL)")
                 db.execute("INSERT INTO records(value) VALUES ('current')")
                 self.assertEqual(
                     db.execute("SELECT value FROM records").fetchone()[0],
                     "current",
                 )
-            cache.reset()
+            holder.reset()
 
-    def test_cache_replacement_waits_for_leased_unit_of_work(self):
+    def test_holder_replacement_waits_for_leased_unit_of_work(self):
         with tempfile.TemporaryDirectory() as root:
-            cache = DatabaseManagerCache()
-            first_signature = (str(Path(root) / "first.db"), "", False)
-            second_signature = (str(Path(root) / "second.db"), "", False)
-            cache.get(first_signature, first_signature[0], sqlite3)
+            holder, state = make_holder(Path(root))
+            holder()
             entered = threading.Event()
             release = threading.Event()
             replaced = threading.Event()
 
             def use_manager():
-                with cache.unit_of_work():
+                with holder.unit_of_work():
                     entered.set()
                     release.wait(2)
 
             def replace_manager():
-                cache.get(second_signature, second_signature[0], sqlite3)
+                holder()
                 replaced.set()
 
             user = threading.Thread(target=use_manager)
             user.start()
             self.assertTrue(entered.wait(1))
+            state["path"] = Path(root) / "second.db"
             replacement = threading.Thread(target=replace_manager)
             replacement.start()
             self.assertFalse(replaced.wait(0.05))
@@ -182,7 +189,29 @@ class DatabaseManagerTests(unittest.TestCase):
             self.assertFalse(user.is_alive())
             self.assertFalse(replacement.is_alive())
             self.assertTrue(replaced.is_set())
-            cache.reset()
+            holder.reset()
+
+    def test_holder_never_closes_a_manager_another_thread_just_opened(self):
+        # The opening thread assigns the manager, then its signature, under the
+        # lock. A second caller in that gap must wait and reuse the manager,
+        # not take it for a stale one and close it (#2106 review).
+        with tempfile.TemporaryDirectory() as root:
+            holder, _state = make_holder(Path(root))
+            opened = holder()
+            signature = holder._signature
+            results = []
+            with holder._lock:
+                holder._signature = None
+                caller = threading.Thread(target=lambda: results.append(holder()))
+                caller.start()
+                caller.join(0.2)
+                holder._signature = signature
+            caller.join(2)
+            self.assertFalse(caller.is_alive())
+            self.assertEqual([opened], results)
+            with opened.unit_of_work() as db:
+                db.execute("SELECT 1")
+            holder.reset()
 
     def test_unit_of_work_rolls_back_and_reader_pool_reuses_connections(self):
         with tempfile.TemporaryDirectory() as root:
@@ -847,29 +876,28 @@ class WriterGateTests(unittest.TestCase):
             values = [row[0] for row in db.execute("SELECT value FROM records")]
         self.assertEqual(sorted(values), [0, 1, 2])
 
-    def test_cache_passes_the_writer_wait_to_the_manager(self):
+    def test_holder_passes_the_writer_wait_to_the_manager(self):
         root = self.enterContext(tempfile.TemporaryDirectory())
-        cache = DatabaseManagerCache()
-        signature = (str(Path(root) / "cache.db"), "", False)
-        manager = cache.get(signature, signature[0], sqlite3)
-        self.addCleanup(manager.close)
+        database, _state = make_holder(Path(root))
+        self.addCleanup(database.reset)
+        database()
         held = threading.Event()
         release = threading.Event()
 
         def hold() -> None:
-            with cache.unit_of_work():
+            with database.unit_of_work():
                 held.set()
                 release.wait(10)
 
-        holder = threading.Thread(target=hold)
-        holder.start()
+        holding = threading.Thread(target=hold)
+        holding.start()
         try:
             self.assertTrue(held.wait(5))
             failure: list[str] = []
 
             def contender() -> None:
                 try:
-                    with cache.unit_of_work(timeout=0):
+                    with database.unit_of_work(timeout=0):
                         pass
                 except DatabaseBusyError as exc:
                     failure.append(exc.resource)
@@ -881,7 +909,7 @@ class WriterGateTests(unittest.TestCase):
             self.assertEqual(failure, ["writer"])
         finally:
             release.set()
-            holder.join(5)
+            holding.join(5)
 
     def make_manager(self) -> DatabaseManager:
         manager = temp_database(self, "gate.db")
@@ -903,7 +931,6 @@ class DatabaseBusyErrorTests(unittest.TestCase):
 
 class DatabaseHolderTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.addCleanup(DATABASE_MANAGER_CACHE.reset)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -920,6 +947,7 @@ class DatabaseHolderTests(unittest.TestCase):
             configure=configure_cipher,
             row_factory=sqlite3.Row,
         )
+        self.addCleanup(self.holder.reset)
 
     def test_the_manager_is_reused_until_the_configuration_changes(self):
         first = self.holder()
@@ -929,7 +957,7 @@ class DatabaseHolderTests(unittest.TestCase):
         self.available = False
         with self.assertRaises(RuntimeError):
             self.holder()
-        self.assertIsNone(DATABASE_MANAGER_CACHE.manager)
+        self.assertIsNone(self.holder.manager)
 
 
 class CipherConfigurationTests(unittest.TestCase):

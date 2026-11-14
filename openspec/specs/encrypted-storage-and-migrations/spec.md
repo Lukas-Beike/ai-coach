@@ -114,7 +114,7 @@ The database manager SHALL block new leases, wait for active operations and clos
 - **WHEN** the swap completes or fails and the drain context exits
 - **THEN** lease admission resumes without retaining a connection to the replaced file
 
-Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseManagerCache`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
+Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseHolder`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
 
 ### Requirement: Canonical extension upgrade preservation
 The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from the baseline, the schema production runs (v26, release 2.0.5, the only production instance).

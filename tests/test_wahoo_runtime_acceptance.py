@@ -78,7 +78,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             config=lambda: self.config,
             oauth=lambda: self.oauth,
             database_manager=lambda: self.database,
-            database_lock=threading.RLock,
             key_values=self.key_values,
             utc_now=lambda: self.now.isoformat(),
         )
@@ -93,7 +92,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             ),
             storage=WahooSyncStorage(
                 database_manager=lambda: self.database,
-                database_lock=threading.RLock(),
                 key_values=self.key_values,
             ),
             daily_markers=lambda: self.markers,

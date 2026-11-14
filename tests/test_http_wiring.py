@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 from backend.http_api.wiring import build_public_state
 
@@ -10,13 +10,11 @@ from backend.http_api.wiring import build_public_state
 class PublicStateWiringTests(unittest.TestCase):
     def make_services(self):
         manager = Mock(name="manager")
-        lock = MagicMock(name="database_lock")
         config = SimpleNamespace(calendar_ical_url="https://calendar.invalid/test.ics")
         settings = Mock(name="settings")
         gate = Mock(name="maintenance_gate")
         ctx = SimpleNamespace(
             database=Mock(name="database", return_value=manager),
-            database_lock=lock,
             config=Mock(name="config", return_value=config),
             settings=settings,
             maintenance=gate,
@@ -56,7 +54,6 @@ class PublicStateWiringTests(unittest.TestCase):
             ctx,
             {
                 "manager": manager,
-                "lock": lock,
                 "config": config,
                 "settings": settings,
                 "gate": gate,
@@ -71,7 +68,6 @@ class PublicStateWiringTests(unittest.TestCase):
 
         self.assertIs(service._dependencies.config, owners["config"])
         self.assertIs(service._dependencies.settings, owners["settings"])
-        self.assertIs(service._dependencies.database_lock, owners["lock"])
         self.assertIs(service._dependencies.database_manager, ctx.database)
         ctx.database.assert_not_called()
         self.assertIs(

@@ -49,10 +49,14 @@ def run(
         reason = next(
             (x for x in lines if x.startswith(("error", "fatal", " ! "))), None
         )
-        raise CliError(
-            f"{program} {' '.join(args[:2])} failed: "
-            f"{reason or (lines[0] if lines else 'no output')}"
-        )
+        detail = reason or (lines[0] if lines else "no output")
+        if "push" in args:
+            # A refusing pre-push hook explains itself before git's generic line.
+            hook = [
+                x for x in lines if not x.startswith(("error", "To ", " ! ", "hint:"))
+            ]
+            detail = "\n".join([detail, *hook[-5:]])
+        raise CliError(f"{program} {' '.join(args[:2])} failed: {detail}")
     return done.stdout
 
 

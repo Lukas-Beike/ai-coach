@@ -21,7 +21,6 @@ class TrainingTemplateToolTests(unittest.TestCase):
                 db.execute("CREATE TABLE writes (template_id TEXT PRIMARY KEY)")
 
         active_manager = [old_manager]
-        lock = threading.RLock()
         library_resolutions: list[DatabaseManager] = []
 
         class Library:
@@ -36,15 +35,17 @@ class TrainingTemplateToolTests(unittest.TestCase):
                 raise AssertionError("Unexpected create")
 
         def manager_factory():
-            self.assertTrue(lock._is_owned())
             return active_manager[0]
 
         def library_factory():
-            self.assertTrue(lock._is_owned())
+            # Resolved inside the unit of work, on the current manager.
+            self.assertEqual(
+                active_manager[0]._writer_lock._owner, threading.get_ident()
+            )
             library_resolutions.append(active_manager[0])
             return Library()
 
-        service = TrainingTemplateToolService(manager_factory, lock, library_factory)
+        service = TrainingTemplateToolService(manager_factory, library_factory)
         active_manager[0] = (
             current_manager  # Simulate manager replacement after restore.
         )
@@ -79,7 +80,6 @@ class TrainingTemplateToolTests(unittest.TestCase):
         manager_calls = []
         service = TrainingTemplateToolService(
             lambda: manager_calls.append("manager"),
-            threading.RLock(),
             lambda: self.fail("Library must not be resolved"),
         )
         with self.assertRaises(AppError) as denied:

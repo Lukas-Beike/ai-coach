@@ -21,11 +21,9 @@ class CoachProfileUpdateService:
         self,
         profile: ProfileService,
         database_manager: DatabaseManager,
-        database_lock: Any,
     ) -> None:
         self._profile = profile
         self._database_manager = database_manager
-        self._database_lock = database_lock
 
     def apply(
         self, arguments: dict[str, Any], intent: dict[str, Any]
@@ -48,7 +46,6 @@ class CoachProfileUpdateService:
             )
         with (
             self._profile.mutation_coordinator,
-            self._database_lock,
             self._database_manager.unit_of_work(),
         ):
             current = self._profile.get()

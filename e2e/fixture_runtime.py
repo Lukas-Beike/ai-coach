@@ -405,7 +405,7 @@ artifact = {}
 
 
 def stage_fixture_artifact():
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         units = db.execute(
             "SELECT local_id, plan_id FROM planned_units "
             "WHERE json_extract(payload, '$.plan_name')=? "

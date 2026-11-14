@@ -49,7 +49,6 @@ class CoachConversationBuilderTests(unittest.TestCase):
             ctx.database.return_value,
             ctx.key_values,
             ctx.model_transport.openai_responses_client.return_value,
-            ctx.database_lock,
             wiring.uuid.uuid4,
             logger=ctx.logger,
         )
@@ -58,7 +57,6 @@ class CoachConversationBuilderTests(unittest.TestCase):
             ctx.key_values,
             ctx.model_transport.openai_responses_client.return_value,
             coach_streams.CHAT_STREAM_REGISTRY,
-            ctx.database_lock,
             self.lock,
             runtime_clock.utc_now,
             wiring.uuid.uuid4,
@@ -127,16 +125,14 @@ class CoachLocalBuilderTests(unittest.TestCase):
             self.services.clarification_service()
 
         manager = ctx.database.return_value
-        scope.assert_called_once_with(manager, ctx.database_lock)
+        scope.assert_called_once_with(manager)
         args = action.call_args.args
-        self.assertEqual(args[:2], (manager, ctx.database_lock))
+        self.assertIs(args[0], manager)
         # The queue accessor is passed on, not resolved.
-        self.assertIs(args[2], ctx.sync_job_queue.service)
-        self.assertIs(args[3], scope.return_value)
-        self.assertEqual(args[4](), "2026-09-26")
-        clarification.assert_called_once_with(
-            manager, ctx.key_values, ctx.database_lock
-        )
+        self.assertIs(args[1], ctx.sync_job_queue.service)
+        self.assertIs(args[2], scope.return_value)
+        self.assertEqual(args[3](), "2026-09-26")
+        clarification.assert_called_once_with(manager, ctx.key_values)
 
     def test_the_morning_checkin_reads_the_live_canonical_reader(self) -> None:
         ctx = self.ctx
@@ -455,10 +451,9 @@ class CoachPlanningToolBuilderTests(unittest.TestCase):
 
         args = factory.call_args.args
         self.assertEqual(
-            args[:8],
+            args[:7],
             (
                 ctx.database.return_value,
-                ctx.database_lock,
                 workflows.structured_training_change_validator.return_value,
                 workflows.structured_training_change_service.return_value,
                 workflows.local_plan_creation_service.return_value,
@@ -467,8 +462,8 @@ class CoachPlanningToolBuilderTests(unittest.TestCase):
                 runtime_events.STATE_EVENT_BUFFER,
             ),
         )
-        self.assertEqual(args[8](), "2026-09-26")
-        self.assertEqual(args[9], tool_wiring.coach_limits.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertEqual(args[7](), "2026-09-26")
+        self.assertEqual(args[8], tool_wiring.coach_limits.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_the_adaptive_apply_takes_the_plan_guard_accessor_unresolved(self) -> None:
         ctx = self.ctx
@@ -479,7 +474,6 @@ class CoachPlanningToolBuilderTests(unittest.TestCase):
             ctx.planning_workflows.adaptive_replan_preview_service.return_value,
             self.commands.illness_pause.return_value,
             ctx.database.return_value,
-            ctx.database_lock,
             self.guard.plan_guard_service,
         )
         self.guard.plan_guard_service.assert_not_called()
@@ -524,7 +518,6 @@ class CoachCommandToolBuilderTests(unittest.TestCase):
         constructors["CoachProfileUpdateService"].assert_called_once_with(
             ctx.athlete.profile.return_value,
             ctx.database.return_value,
-            ctx.database_lock,
         )
 
 
@@ -577,7 +570,7 @@ class CoachToolDispatchBuilderTests(unittest.TestCase):
             workflows.structured_training_change_service,
         )
         built["TrainingTemplateToolService"].assert_called_once_with(
-            ctx.database, ctx.database_lock, ctx.planning.workout_library
+            ctx.database, ctx.planning.workout_library
         )
         built["CoachPlanningActionToolService"].assert_called_once_with(
             workflows.adaptive_replan_preview_service,
@@ -621,7 +614,6 @@ class CoachToolRoundBuilderTests(unittest.TestCase):
 
         built["CoachStructuredToolExecutionService"].assert_called_once_with(
             ctx.database.return_value,
-            ctx.database_lock,
             ctx.key_values,
             ctx.coach_local.clarification_service.return_value,
             ctx.coach_planning_tools.training_patch_service.return_value,
@@ -635,9 +627,9 @@ class CoachToolRoundBuilderTests(unittest.TestCase):
         )
         args = built["CoachStructuredToolRoundService"].call_args.args
         self.assertIs(args[0], ctx.database)
-        self.assertIs(args[8], ctx.coach_context.training_context_service.return_value)
-        self.assertIs(args[9], ctx.coach_turns.structured_response_service.return_value)
-        self.assertEqual(args[12], ctx.profile_mutation_coordinator)
+        self.assertIs(args[7], ctx.coach_context.training_context_service.return_value)
+        self.assertIs(args[8], ctx.coach_turns.structured_response_service.return_value)
+        self.assertEqual(args[11], ctx.profile_mutation_coordinator)
         # The journal and the round each take a fresh job store.
         self.assertEqual(ctx.coach_background_jobs.job_store.call_count, 2)
 
@@ -710,7 +702,6 @@ class CoachBackgroundJobBuilderTests(unittest.TestCase):
             cancellation = self.services.cancellation_service()
 
         self.assertIs(store._database_manager, ctx.database)
-        self.assertIs(store._database_lock, ctx.database_lock)
         self.assertIs(store._wake_event, COACH_JOB_WORKER.wake_event)
         self.assertIs(store._maintenance_gate, gate)
         self.assertIs(submission._stream_registry, coach_streams.CHAT_STREAM_REGISTRY)
@@ -726,7 +717,6 @@ class CoachBackgroundJobBuilderTests(unittest.TestCase):
         deps = self.services.turn_failure_service()._deps
 
         self.assertIs(deps.database_manager, ctx.database)
-        self.assertIs(deps.database_lock, ctx.database_lock)
         self.assertIs(deps.chat_repository, self.chats)
         self.assertIs(deps.key_values, ctx.key_values)
         self.assertIs(deps.event_buffer, runtime_events.STATE_EVENT_BUFFER)
@@ -756,7 +746,6 @@ class CoachBackgroundJobBuilderTests(unittest.TestCase):
 
         factory.assert_called_once_with(
             ctx.database.return_value,
-            ctx.database_lock,
             ctx.key_values,
             ctx.coach_local.quick_actions_service,
             ctx.clock.now,
@@ -787,7 +776,6 @@ class CoachTurnBuilderTests(unittest.TestCase):
         service = self.services.chat_turn_service()
 
         self.assertIs(service._database_manager, ctx.database)
-        self.assertIs(service._database_lock, ctx.database_lock)
         self.assertIs(service._receipts._manager_factory, ctx.database)
         self.assertIs(service._settings, ctx.settings)
         self.assertIs(service._conversations, ctx.coach_conversation.provision_service)

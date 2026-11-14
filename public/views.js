@@ -515,7 +515,8 @@ function renderModel(model) {
   }
   // A task whose provider has no key disables only its own entry points.
   // Every quick-action kind but the morning check-in runs on the planning model,
-  // in the "Analyse & Plan" menu and its copies in the composer's "+" menu.
+  // in the "Analyse & Plan" menu, its copies in the composer's "+" menu and the
+  // calendar's "Mit dem Coach analysieren" (#2744).
   const planningOff = model?.tasks?.planning?.ready === false;
   const planning = $("#quickAnalysisButton");
   if (planning) planning.disabled = planningOff;

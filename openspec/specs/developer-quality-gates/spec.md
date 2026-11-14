@@ -182,18 +182,22 @@ Evidence:
 - `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`
 - `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`
 
-### Requirement: CI runs the complete sharded suite
-The CI Python test jobs SHALL run every test through `tests/run_tests.py --shard N --total T`, covering the whole suite across the shards, and SHALL NOT use `--changed`. Changed-test selection is a local convenience and never evidence of complete validation.
+### Requirement: CI runs the complete sharded suite unless only documentation changed
+The CI Python test jobs SHALL run every test through `tests/run_tests.py --shard N --total T`, covering the whole suite across the shards. They SHALL use `--changed` only on a pull request that changes documentation alone (#2747). Changed-test selection is never evidence of complete validation.
 
 #### Scenario: Pull-request validation
-- **WHEN** CI validates a pull request
+- **WHEN** CI validates a pull request that changes any path other than documentation
 - **THEN** each shard job runs its share of the whole suite and the container job runs the container suite in the built image
+
+#### Scenario: Documentation-only pull request
+- **WHEN** every changed path of a pull request is Markdown or text under `docs/`, `.agents/skills/` (outside `scripts/`) or `openspec/`, or is `README.md`, `REVIEW.md`, `AGENTS.md` or a first-level `AGENTS.md` outside `public/`
+- **THEN** shard 1 runs `tests/run_tests.py --changed --base HEAD^1 --with-heavy` and the Node unit tests, the other shards report without running tests, and the container, browser and quality jobs are skipped
 
 #### Scenario: Shard count declared once
 - **WHEN** the shard count changes
 - **THEN** the workflow variable and its matrix stay equal
 
-Evidence: the `test_shards` and container jobs of `.github/workflows/publish-container.yml`; `docs/testing.md` (Parallel Sharded CI Runner). Tests: `tests/test_ci_contracts.py::ShardingContractTests.test_native_shard_count_is_declared_once_and_matched_by_the_matrix`, `tests/test_ci_contracts.py::ContainerSuiteContractTests.test_container_job_runs_the_container_suite_with_matching_mounts`, `tests/test_ci_contracts.py::WorkflowSourceTests.test_quality_checks_all_sources_and_merges_every_shard`. No test pins the absence of `--changed` from the workflows; the workflows contain none today.
+Evidence: the `test_shards` and container jobs of `.github/workflows/publish-container.yml`; `docs/testing.md` (Parallel Sharded CI Runner). Tests: `tests/test_ci_contracts.py::ShardingContractTests.test_native_shard_count_is_declared_once_and_matched_by_the_matrix`, `tests/test_ci_contracts.py::ContainerSuiteContractTests.test_container_job_runs_the_container_suite_with_matching_mounts`, `tests/test_ci_contracts.py::WorkflowSourceTests.test_quality_checks_all_sources_and_merges_every_shard`, `tests/test_ci_contracts.py::ChangedFileClassifierTests.test_only_documentation_paths_are_docs`, `tests/test_ci_contracts.py::ChangedFileClassifierTests.test_workflow_skips_suites_only_on_a_classified_pull_request`, `tests/test_changed_tests.py::ChangedPathsTests.test_with_heavy_keeps_the_selected_slow_modules_for_ci`.
 
 ### Requirement: Backend never reaches the composition root
 No backend module SHALL import `server`, or reach it through a dynamic import or `sys.modules`, and `server.py` SHALL NOT define a class or a top-level symbol that a backend module defines. Functions in `server.py` SHALL compose explicit dependencies or run lifecycle entry points, without nested behavior or domain, database or network calls.

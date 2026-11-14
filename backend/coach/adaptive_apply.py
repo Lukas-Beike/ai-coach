@@ -36,14 +36,12 @@ class CoachAdaptiveApplyService:
         preview: AdaptiveReplanPreviewService,
         illness_sync: IllnessPauseSyncService,
         database_manager: DatabaseManager,
-        database_lock: Any,
         plan_guard: Callable[[], PlanGuardService] | None = None,
     ) -> None:
         self._plan_guard = plan_guard
         self._preview = preview
         self._illness_sync = illness_sync
         self._database_manager = database_manager
-        self._database_lock = database_lock
 
     def apply(
         self,
@@ -78,7 +76,7 @@ class CoachAdaptiveApplyService:
             raise AppError(
                 409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen."
             )
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             current_user = coach_store.user_message_for_turn(db, client_turn_id)
             publication = coach_store.message_by_id(
                 db, latest.get("published_message_id"), "id", "assistant"
@@ -121,7 +119,7 @@ class CoachAdaptiveApplyService:
             return self._illness_sync.apply_local(adjustment_id), []
         accepted = arguments.get(PLAN_FINDINGS_ARGUMENT)
         guard = self._plan_guard()
-        with self._database_lock, self._database_manager.unit_of_work():
+        with self._database_manager.unit_of_work():
             before = guard.findings()
             applied = self._illness_sync.apply_local(adjustment_id)
             # The replan rewrites existing units but cannot author a focus,

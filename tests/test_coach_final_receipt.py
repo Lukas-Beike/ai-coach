@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import unittest
 from datetime import date
 from typing import Any
@@ -36,7 +35,6 @@ class CoachFinalReceiptTests(unittest.TestCase):
         self.events.publish.side_effect = lambda *_: self.trace.append("publish")
         self.service = CoachFinalReceiptService(
             self.manager,
-            threading.RLock(),
             self.chat,
             self.keys,
             self.events,
@@ -353,7 +351,6 @@ class CoachFinalReceiptTests(unittest.TestCase):
         events = StateEventBuffer()
         service = CoachFinalReceiptService(
             manager,
-            threading.RLock(),
             ChatRepository(lambda: "now"),
             keys,
             events,

@@ -148,9 +148,7 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
     authority = PlanningAuthorityService(
         database, mock.Mock(), mock.Mock(), NOW.isoformat
     )
-    diary, _library = build_nutrition_services(
-        database, threading.RLock(), NOW.isoformat, lambda: NOW
-    )
+    diary, _library = build_nutrition_services(database, NOW.isoformat, lambda: NOW)
     plan_push = PlanPushCommandService(queue)
     sync_tools = CoachSyncToolService(
         queue,
@@ -192,7 +190,6 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
     preparation = CoachStructuredToolPreparationService(
         CoachDialogueActionService(
             database,
-            threading.RLock(),
             lambda: queue,
             mock.Mock(),
             lambda: date(2026, 11, 9),
@@ -211,7 +208,6 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
         queue=queue,
         tools=CoachStructuredToolExecutionService(
             database,
-            threading.RLock(),
             KeyValueRepository(NOW.isoformat),
             mock.Mock(),
             mock.Mock(),

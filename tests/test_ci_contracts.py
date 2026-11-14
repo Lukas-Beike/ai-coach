@@ -4,6 +4,7 @@ import fnmatch
 import functools
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -22,6 +23,20 @@ SPEC = importlib.util.spec_from_file_location(
 )
 release_source = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_source)
+CHANGES_SPEC = importlib.util.spec_from_file_location(
+    "ci_changes",
+    Path(__file__).resolve().parents[1] / ".github/scripts/ci_changes.py",
+)
+assert CHANGES_SPEC is not None and CHANGES_SPEC.loader is not None
+ci_changes = importlib.util.module_from_spec(CHANGES_SPEC)
+CHANGES_SPEC.loader.exec_module(ci_changes)
+WORKFLOW = (
+    Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml"
+)
+
+
+def _job(workflow, name, following):
+    return workflow.split(f"  {name}:\n", 1)[1].split(f"  {following}:\n", 1)[0]
 
 
 class WorkflowSourceTests(unittest.TestCase):
@@ -128,13 +143,15 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertEqual(config["tool"]["coverage"]["report"]["precision"], 2)
         self.assertEqual(evidence["shards"], 4)
 
-        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        shards = workflow.split("  test_shards:\n", 1)[1].split(
+            "  container_tests:\n", 1
+        )[0]
         self.assertIn("coverage run tests/run_tests.py --shard", shards)
         self.assertIn('--total "$PYTHON_TEST_SHARDS"', shards)
         self.assertIn("python-coverage-${{ matrix.shard }}", shards)
         self.assertIn("include-hidden-files: true", shards)
         self.assertIn("if-no-files-found: error", shards)
-        quality = workflow.split("  quality:\n", 1)[1].split("  image_sbom:\n", 1)[0]
+        quality = workflow.split("  quality:\n", 1)[1].split("  e2e:\n", 1)[0]
         self.assertIn("pattern: python-coverage-*", quality)
         self.assertNotIn("merge-multiple", quality)
         self.assertIn('for shard in $(seq 1 "$PYTHON_TEST_SHARDS")', quality)
@@ -238,7 +255,8 @@ class WorkflowSourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.MULTILINE)
-        self.assertEqual(len(checkout_refs), 10)
+        # The syntax and SBOM jobs were merged into others (#2750).
+        self.assertEqual(len(checkout_refs), 8)
         self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
         self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
         self.assertNotIn("source_ref", workflow)
@@ -259,16 +277,12 @@ class WorkflowSourceTests(unittest.TestCase):
         image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
         self.assertIn("docker build --tag pacecraft:ci\n", image)
         self.assertIn("needs: source\n", image)
-        upload = image.split("actions/upload-artifact@", 1)[1]
+        upload = image.split("actions/upload-artifact@", 1)[1].split("- name:", 1)[0]
         self.assertIn("name: pacecraft-ci-image", upload)
         self.assertIn("retention-days: 1", upload)
         consumers = {
             "container_tests": (
                 workflow.split("  container_tests:\n", 1)[1].split("  test:\n", 1)[0],
-                "needs: [source, image]",
-            ),
-            "image_sbom": (
-                workflow.split("  image_sbom:\n", 1)[1].split("  e2e:\n", 1)[0],
                 "needs: [source, image]",
             ),
             "e2e": (
@@ -282,7 +296,16 @@ class WorkflowSourceTests(unittest.TestCase):
                 self.assertIn("name: pacecraft-ci-image", text)
                 self.assertIn("gunzip -c pacecraft-ci-image.tar.gz | docker load", text)
                 self.assertNotIn("docker build", text)
-        self.assertIn("image: pacecraft:ci", consumers["image_sbom"][0])
+        # The SBOM describes the image the same job built (#2750), after its upload.
+        self.assertLess(
+            image.index("- name: Upload shared CI image\n"),
+            image.index("- name: Generate SPDX SBOM\n"),
+        )
+        sbom = image.split("- name: Generate SPDX SBOM\n", 1)[1]
+        self.assertIn("image: pacecraft:ci", sbom)
+        self.assertIn("name: pacecraft-sbom", sbom)
+        self.assertIn("- name: Retry SPDX SBOM generation\n", sbom)
+        self.assertNotIn("  image_sbom:\n", workflow)
         self.assertIn("--workdir /app pacecraft:ci", consumers["container_tests"][0])
 
     def test_e2e_selects_specs_with_playwright_list_not_file_grep(self):
@@ -304,25 +327,24 @@ class WorkflowSourceTests(unittest.TestCase):
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
         # Browser checks no longer wait for the unit tests; publishing still needs both.
         self.assertNotIn("needs.test", e2e)
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", workflow)
+        # Every project runs unless the classifier answered ui=false (#2748).
+        choice = re.search(
+            r"project: \$\{\{ fromJSON\(needs\.source\.outputs\.ui == 'false' "
+            r"&& '(\[[^']*\])' \|\| '(\[[^']*\])'\) \}\}",
+            e2e,
+        )
+        assert choice is not None
+        no_ui, every = (json.loads(choice.group(i)) for i in (1, 2))
+        self.assertEqual(no_ui, ["desktop"])
+        self.assertEqual(set(every), {"mobile", "tablet-landscape", "desktop"})
+        shards = re.search(r"\n        shards: \[(\d+)\]\n", e2e)
+        assert shards is not None
+        count = int(shards.group(1))
         self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
+            f"\n        shard: [{', '.join(str(i) for i in range(1, count + 1))}]\n",
+            e2e,
         )
-        entries = re.findall(
-            r"- \{ project: ([a-z-]+), shard: (\d+), shards: (\d+) \}", e2e
-        )
-        projects = {}
-        for project, shard, shards in entries:
-            projects.setdefault(project, []).append((int(shard), int(shards)))
-        self.assertEqual(
-            set(projects),
-            {"mobile", "tablet-landscape", "desktop"},
-        )
-        for project, shards in projects.items():
-            with self.subTest(project=project):
-                count = shards[0][1]
-                self.assertEqual(
-                    sorted(shards), [(i, count) for i in range(1, count + 1)]
-                )
         aggregate = workflow.split("  browser:\n", 1)[1].split(
             "  build-and-push:\n", 1
         )[0]
@@ -330,8 +352,10 @@ class WorkflowSourceTests(unittest.TestCase):
             name: int(count)
             for name, count in re.findall(r"--expected ([a-z-]+):(\d+)", aggregate)
         }
-        self.assertEqual(
-            expected, {name: shards[0][1] for name, shards in projects.items()}
+        self.assertEqual(expected, dict.fromkeys(every, count))
+        self.assertIn(f"expected=(--expected desktop:{count})\n", aggregate)
+        self.assertIn(
+            'if [[ "$UI" != "false" ]]; then\n            expected+=', aggregate
         )
         self.assertIn("--jobs 1", e2e)
         self.assertIn(
@@ -401,7 +425,7 @@ class WorkflowSourceTests(unittest.TestCase):
         browser = workflow.split("  browser:\n", 1)[1].split("  build-and-push:\n", 1)[
             0
         ]
-        self.assertIn("needs: e2e", browser)
+        self.assertIn("needs: [source, e2e]", browser)
         self.assertIn(
             "name: browser-run-summary-${{ matrix.project }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
             workflow,
@@ -410,9 +434,7 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertNotIn("attempt-${{ github.run_attempt }}", browser)
         self.assertIn("python .github/scripts/aggregate_browser_results.py", browser)
         self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
-        self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
-        )
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", workflow)
 
     def test_release_pushes_the_tested_image_instead_of_rebuilding(self):
         workflow = (
@@ -421,9 +443,7 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         publish = workflow.split("  build-and-push:\n", 1)[1]
         self.assertNotIn("docker/build-push-action", workflow)
-        self.assertIn(
-            "needs: [source, test, e2e, browser, quality, image_sbom]", publish
-        )
+        self.assertIn("needs: [source, image, test, e2e, browser, quality]", publish)
         self.assertIn("name: pacecraft-ci-image", publish)
         self.assertIn("docker tag pacecraft:ci", publish)
         self.assertIn("cosign attest --type spdxjson", publish)
@@ -805,7 +825,9 @@ class ShardingContractTests(unittest.TestCase):
         workflow = (root / ".github/workflows/publish-container.yml").read_text(
             encoding="utf-8"
         )
-        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        shards = workflow.split("  test_shards:\n", 1)[1].split(
+            "  container_tests:\n", 1
+        )[0]
         matrix = re.search(r"shard: \[([0-9, ]+)\]", shards)
         self.assertIsNotNone(matrix)
         self.assertEqual(
@@ -1024,6 +1046,207 @@ class ReleaseSourceTests(unittest.TestCase):
         release_source.git(clone, "fetch", "--unshallow", "--tags", "origin")
         release_source.git(clone, "fetch", "origin", "main:refs/remotes/origin/main")
         release_source.verify(clone, self.sha, "1.7.2")
+
+
+class ChangedFileClassifierTests(unittest.TestCase):
+    """Only a classified pull request skips suites (#2747) or browser projects (#2748)."""
+
+    def test_only_documentation_paths_are_docs(self):
+        docs = (
+            "docs/testing.md",
+            "docs/notes.txt",
+            ".agents/skills/pr/SKILL.md",
+            ".agents/skills/pr/references/review.md",
+            "README.md",
+            "AGENTS.md",
+            "backend/AGENTS.md",
+            ".github/AGENTS.md",
+            "REVIEW.md",
+            "openspec/specs/coach/spec.md",
+        )
+        not_docs = (
+            ".agents/skills/pr/scripts/pr.py",
+            ".agents/skills/pr/scripts/notes.md",
+            ".agents/skills/pr/evals/evals.json",
+            "docs/diagram.png",
+            "openspec/config.yaml",
+            "public/AGENTS.md",
+            "public/InterVariable-LICENSE.md",
+            "backend/sync/AGENTS.md",
+            "tests/fixtures/providers/README.md",
+            ".github/workflows/publish-container.yml",
+            "tests/test_ci_contracts.py",
+            "scripts/release_dispatch.py",
+            "server.py",
+            "CHANGELOG.md",
+            "package.json",
+        )
+        for path in docs:
+            with self.subTest(path=path):
+                self.assertTrue(ci_changes.is_doc(path))
+                self.assertTrue(ci_changes.docs_only([path]))
+        for path in not_docs:
+            with self.subTest(path=path):
+                self.assertFalse(ci_changes.is_doc(path))
+                self.assertFalse(ci_changes.docs_only(["docs/testing.md", path]))
+        self.assertFalse(ci_changes.docs_only([]))
+
+    def test_ui_paths_run_every_browser_project(self):
+        ui_paths = (
+            "public/app.js",
+            "public/AGENTS.md",
+            "e2e/calendar.spec.cjs",
+            "e2e/browser_durations.json",
+            "playwright.config.cjs",
+            "package.json",
+            "package-lock.json",
+            "backend/http_api/static_assets.py",
+            "backend/http_api/response_transport.py",
+            "backend/http_api/responses.py",
+            "scripts/run_browser_tests.py",
+            "scripts/browser_environment.json",
+            ".github/scripts/aggregate_browser_results.py",
+            ".github/scripts/ci_changes.py",
+            ".github/workflows/publish-container.yml",
+        )
+        backend_only = (
+            "server.py",
+            "backend/sync/garmin.py",
+            "backend/http_api/handler.py",
+            "tests/test_ci_contracts.py",
+            "tests/navigation-state.test.cjs",
+            "docs/testing.md",
+            "Dockerfile",
+            "publicity.md",
+        )
+        for path in ui_paths:
+            with self.subTest(path=path):
+                self.assertTrue(ci_changes.ui(["server.py", path]))
+        for path in backend_only:
+            with self.subTest(path=path):
+                self.assertFalse(ci_changes.ui([path]))
+        # An unknown change runs every project.
+        self.assertTrue(ci_changes.ui(None))
+        self.assertTrue(ci_changes.ui([]))
+
+    @unittest.skipUnless(shutil.which("git"), "needs Git for a merge-commit fixture")
+    def test_pull_request_merge_commit_is_classified_and_every_other_event_is_not(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-C", str(root), *args], text=True, stderr=subprocess.PIPE
+            ).strip()
+
+        def commit(path, message):
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(message, encoding="utf-8")
+            git("add", path)
+            git("commit", "-m", message)
+
+        git("init", "--initial-branch=develop")
+        git("config", "user.name", "Fixture")
+        git("config", "user.email", "fixture@example.invalid")
+        commit("server.py", "base")
+        every_suite = ("false", "true")
+        for branch, path, expected in (
+            ("docs", "docs/testing.md", ("true", "false")),
+            ("code", "server.py", ("false", "false")),
+            ("ui", "public/app.js", every_suite),
+        ):
+            with self.subTest(branch=branch):
+                git("switch", "-c", branch, "develop")
+                commit(path, f"change {branch}")
+                git("switch", "--detach", "develop")
+                git("merge", "--no-ff", "-m", "merge", branch)
+                for event, want in (
+                    ("pull_request", expected),
+                    ("push", every_suite),
+                    ("release", every_suite),
+                    ("workflow_dispatch", every_suite),
+                ):
+                    self.assertEqual(self._classify(root, event), want, event)
+                # A single-parent checkout is no pull request merge commit.
+                git("switch", "--detach", branch)
+                self.assertEqual(self._classify(root, "pull_request"), every_suite)
+
+    def _classify(self, root, event):
+        output = root.parent / f"{root.name}-output"
+        output.write_text("", encoding="utf-8")
+        self.addCleanup(output.unlink, missing_ok=True)
+        subprocess.run(
+            [sys.executable, Path(ci_changes.__file__).resolve()],
+            cwd=root,
+            env={**os.environ, "EVENT_NAME": event, "GITHUB_OUTPUT": str(output)},
+            check=True,
+            capture_output=True,
+        )
+        values = dict(
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").split()
+        )
+        return values["docs_only"], values["ui"]
+
+    def test_workflow_skips_suites_only_on_a_classified_pull_request(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        source = _job(workflow, "source", "image")
+        self.assertIn("docs_only: ${{ steps.changes.outputs.docs_only }}", source)
+        self.assertIn("ui: ${{ steps.changes.outputs.ui }}", source)
+        classify = source.split("- name: Classify changed files\n", 1)[1]
+        self.assertIn("if: github.event_name == 'pull_request'\n", classify)
+        self.assertIn("python .github/scripts/ci_changes.py", classify)
+        skip = "if: needs.source.outputs.docs_only != 'true'\n"
+        self.assertIn(skip, _job(workflow, "container_tests", "test"))
+        self.assertIn(skip, _job(workflow, "e2e", "browser"))
+        self.assertIn(
+            "if: needs.test.result == 'success' && needs.source.outputs.docs_only != 'true'\n",
+            _job(workflow, "quality", "e2e"),
+        )
+        # Required "Test shard N/4" names need the matrix job itself to run.
+        shards = _job(workflow, "test_shards", "container_tests")
+        self.assertNotRegex(shards.split("steps:", 1)[0], r"\n    if:")
+        self.assertIn(
+            "MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' "
+            "|| matrix.shard == 1 && 'docs' || 'idle' }}",
+            shards,
+        )
+        for mode, command in (
+            ("full", "coverage run tests/run_tests.py --shard"),
+            ("docs", "python tests/run_tests.py --changed --base HEAD^1 --with-heavy"),
+            # The skipped e2e job runs them otherwise; docs-only runs need them.
+            ("docs", "node --test tests/*.cjs"),
+        ):
+            self.assertIn(f"if: env.MODE == '{mode}'\n        run: {command}", shards)
+        # The scripts may use Python 3.14 syntax; the runner's own Python is older.
+        self.assertLess(
+            source.index("python-version: '3.14'"),
+            source.index("run: python .github/scripts/release_source.py"),
+        )
+        # Aggregators accept a skip only when the run is docs-only.
+        test = _job(workflow, "test", "quality")
+        self.assertIn(
+            'if [[ "$DOCS_ONLY" == "true" ]]; then\n            container_expected=skipped',
+            test,
+        )
+        self.assertIn('"$CONTAINER_TESTS_RESULT" != "$container_expected"', test)
+        self.assertIn("docs-only: suites skipped", test)
+        browser = _job(workflow, "browser", "build-and-push")
+        self.assertIn(
+            'if [[ "$DOCS_ONLY" == "true" && "$E2E_RESULT" == "skipped" ]]', browser
+        )
+        # Image with its SBOM, the syntax check and publishing never skip.
+        self.assertIn(
+            "- name: Run syntax checks\n"
+            "        if: env.MODE != 'idle' && matrix.shard == 1\n",
+            shards,
+        )
+        never_skip = (
+            _job(workflow, "image", "test_shards"),
+            workflow.split("  build-and-push:\n", 1)[1],
+        )
+        for job in never_skip:
+            self.assertNotIn("docs_only", job.lower())
 
 
 class ReleaseWorkflowTests(unittest.TestCase):

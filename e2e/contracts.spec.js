@@ -694,15 +694,26 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(facts).not.toContainText("Trainingsload");
   await expect(completed.locator(".planned-entry-details")).not.toContainText(/Belastung 42.*Belastung 42/);
   const analyse = completed.getByRole("button", { name: "Mit dem Coach analysieren" });
-  const sent = await analyse.evaluate((button) => {
+  const [sent, kind] = await analyse.evaluate((button) => {
     let text = null;
+    let requestKind = null;
     const original = globalThis.askCoach;
-    globalThis.askCoach = (message) => { text = message; };
+    globalThis.askCoach = (message, options) => { text = message; requestKind = options?.requestKind; };
     button.click();
     globalThis.askCoach = original;
-    return text;
+    return [text, requestKind];
   });
   expect(sent).toMatch(/^Analysiere meine Einheit vom .+ \(Radfahren, 07:15, .+\)\.$/);
+  // It runs as a session analysis on the planning model and is off without a planning key (#2744).
+  expect(kind).toBe("session_analysis");
+  expect(await page.evaluate(() => {
+    const planning = state.data.model?.tasks?.planning;
+    state.data.model = { ...state.data.model, tasks: { ...state.data.model?.tasks, planning: { ...planning, ready: false } } };
+    const off = plannedCoachButton("Mit dem Coach analysieren", "x", "secondary-button", "session_analysis").disabled;
+    const discuss = plannedCoachButton("Mit dem Coach besprechen", "x").disabled;
+    state.data.model = { ...state.data.model, tasks: { ...state.data.model.tasks, planning } };
+    return [off, discuss];
+  })).toEqual([true, false]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

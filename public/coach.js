@@ -1148,14 +1148,17 @@ function addStructuredCoachReceipts(payload) {
 }
 
 // `send: false` only puts the message into the field for the athlete to finish and send (#2193).
-async function askCoach(message, { send = true } = {}) {
+async function askCoach(message, { send = true, requestKind = null } = {}) {
   const applied = await AppRouter.navigate("coach", { historyMode: "push", focus: false });
   if (!applied) return;
   const input = $("#messageInput");
   if (!input) return;
   // A prefill keeps an unsent draft and adds the message on its own line; it is the athlete's own
   // request, so a quick action's kind left in the field no longer applies.
-  if (!send) delete input.dataset.requestKind;
+  // A calendar entry point with a quick-action kind runs on that kind's model (#2744); any other
+  // request, sent or prefilled, drops a kind left in the field.
+  if (send && requestKind) input.dataset.requestKind = requestKind;
+  else delete input.dataset.requestKind;
   input.value = !send && input.value.trim() ? `${input.value.trimEnd()}\n${message}` : message;
   input.dispatchEvent(new Event("input"));
   if (send) {

@@ -7,7 +7,6 @@ import json
 import logging
 import tempfile
 import unittest
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Self
 from unittest.mock import Mock
@@ -112,7 +111,6 @@ class FailureLogLineTests(unittest.TestCase):
         manager.unit_of_work.side_effect = OSError("disk detail")
         service = DatabaseBackupService(
             manager,
-            nullcontext(),
             DatabaseBackupConfig(
                 database_path=Path("unused.db"),
                 data_dir=Path("."),

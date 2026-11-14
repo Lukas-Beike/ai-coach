@@ -93,8 +93,6 @@ class NutritionBuilderTests(unittest.TestCase):
         )
         self.assertIs(ctx.config, yazio.call_args.args[0])
         self.assertEqual("female", yazio.call_args.kwargs["athlete_sex"]())
-        self.assertIs(ctx.database_lock, library.call_args.kwargs["db_lock"])
-        self.assertIs(ctx.database_lock, diary.call_args.kwargs["db_lock"])
         self.assertIs(library.return_value, diary.call_args.kwargs["meal_library"])
         # The product web search reads the Nutrition model choice.
         ctx.settings.selected_model.return_value = "nutrition-model"

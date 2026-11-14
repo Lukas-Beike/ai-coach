@@ -37,7 +37,6 @@ class CoachTrainingPatchService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: Any,
         change_validator: StructuredTrainingChangeValidator,
         change_service: StructuredTrainingChangeService,
         plan_creation: LocalTrainingPlanCreationService,
@@ -48,7 +47,6 @@ class CoachTrainingPatchService:
         change_limit: int,
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._change_validator = change_validator
         self._change_service = change_service
         self._plan_creation = plan_creation
@@ -99,7 +97,7 @@ class CoachTrainingPatchService:
                 reason="invalid_change",
             )
 
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
             if (
                 type(arguments.get("expected_revision")) is not int

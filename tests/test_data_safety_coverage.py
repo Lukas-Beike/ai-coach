@@ -552,7 +552,6 @@ class DataKindFixture(unittest.TestCase):
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
                 database_manager=cast(Any, _Manager(self.db)),
-                database_lock=_Lock(),
                 key_value_repository=self.key_values,
                 maintenance_gate=cast(Any, _Gate()),
                 profile_mutation_coordinator=threading.RLock(),
@@ -900,7 +899,6 @@ class BackupRestoreRoundTripTests(DataKindFixture):
         self.addCleanup(manager.close)
         backup = DatabaseBackupService(
             manager,
-            Mock(),
             DatabaseBackupConfig(
                 database_path=self.database_path,
                 data_dir=self.root,

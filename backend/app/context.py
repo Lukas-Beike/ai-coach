@@ -57,7 +57,6 @@ class AppContext:
     redactor: Redactor
     # The current sync operation id, read by the provider refresh journals.
     operation_context: ContextVar[dict[str, str] | None]
-    database_lock: threading.RLock
     # Observed opener for a raw provider request (log and diagnostic capture).
     observed_opener: Callable[[str], Opener]
     # The live data directory, database path and cipher availability: tests

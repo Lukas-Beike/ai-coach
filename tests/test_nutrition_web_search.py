@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -378,7 +377,6 @@ class NutritionWebSearchCatalogTests(unittest.TestCase):
         self.searcher, self.sent = service(response([value("salt_g", 0.7)]))
         _, library = build_nutrition_services(
             manager,
-            threading.Lock(),
             lambda: NOW.isoformat(),
             lambda: NOW,
             web_search=self.searcher,

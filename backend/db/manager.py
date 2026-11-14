@@ -22,10 +22,6 @@ from backend.errors import DatabaseBusyError
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
-# The application lock coordinates larger transactions and restore work that
-# span multiple repositories. DatabaseManager keeps its own connection locks.
-DATABASE_LOCK = threading.RLock()
-
 # Foreground writers that are granted the writer while a background writer
 # waits; after this many the background writer is served next, so a steady
 # stream of short foreground writes can delay but never starve background work.
@@ -359,7 +355,7 @@ class DatabaseManager:
                     reusable = True
                     if getattr(connection, "in_transaction", False):
                         # A write through a reader handle must not stay open
-                        # on a pooled connection and hold the database lock.
+                        # on a pooled connection and hold SQLite's write lock.
                         try:
                             connection.rollback()
                         except Exception:  # noqa: BLE001 - a connection that cannot roll back is closed, not pooled
@@ -496,132 +492,14 @@ class DatabaseManager:
             self._state.notify_all()
 
 
-class DatabaseManagerCache:
-    """Reuse the active manager until its path or encryption key changes."""
-
-    def __init__(self) -> None:
-        self.manager: DatabaseManager | None = None
-        self.signature: tuple[str, str, bool] | None = None
-        self._lock = threading.RLock()
-        self._current_manager: ContextVar[DatabaseManager | None] = ContextVar(
-            f"database_cache_manager_{id(self)}", default=None
-        )
-
-    def get(
-        self,
-        signature: tuple[str, str, bool],
-        path: str | Path,
-        backend: Any,
-        *,
-        password: str = "",
-        configure: Callable[[Any, str], None] | None = None,
-        row_factory: Callable[[Any, tuple[Any, ...]], Any] | None = None,
-        reader_count: int = 4,
-        timeout: float = 20.0,
-        persist_connections: bool = True,
-    ) -> DatabaseManager:
-        current = self._current_manager.get()
-        if current is not None:
-            return current
-        with self._lock:
-            if self.manager is not None and self.signature != signature:
-                self.manager.close()
-                self.manager = None
-                self.signature = None
-            if self.manager is None:
-                self.manager = DatabaseManager(
-                    path,
-                    backend,
-                    password=password,
-                    configure=configure,
-                    row_factory=row_factory,
-                    reader_count=reader_count,
-                    timeout=timeout,
-                    persist_connections=persist_connections,
-                )
-                self.signature = signature
-            return self.manager
-
-    def matches(self, signature: tuple[str, str, bool]) -> bool:
-        with self._lock:
-            return self.manager is not None and self.signature == signature
-
-    def reset(self) -> None:
-        with self._lock:
-            manager = self.manager
-            self.manager = None
-            self.signature = None
-        if manager is not None:
-            manager.close()
-
-    @contextmanager
-    def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
-        """Use the current manager without forcing its construction."""
-        manager = self._current_manager.get()
-        if manager is None:
-            with self._lock:
-                manager = self.manager
-            if manager is None:
-                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
-        token = self._current_manager.set(manager)
-        try:
-            with manager.unit_of_work(timeout=timeout) as db:
-                yield db
-        finally:
-            self._current_manager.reset(token)
-
-    def after_commit(self, callback: Callable[[], None]) -> None:
-        """Defer ``callback`` to the current unit of work's commit."""
-        manager = self._current_manager.get()
-        if manager is None:
-            with self._lock:
-                manager = self.manager
-            if manager is None:
-                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
-        manager.after_commit(callback)
-
-    @contextmanager
-    def reader(self) -> Iterator[Any]:
-        """Use a read lease without holding the cache lock while waiting."""
-        manager = self._current_manager.get()
-        if manager is None:
-            with self._lock:
-                manager = self.manager
-            if manager is None:
-                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
-        token = self._current_manager.set(manager)
-        try:
-            with manager.reader() as db:
-                yield db
-        finally:
-            self._current_manager.reset(token)
-
-    @contextmanager
-    def read_snapshot(self) -> Iterator[Any]:
-        """Use a pinned read-only snapshot on the current manager."""
-        manager = self._current_manager.get()
-        if manager is None:
-            with self._lock:
-                manager = self.manager
-            if manager is None:
-                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
-        token = self._current_manager.set(manager)
-        try:
-            with manager.read_snapshot() as db:
-                yield db
-        finally:
-            self._current_manager.reset(token)
-
-
-DATABASE_MANAGER_CACHE = DatabaseManagerCache()
-
-
 class DatabaseHolder:
     """The live database manager for the active path and security configuration.
 
     Callable: every use reads the data directory, path, configuration and cipher
-    availability again, so a credential swap, a restore or a changed path opens
-    the matching manager and none of the holders' users caches one.
+    availability again and keeps one manager per process. A changed path or key
+    closes it (waiting for leased work) and opens the matching one, so none of
+    the holder's users caches a manager. The lazy proxies below let a service
+    built at import time use the manager once it exists.
     """
 
     def __init__(
@@ -644,6 +522,9 @@ class DatabaseHolder:
         self._plain_backend = plain_backend
         self._configure = configure
         self._row_factory = row_factory
+        self.manager: DatabaseManager | None = None
+        self._signature: tuple[str, str, bool] | None = None
+        self._lock = threading.RLock()
 
     def __call__(self) -> DatabaseManager:
         self._data_dir().mkdir(parents=True, exist_ok=True)
@@ -651,18 +532,55 @@ class DatabaseHolder:
         password = self._config().app_password
         available = self._sqlcipher_available()
         if password and not available:
-            DATABASE_MANAGER_CACHE.reset()
+            self.reset()
             raise RuntimeError(
                 "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
             )
-        return DATABASE_MANAGER_CACHE.get(
-            (str(path.resolve()), password, available),
-            path,
-            self._encrypted_backend if password else self._plain_backend,
-            password=password,
-            configure=self._configure,
-            row_factory=self._row_factory,
-            reader_count=4,
-            timeout=20,
-            persist_connections=bool(password),
-        )
+        signature = (str(path.resolve()), password, available)
+        # Compare and detach under the lock, so a thread never closes a manager
+        # another thread has just opened; the close waits for leases outside it.
+        with self._lock:
+            stale = None
+            if self.manager is not None and self._signature != signature:
+                stale, self.manager, self._signature = self.manager, None, None
+        if stale is not None:
+            stale.close()
+        with self._lock:
+            if self.manager is None:
+                self.manager = DatabaseManager(
+                    path,
+                    self._encrypted_backend if password else self._plain_backend,
+                    password=password,
+                    configure=self._configure,
+                    row_factory=self._row_factory,
+                    reader_count=4,
+                    timeout=20,
+                    persist_connections=bool(password),
+                )
+                self._signature = signature
+            return self.manager
+
+    def reset(self) -> None:
+        """Close the manager, waiting for leased work; the next use opens a new one."""
+        with self._lock:
+            manager, self.manager, self._signature = self.manager, None, None
+        if manager is not None:
+            manager.close()
+
+    def _current(self) -> DatabaseManager:
+        with self._lock:
+            if self.manager is None:
+                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
+            return self.manager
+
+    def unit_of_work(self, *, timeout: float | None = None) -> Any:
+        return self._current().unit_of_work(timeout=timeout)
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        self._current().after_commit(callback)
+
+    def reader(self) -> Any:
+        return self._current().reader()
+
+    def read_snapshot(self) -> Any:
+        return self._current().read_snapshot()

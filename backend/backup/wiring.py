@@ -48,7 +48,6 @@ def build_backup(ctx: AppContext) -> BackupServices:
     def backup_service() -> DatabaseBackupService:
         return DatabaseBackupService(
             ctx.database(),
-            ctx.database_lock,
             DatabaseBackupConfig(
                 database_path=ctx.database_path(),
                 data_dir=ctx.data_dir(),

@@ -16,11 +16,9 @@ class TrainingTemplateToolService:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Any,
         workout_library_service: Callable[[], Any],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._workout_library_service = workout_library_service
 
     def execute(
@@ -62,10 +60,9 @@ class TrainingTemplateToolService:
                 )
             actions.append((action, local_id))
 
-        # Restore may replace the active manager. Resolve it, and then the
-        # library, only after acquiring the shared lock, and keep every nested
-        # library write inside the same manager-owned unit of work.
-        with self._database_lock, self._database_manager().unit_of_work():
+        # Restore may replace the active manager. Resolve the library inside
+        # the unit of work, so every nested library write joins it.
+        with self._database_manager().unit_of_work():
             library = self._workout_library_service()
             results = []
             for template, (action, local_id) in zip(templates, actions, strict=True):

@@ -626,7 +626,9 @@ class RouteTests(unittest.TestCase):
         service.adopt.return_value = {"profile": {}, "first_threshold_estimate": None}
         profile = Mock(mutation_coordinator=threading.RLock())
         routes = FirstThresholdPostRoutes(
-            lambda: service, lambda: profile, lambda: MagicMock(), threading.RLock()
+            lambda: service,
+            lambda: profile,
+            lambda: MagicMock(),
         )
         handler = Mock()
         handler.read_json.return_value = {"percent_lthr": 90.0}

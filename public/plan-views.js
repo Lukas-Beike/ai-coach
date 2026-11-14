@@ -121,9 +121,12 @@ function stopSummaryToggle(event) {
   event.stopPropagation();
 }
 
-function plannedCoachButton(label, prompt, className = "secondary-button planned-conflict-button") {
-  const button = h("button", { type: "button", className }, label);
-  button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt); });
+// A request kind sends the prompt as that quick action, on the planning model (#2744); without a
+// planning key the button is off like the other planning entry points.
+function plannedCoachButton(label, prompt, className = "secondary-button planned-conflict-button", requestKind = null) {
+  const button = h("button", { type: "button", className, dataset: requestKind ? { requestKind } : undefined }, label);
+  button.disabled = Boolean(requestKind) && !coachConfigured(null, requestKind);
+  button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt, { requestKind }); });
   return button;
 }
 
@@ -1280,7 +1283,7 @@ function plannedActivityActions(actual, dateKey, title, entryKey) {
     plannedEntryDurationLabel(actual, actual),
     /^[\w:.-]{1,80}$/.test(id) ? `ID ${id}` : null,
   ].filter(Boolean).join(", ")}).`;
-  const coach = plannedCoachButton("Mit dem Coach analysieren", prompt, "secondary-button");
+  const coach = plannedCoachButton("Mit dem Coach analysieren", prompt, "secondary-button", "session_analysis");
   const feedback = h("button", { type: "button", className: "secondary-button planned-activity-feedback" }, "Feedback");
   feedback.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
   return [more, h("div", "planned-activity-actions", coach, feedback)];

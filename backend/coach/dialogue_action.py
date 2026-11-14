@@ -70,13 +70,11 @@ class CoachDialogueActionService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: Any,
         sync_jobs: Callable[[], SyncJobQueueService],
         plan_scope: CoachDialoguePlanScopeService,
         today: Callable[[], date],
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._sync_jobs = sync_jobs
         self._plan_scope = plan_scope
         self._today = today
@@ -100,7 +98,7 @@ class CoachDialogueActionService:
             item["id"] for item in context["messages"] if item["role"] == "user"
         }
         # A referenced draft may predate the bounded recent dialogue.
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             user_ids.update(coach_store.draft_user_message_ids(db))
         try:
             request = validate_request(
@@ -232,7 +230,7 @@ class CoachDialogueActionService:
     def _validate_objects(
         self, name: str, arguments: dict[str, Any], scope: set[str]
     ) -> None:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             self._validate_scope_tokens(db, name, scope, self._broad_scopes)
         self._validate_template_action_scope(name, arguments, scope)
 
@@ -309,7 +307,7 @@ class CoachDialogueActionService:
             **period,
             "start": max(period["start"], self._today().isoformat()),
         }
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             for entry in arguments.get("entries") or []:
                 row = planning_store.planned_unit_row(
                     db, str(entry.get("library_workout_id") or "")

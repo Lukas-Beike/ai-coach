@@ -28,7 +28,6 @@ class ProfileCoordinatorTests(unittest.TestCase):
             self, "profile.db", row_factory=row_factory, schema=True
         )
         self.coordinator = threading.RLock()
-        self.database_lock = threading.RLock()
         self.kv = KeyValueRepository(lambda: "2026-10-29T12:00:00+00:00")
         self.repository = ProfileRepository(self.kv)
         self.profile = ProfileService(
@@ -126,9 +125,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
         self.assert_waits_without_blocking_other_writes(
             lambda: self.profile.save({"name": "Second"})
         )
-        coach = CoachProfileUpdateService(
-            self.profile, self.manager, self.database_lock
-        )
+        coach = CoachProfileUpdateService(self.profile, self.manager)
         intent = {
             "operation": "update_profile",
             "target_system": "local",
@@ -146,7 +143,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(self.profile.get()["name"], "Third")
 
-    def test_http_profile_waits_before_database_lock(self):
+    def test_http_profile_waits_before_the_writer(self):
         attempted = threading.Event()
         lock = self.coordinator
 
@@ -160,9 +157,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
                 lock.release()
 
         self.profile.mutation_coordinator = ObservableCoordinator()
-        routes = AthletePutRoutes(
-            lambda: self.profile, lambda: self.manager, self.database_lock
-        )
+        routes = AthletePutRoutes(lambda: self.profile, lambda: self.manager)
         for path, payload, expected in (("/api/profile", {"name": "HTTP"}, "HTTP"),):
             with self.subTest(path=path):
                 attempted.clear()
@@ -181,16 +176,9 @@ class ProfileCoordinatorTests(unittest.TestCase):
                     thread.start()
                     self.assertTrue(attempted.wait(2))
                     # Model an export holding the coordinator and persisting tokens.
-                    acquired = self.database_lock.acquire(timeout=2)
-                    try:
-                        self.assertTrue(
-                            acquired, "request acquired DB lock before coordinator"
-                        )
-                        with self.manager.unit_of_work() as db:
-                            self.kv.set(db, "synthetic_token_write", "done")
-                    finally:
-                        if acquired:
-                            self.database_lock.release()
+                    # The request must not hold the writer while it waits.
+                    with self.manager.unit_of_work(timeout=2) as db:
+                        self.kv.set(db, "synthetic_token_write", "done")
                 thread.join(5)
                 self.assertFalse(thread.is_alive(), "request deadlocked")
                 self.assertEqual(errors, [])
@@ -198,9 +186,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
                 self.assertEqual(self.profile.get()["name"], expected)
 
     def test_structured_round_persists_profile_and_receipt(self):
-        coach = CoachProfileUpdateService(
-            self.profile, self.manager, self.database_lock
-        )
+        coach = CoachProfileUpdateService(self.profile, self.manager)
         intent = {
             "operation": "update_profile",
             "target_system": "local",
@@ -215,7 +201,6 @@ class ProfileCoordinatorTests(unittest.TestCase):
         )
         execution = CoachStructuredToolExecutionService(
             self.manager,
-            self.database_lock,
             self.kv,
             Mock(),
             Mock(),
@@ -227,7 +212,6 @@ class ProfileCoordinatorTests(unittest.TestCase):
         jobs.turn_open.return_value = True
         round_service = CoachStructuredToolRoundService(
             lambda: self.manager,
-            self.database_lock,
             Mock(),
             Mock(),
             execution,
@@ -301,9 +285,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
                     "now",
                 ),
             )
-        undo = CoachTurnUndoService(
-            lambda: self.manager, self.database_lock, lambda: self.history
-        )
+        undo = CoachTurnUndoService(lambda: self.manager, lambda: self.history)
         self.assert_waits_without_blocking_other_writes(lambda: undo.undo("turn"))
         self.assertEqual(self.profile.get()["name"], "")
 

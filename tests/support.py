@@ -22,7 +22,7 @@ from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
 from backend.config import Config
-from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
+from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.route_table import RouteRequest, RouteTable
@@ -288,7 +288,7 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
         server.initialise_database()
         yield
     finally:
-        DATABASE_MANAGER_CACHE.reset()
+        server.database_manager.reset()
         for item in reversed(patches):
             item.stop()
 
@@ -368,7 +368,7 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
     ingested = {**snapshot, "raw_provider_data": raw}
     if stored_retrieved_at(ingested, zone=zone) is None:
         ingested["synced_at"] = runtime_clock.utc_now()
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         ingest_intervals_partial_snapshot(db, ingested, zone=zone)
         CanonicalCoverageStore(server.KEY_VALUE_REPOSITORY).persist(
             db, intervals_snapshot_coverage(ingested, zone=zone), zone=zone
@@ -389,7 +389,7 @@ def store_garmin_activities(server, activities: list[dict[str, Any]]) -> None:
 
     zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
     payload = {"synced_at": runtime_clock.utc_now(), "activities": activities}
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         GarminSnapshotWriter(server.KEY_VALUE_REPOSITORY, lambda: zone).write(
             db, payload
         )
@@ -400,7 +400,7 @@ def complete_canonical_backfill(server) -> None:
     """Run the canonical backfill to completion, so reads come from the tables."""
     backfill = server.CANONICAL_BACKFILL.status_reader
     for _ in range(1000):
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             if backfill.run_batch(db).done:
                 return
     raise AssertionError("canonical backfill did not finish")
@@ -415,7 +415,7 @@ def create_test_session(server) -> str:
     token = f"session-{uuid.uuid4().hex}"
     now = time.time()
     auth = server.session_auth_service()
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
             (
@@ -491,7 +491,7 @@ def reset_application_state(server) -> None:
     delete order is irrelevant. planning_state is re-seeded because a missing
     singleton row is treated as database corruption by planning revision bumps.
     """
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         db.execute("PRAGMA defer_foreign_keys = ON")
         for table in application_tables(db):
             db.execute(f'DELETE FROM "{table}"')

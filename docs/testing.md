@@ -36,7 +36,7 @@ across the repository. The slow tooling modules
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if
 an imported backend module changed; the run prints why it skipped them. CI
-always runs everything:
+runs everything, except on a documentation-only pull request (below):
 ```powershell
 python tests/run_tests.py --changed
 python tests/run_tests.py --changed --list
@@ -56,6 +56,21 @@ IDs without running them:
 python tests/run_tests.py --shard 1 --total 4
 python tests/run_tests.py --shard 1 --total 4 --list
 ```
+A pull request that changes documentation alone skips the suites (#2747).
+`.github/scripts/ci_changes.py` diffs the merge commit against its base parent;
+documentation is Markdown or text under `docs/`, `.agents/skills/` (outside
+`scripts/`) or `openspec/`, plus `README.md`, `REVIEW.md`, `AGENTS.md` and
+first-level `AGENTS.md` files outside `public/`. Shard 1 then runs
+`--changed --base HEAD^1 --with-heavy` (slow tooling modules stay in when
+selected) and the Node unit tests, the other shards report without tests, and
+the container, browser and quality jobs are skipped; the image with its SBOM
+and the syntax check (shard 1) still run. The `test` and `Browser checks`
+aggregates print "docs-only: suites skipped". Push, release and dispatch runs
+never classify and always run everything. Before this, a docs-only PR ran all 17 jobs like any other PR
+(median PR run 11.9 min, p90 18.1 min over 31 runs on 2026-11-13). The first
+docs-only run (#2760, run 43569747387) took 1.3 min: 10 of 14 jobs ran, shard 1
+ran 144 affected Python tests and 594 Node tests.
+
 Refresh the recording when shard times drift apart, with a full unsharded run in
 the image. The Windows runner uses the same read-only mounts and writes the file
 into the given directory, which then replaces `tests/test_durations.json`:
@@ -209,6 +224,13 @@ Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa
 for manual login, PWA/offline and UI checks. Never target a connected installation.
 Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.
+
+A pull request that changes no UI path runs only the `desktop` project (#2748);
+`mobile` and `tablet-landscape` then run on the push to `develop`, and a red run
+there stops merges like any red `develop` run. `UI_PATHS` in
+`.github/scripts/ci_changes.py` is the one list of UI paths: the client and its
+browser tests and tooling, the server modules that serve the shell and assets,
+and the test workflow. Push, release and dispatch runs always run every project.
 
 Configured viewports in `playwright.config.cjs`:
 - `mobile`: 390x844 (Standard mobile)

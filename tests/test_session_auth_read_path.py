@@ -8,7 +8,6 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import patch
 
 from backend.config import Config
@@ -55,10 +54,7 @@ class SessionAuthReadPathTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute("PRAGMA journal_mode=WAL")
             initialize_schema(db)
-        self.database_lock = threading.RLock()
-        self.auth = SessionAuthService(
-            self.manager, self.database_lock, CONFIG, True, RateLimiter()
-        )
+        self.auth = SessionAuthService(self.manager, CONFIG, True, RateLimiter())
         # Cleanup is covered separately; keep it off the other assertions.
         self.auth._last_cleanup_monotonic = time.monotonic()
 
@@ -272,39 +268,6 @@ class SessionAuthReadPathTests(unittest.TestCase):
                 self.assertEqual(self.auth.cookie_value(handler, "ic_csrf"), "CSRF")
                 self.assertEqual(self.auth.cookie_value(handler, "missing"), "")
 
-    def test_login_and_logout_do_not_queue_behind_the_shared_database_lock(
-        self,
-    ) -> None:
-        # Startup writers hold the shared lock while they wait for the writer;
-        # a login must not inherit that wait.
-        holding, release = threading.Event(), threading.Event()
-
-        def hold_lock() -> None:
-            with self.database_lock:
-                holding.set()
-                release.wait(10)
-
-        holder = threading.Thread(target=hold_lock)
-        holder.start()
-        self.addCleanup(holder.join, 5)
-        self.addCleanup(release.set)
-        self.assertTrue(holding.wait(5))
-        result = cast(
-            dict,
-            self.run_blocking(
-                lambda: self.auth.login_user(handler_for(), "synthetic-password")
-            ),
-        )
-        token = result["session_token"]
-        self.assertTrue(self.auth.authenticated_session(handler_for(token)))
-
-        def logout() -> bool:
-            self.auth.logout_user(handler_for(token))
-            return True
-
-        self.run_blocking(logout)
-        self.assertIsNone(self.auth.authenticated_session(handler_for(token)))
-
     def test_login_wait_for_a_busy_writer_is_bounded(self) -> None:
         self.hold_writer()
         started = time.monotonic()
@@ -376,42 +339,6 @@ class SessionAuthReadPathTests(unittest.TestCase):
             self.auth.session_token_hash(csrf),
         )
         self.assertEqual(self.auth.restore_coach_session_csrf_hash("unknown"), "")
-
-
-class SessionAuthCacheLockTests(unittest.TestCase):
-    def test_cache_resolution_does_not_wait_for_the_database_lock(self) -> None:
-        cache = http_auth.SessionAuthServiceCache()
-        database_lock = threading.RLock()
-        resolved: list[object] = []
-        acquired = threading.Event()
-        release = threading.Event()
-
-        def hold_database_lock() -> None:
-            with database_lock:
-                acquired.set()
-                release.wait(10)
-
-        holder = threading.Thread(target=hold_database_lock)
-        holder.start()
-        self.addCleanup(holder.join, 5)
-        self.addCleanup(release.set)
-        self.assertTrue(acquired.wait(5))
-
-        resolver = threading.Thread(
-            target=lambda: resolved.append(
-                cache.get(
-                    cast(DatabaseManager, object()),
-                    database_lock,
-                    CONFIG,
-                    True,
-                    RateLimiter(),
-                )
-            )
-        )
-        resolver.start()
-        resolver.join(5)
-        self.assertFalse(resolver.is_alive())
-        self.assertEqual(len(resolved), 1)
 
 
 if __name__ == "__main__":

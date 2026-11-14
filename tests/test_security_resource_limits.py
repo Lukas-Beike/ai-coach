@@ -263,9 +263,7 @@ class CalendarResourceLimitsTests(unittest.TestCase):
 class HttpResourceLimitsTests(unittest.TestCase):
     def test_login_throttles_before_reading_and_counts_malformed_requests(self):
         config = SimpleNamespace(app_password="synthetic-password-123")
-        auth = SessionAuthService(
-            Mock(), threading.RLock(), config, True, RateLimiter()
-        )
+        auth = SessionAuthService(Mock(), config, True, RateLimiter())
         handler = Mock(client_address=("127.0.0.1", 1))
         handler.read_json.side_effect = AppError(400, "synthetic malformed JSON")
         for _ in range(5):
@@ -282,7 +280,6 @@ class HttpResourceLimitsTests(unittest.TestCase):
         limiter.allow.return_value = (True, 0)
         auth = SessionAuthService(
             Mock(),
-            threading.RLock(),
             SimpleNamespace(app_password="synthetic-password-123"),
             True,
             limiter,
@@ -363,7 +360,9 @@ class HttpResourceLimitsTests(unittest.TestCase):
 
         class Handler(RequestHandler):
             input_timeout_seconds = 0.2
-            dependencies = SimpleNamespace(max_body_bytes=1024, logger=logging.getLogger("test.resource_limits"))
+            dependencies = SimpleNamespace(
+                max_body_bytes=1024, logger=logging.getLogger("test.resource_limits")
+            )
 
             def do_POST(self):
                 try:
@@ -371,7 +370,7 @@ class HttpResourceLimitsTests(unittest.TestCase):
                     time.sleep(0.3)
                     self.send_response(200)
                     self.end_headers()
-                except (TimeoutError, AppError):
+                except TimeoutError, AppError:
                     self.close_connection = True
                 finally:
                     completed.set()

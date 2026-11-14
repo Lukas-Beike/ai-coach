@@ -7,7 +7,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 from test_session_linking import (
     FIRST,
@@ -106,9 +106,7 @@ class LinkedSessionPersistenceTests(LinkingCase):
             monotonic=lambda: 10.0,
             disk_usage=lambda _path: SimpleNamespace(free=100_000_000),
         )
-        data = DatabaseBackupService(
-            self.manager, MagicMock(), config, Mock()
-        ).read_bytes()
+        data = DatabaseBackupService(self.manager, config, Mock()).read_bytes()
         target = root / "restored.db"
         target.write_bytes(data)
         restored = DatabaseManager(target, sqlite3, row_factory=row_factory)
