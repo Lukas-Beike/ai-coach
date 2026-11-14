@@ -17,7 +17,7 @@ CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,6}) +(\S.*)$")
 
 # "Acceptance criteria ..." or a plain "Acceptance" (#2799), not "Acceptance tests"
-CRITERIA = re.compile(r"acceptance(?:\s+criteria\b|\s*:?\s*$)", re.IGNORECASE)
+CRITERIA = re.compile(r"acceptance(?:\s+criteria\b.*|:?)", re.IGNORECASE)
 
 
 def open_boxes(body):
@@ -34,7 +34,7 @@ def open_boxes(body):
         fenced ^= text.startswith(("```", "~~~"))
         if (heading := HEADING.match(text)) and not fenced:
             depth = len(heading[1])  # a deeper heading stays inside the section
-            starts = CRITERIA.match(heading[2])
+            starts = CRITERIA.fullmatch(heading[2])
             level = depth if starts else level * (depth > level)
         if box := CHECKBOX.match(body, start, end):
             (criteria if level else parts).append(box)
