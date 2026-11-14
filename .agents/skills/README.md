@@ -100,7 +100,7 @@ output never echoes text that can quote a file.
 | [pacecraft-worktree-prune](pacecraft-worktree-prune/SKILL.md) | Remove merged, clean, idle worktrees |
 | [pacecraft-release-dispatch](pacecraft-release-dispatch/SKILL.md) | Dispatch the daily release and follow its chain |
 | [pacecraft-image-verify](pacecraft-image-verify/SKILL.md) | GHCR digests of the release tag, `latest` and the running container |
-| [pacecraft-prod-diagnostics](pacecraft-prod-diagnostics/SKILL.md) | Named production diagnostics fields and record counts, compared |
+| [pacecraft-prod-diagnostics](pacecraft-prod-diagnostics/SKILL.md) | Named production diagnostics fields and record counts, compared; one section's allow-listed counts |
 | [pacecraft-prod-logs](pacecraft-prod-logs/SKILL.md) | Warning and error counts by event name, never log text |
 | [pacecraft-prod-guards](pacecraft-prod-guards/SKILL.md) | 401 without session, 403 without CSRF token, TLS expiry |
 | [pacecraft-ui-walk](pacecraft-ui-walk/SKILL.md) | Headless phone and desktop walk with screenshots and load times |

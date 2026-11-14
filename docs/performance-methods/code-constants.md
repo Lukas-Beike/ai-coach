@@ -52,6 +52,17 @@ every named number the code fixes. A test fails when it is out of date.
 | `LT1_FIXED_SHARE` | `'fixed_share'` | `backend/performance/current_metrics.py` |  |
 | `DAILY_HEALTH_FIELDS` | `('steps', 'floors', 'calories')` | `backend/performance/daily_health.py` | The 7-day averaged daily totals and the energy components of one day. |
 | `DAILY_EXPENDITURE_FIELDS` | `('active_kcal', 'resting_kcal', 'total_kcal')` | `backend/performance/daily_health.py` |  |
+| `DEFAULT_DAYS` | `365` | `backend/performance/decoupling_eligibility.py` |  |
+| `WARMUP_S` | `600.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `COOLDOWN_S` | `600.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_SESSION_S` | `1800.0` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_COVERAGE` | `0.85` | `backend/performance/decoupling_eligibility.py` |  |
+| `MAX_HALF_DIFFERENCE` | `0.1` | `backend/performance/decoupling_eligibility.py` |  |
+| `WINDOWS_S` | `(1, 30, 60)` | `backend/performance/decoupling_eligibility.py` |  |
+| `PERCENTILES` | `(25, 50, 75, 90)` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_DISTRIBUTION` | `3` | `backend/performance/decoupling_eligibility.py` | Fewer values would show single sessions' values as quartiles. |
+| `CURRENT` | `'cv_1s_15'` | `backend/performance/decoupling_eligibility.py` |  |
+| `RIDE_ONLY_RULES` | `frozenset({'vi_30s_105', 'vi_30s_110'})` | `backend/performance/decoupling_eligibility.py` |  |
 | `ESTIMATE_DAYS` | `60` | `backend/performance/first_threshold_estimate.py` |  |
 | `MIN_SESSIONS` | `3` | `backend/performance/first_threshold_estimate.py` |  |
 | `GOOD_MIN_SESSIONS` | `5` | `backend/performance/first_threshold_estimate.py` | The estimate is good with this many sessions that agree within this spread (percentage points of the threshold HR); otherwise it is low. |

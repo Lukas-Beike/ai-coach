@@ -27,3 +27,31 @@ the calendar sync refills it from today on every refresh.
 
 Exit 0 all ok, 1 a check failed, 2 unreachable or login refused. The script
 prints no response body, cookie, or password; do not add a mode that does.
+
+## One section
+
+```powershell
+python scripts/prod_diagnostics.py --url <app address> --password-file <secret file> --section <name>
+```
+
+Prints, instead of the checks, only the fields of that section that
+`SECTION_FIELDS` in the script allows: numbers and flags by dotted path, and
+`status` as a state word (`ready`, `pending`, `failed`, `unavailable`), sorted
+by path. Free text, ids and any field not on the allow-list are never printed.
+A section without an allow-list entry is refused; add the entry and its test
+in `tests/test_prod_checks.py` together with the section.
+
+## Temporary production probe
+
+When a verification would need the production database or the athlete, add a
+probe instead (#2779):
+
+1. Add a counts-only diagnostics section that computes the numbers in the
+   background, one session per read snapshot with a pause after each (duty
+   cycle, #2761), `pending` until the first result; a test pins that it holds
+   no ids, names, dates or single values. Open its removal issue at the same time.
+2. Add the section's allow-list to `SECTION_FIELDS` with its test.
+3. After the release, read it with `--section <name>`; while it is `pending`,
+   read again later.
+4. Present the counts, then remove the section and its allow-list through the
+   removal issue.

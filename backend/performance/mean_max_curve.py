@@ -84,8 +84,11 @@ class SessionCurveReader:
         *,
         capacity: int = _DEFAULT_CAPACITY,
         spawn: Callable[[Callable[[], None]], None] | None = None,
+        # Names the background build in its log event and error (#2779).
+        background_name: str = "session_curves",
     ) -> None:
         self._session_records = session_records
+        self._background_name = background_name
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
         self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
@@ -181,7 +184,7 @@ class SessionCurveReader:
                 and failed[0] == stamp
                 and time.monotonic() - failed[1] < _RETRY_AFTER_S
             ):
-                raise RuntimeError("background session curves failed")
+                raise RuntimeError(f"background {self._background_name} failed")
             start = not self._building
             self._building = True
         if start:
@@ -203,8 +206,8 @@ class SessionCurveReader:
             built = tuple(MappingProxyType(record) for record in build())
         except Exception:
             _LOGGER.exception(
-                "Background session curves failed",
-                extra={"event": "background_session_curves_failed"},
+                "Background build failed",
+                extra={"event": f"background_{self._background_name}_failed"},
             )
         with self._lock:
             if built is None:

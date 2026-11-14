@@ -13,8 +13,12 @@ from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
 )
+from backend.performance.decoupling_eligibility import DecouplingEligibility
+from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.pace_at_hr import LT1_DAYS, ride_band_coverage
 from backend.runtime import clock as runtime_clock
+from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.session_metrics import analysis_activity
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,18 @@ class DiagnosticsServices:
 def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
     """Fresh projections per call over the current database and domain owners."""
     utc_now = runtime_clock.utc_now
+    # Lives with the process: its background slot keeps the last report (#2779).
+    sessions = CanonicalTableReader()
+    decoupling = DecouplingEligibility(
+        ctx.database,
+        sessions.activity_sessions,
+        analysis_activity,
+        ctx.key_values,
+        lambda: ctx.clock.now().date(),
+        SessionCurveReader(
+            sessions.session_activities, background_name="decoupling_eligibility"
+        ),
+    )
 
     def recent_log_entries_service() -> RecentLogEntriesService:
         return RecentLogEntriesService(ctx.log_path(), ctx.redactor, utc_now)
@@ -74,6 +90,7 @@ def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
                     ctx.performance.training_reports().profiles.curve_records(LT1_DAYS),
                     ctx.clock.now().date(),
                 ),
+                decoupling_eligibility=decoupling.section,
             )
         )
 

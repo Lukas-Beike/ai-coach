@@ -55,6 +55,22 @@ def report(messages=40):
             ],
         },
         "runtime": {"process_memory": {"rss_bytes": 1000}},
+        "decoupling_eligibility": {
+            "status": "ready",
+            "current": True,
+            "days": 365,
+            "note": "text never printed",
+            "groups": {
+                "ride/outdoor": {
+                    "sessions": 6,
+                    "without_streams": 1,
+                    "act_secret": 1,
+                    "counts": {"pass_cv_1s_15": 1, "label": "text never printed"},
+                    "max_half_distribution": {"cv_1s": {"n": 4, "p90": None}},
+                },
+                "act_secret/outdoor": {"sessions": 2},
+            },
+        },
     }
 
 
@@ -183,6 +199,43 @@ class ProdChecksTests(unittest.TestCase):
             ),
             [("info", "count external_calendar_events 20")],
         )
+
+    def test_section_prints_only_allow_listed_fields_in_path_order(self):
+        code, text = self.run_main(
+            prod_diagnostics, "--url", self.url, "--password-file", str(self.secret),
+            "--section", "decoupling_eligibility",
+        )  # fmt: skip
+        self.assertEqual(code, 0)  # the checks (sync.last_error) are not run
+        prefix = "info decoupling_eligibility."
+        self.assertEqual(
+            text.splitlines(),
+            [
+                "ok health",
+                "ok logout 200",
+                f"{prefix}current true",
+                f"{prefix}days 365",
+                f"{prefix}groups.ride/outdoor.counts.pass_cv_1s_15 1",
+                f"{prefix}groups.ride/outdoor.max_half_distribution.cv_1s.n 4",
+                f"{prefix}groups.ride/outdoor.max_half_distribution.cv_1s.p90 null",
+                f"{prefix}groups.ride/outdoor.sessions 6",
+                f"{prefix}groups.ride/outdoor.without_streams 1",
+                f'{prefix}status "ready"',
+            ],
+        )
+        self.assertEqual(
+            prod_diagnostics.section_lines({}, "decoupling_eligibility"),
+            [("FAIL", "section decoupling_eligibility missing")],
+        )
+        failed = {"decoupling_eligibility": {"status": "failed"}}
+        self.assertEqual(
+            prod_diagnostics.section_lines(failed, "decoupling_eligibility"),
+            [("FAIL", 'decoupling_eligibility.status "failed"')],
+        )
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            prod_diagnostics.main(
+                ["--url", self.url, "--password-file", str(self.secret),
+                 "--section", "decoupling_eligibility", "--expect-version", "2.1.2"]
+            )  # fmt: skip
 
     def test_diagnostics_version_mismatch_and_wrong_password(self):
         code, text = self.run_main(

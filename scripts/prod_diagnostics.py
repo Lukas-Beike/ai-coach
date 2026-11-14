@@ -3,16 +3,21 @@
     python scripts/prod_diagnostics.py --url <app address> --password-file <secret file>
         [--expect-version 2.1.2] [--expect-schema 27] [--out result.json]
         [--compare previous.json] [--ca-file ca.pem]
+    python scripts/prod_diagnostics.py --url <app address> --password-file <secret file>
+        --section decoupling_eligibility
 
 Prints one line per check (`ok` / `FAIL` / `info`); never a response body,
 cookie, password or error text. Exit 0 all ok, 1 a check failed (a count
 dropped against --compare, a version mismatch, a stale or stuck sync), 2 the
-app could not be reached or read.
+app could not be reached or read. `--section <name>` prints only the
+allow-listed count and state fields of that section instead of the checks.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
@@ -32,6 +37,16 @@ MEMORY = ("rss_bytes", "peak_rss_bytes")
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
+# What `--section` prints of a section: dotted paths of numbers and flags, and
+# `status` as one of STATES; nothing else of the section is printed (#2779).
+SECTION_FIELDS = {
+    "decoupling_eligibility": re.compile(
+        r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
+        r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
+        r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
+    ),
+}
+STATES = {"ready", "pending", "failed", "unavailable"}
 
 
 def hours_since(stamp: str | None, now: datetime) -> float | None:
@@ -108,6 +123,37 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
         "stuck_jobs": stuck_jobs(jobs, now),
         "memory": {key: memory[key] for key in MEMORY if key in memory},
     }
+
+
+def leaves(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    """The dotted path and value of every leaf, sorted by path."""
+    if not isinstance(value, dict):
+        return [(path, value)]
+    return [
+        leaf
+        for key in sorted(value, key=str)
+        for leaf in leaves(value[key], f"{path}.{key}" if path else str(key))
+    ]
+
+
+def printable(value: Any) -> bool:
+    if isinstance(value, str):
+        return value in STATES
+    return value is None or isinstance(value, int | float)
+
+
+def section_lines(report: dict[str, Any], name: str) -> list[tuple[str, str]]:
+    """The allow-listed fields of one section, sorted by path."""
+    allowed = SECTION_FIELDS[name]
+    lines = [
+        (
+            "FAIL" if value in ("failed", "unavailable") else "info",
+            f"{name}.{path} {json.dumps(value)}",
+        )
+        for path, value in leaves(report.get(name))
+        if allowed.fullmatch(path) and printable(value)
+    ]
+    return lines or [("FAIL", f"section {name} missing")]
 
 
 def mark(ok: bool, text: str) -> tuple[str, str]:
@@ -216,7 +262,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out")
     parser.add_argument("--compare")
     parser.add_argument("--ca-file")
+    parser.add_argument("--section", choices=sorted(SECTION_FIELDS))
     args = parser.parse_args(argv)
+    checks_asked = (args.out, args.compare, args.expect_version, args.expect_schema)
+    if args.section and any(value is not None for value in checks_asked):
+        parser.error("--section prints one section; it runs no checks or results")
     try:
         previous = read_result(args.compare)
         session = Session(args.url, args.ca_file)
@@ -229,12 +279,17 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             logout = session.logout()
             print(f"{'ok' if logout == 200 else 'FAIL'} logout {logout}")
-        result = extract(report, datetime.now(UTC))
-        write_result(args.out, result)
+        if not args.section:
+            result = extract(report, datetime.now(UTC))
+            write_result(args.out, result)
     except ProdError as exc:
         print(f"FAIL {exc}")
         return 2
-    lines = checks(result, previous, args.expect_version, args.expect_schema)
+    lines = (
+        section_lines(report, args.section)
+        if args.section
+        else checks(result, previous, args.expect_version, args.expect_schema)
+    )
     for state, text in lines:
         print(f"{state} {text}")
     failed = not healthy or logout != 200 or any(s == "FAIL" for s, _ in lines)
