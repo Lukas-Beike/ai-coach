@@ -40,7 +40,7 @@ The application SHALL verify the submitted password with constant-time compariso
 - **WHEN** a protected request presents no current unexpired stored session
 - **THEN** the request is rejected as unauthenticated
 
-Evidence: `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.logout_user`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_http_auth_post.py::test_login_success_dispatches_password_and_sets_cookies`; `tests/test_http_auth_post.py::test_logout_success_authenticates_operates_gate_and_clears_cookies`; `tests/test_server_database.py::test_session_is_persisted_and_restored_from_database`.
+Evidence: `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.logout_user`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_http_auth_post.py::test_login_success_dispatches_password_and_sets_cookies`; `tests/test_http_auth_post.py::test_logout_success_operates_gate_and_clears_cookies`; `tests/test_server_database.py::test_session_is_persisted_and_restored_from_database`.
 
 ### Requirement: Read-only session verification under contention
 
@@ -308,7 +308,7 @@ Evidence: `backend/http_api/handler.py::RequestHandler.handle_one_request`; `bac
 - **WHEN** the readiness write probe cannot create its file
 - **THEN** `checks.data_directory` is false, the status is 503 and no probe file remains; every readiness call creates and removes one probe file
 
-Evidence: `backend/http_api/public_get.py::PublicGetRoutes`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_auth_status_uses_optional_authenticated_session_and_live_gate`; `tests/test_server_http.py::test_readiness_fails_when_data_directory_is_read_only`; `tests/test_server_http.py::test_readiness_cleans_up_probe_after_write_failure`.
+Evidence: `backend/http_api/public_get.py::PublicGetRoutes`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_auth_status_uses_optional_authenticated_session_and_live_gate`; `tests/test_http_readiness.py::test_a_read_only_data_directory_is_not_ready`; `tests/test_http_readiness.py::test_the_probe_is_removed_after_a_write_failure`.
 
 ### Requirement: State event stream transport
 

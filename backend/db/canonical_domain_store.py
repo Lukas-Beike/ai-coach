@@ -26,7 +26,12 @@ from backend.canonical.domain_records import (
 from backend.canonical.records import Provenance
 from backend.canonical.validation import require_instance, require_text
 from backend.canonical.vocabulary import ProjectionState, ProviderId
-from backend.db.canonical_store import WriteOutcome, canonical_json
+from backend.db.canonical_store import (
+    WriteOutcome,
+    canonical_json,
+    insert_row,
+    update_row,
+)
 
 EMPTY_DETAILS: Final = "{}"
 CONTEXT_KEY: Final = "context"
@@ -630,32 +635,27 @@ def _replace(
 def _upsert(
     db: Any, table: _Table, row: Mapping[str, object], *, now: str
 ) -> WriteOutcome:
-    key = tuple(row[column] for column in table.keys)
+    keys = {column: row[column] for column in table.keys}
     found = _fetch_all(
         db,
         f"SELECT state, {', '.join(table.columns)} FROM {table.name} "
         f"WHERE {_where(table)}",
-        key,
+        tuple(keys.values()),
     )
     existing = found[0] if found else None
+    values = {
+        **{column: row[column] for column in table.columns},
+        "state": _ACTIVE,
+        "updated_at": now,
+    }
     if existing is None:
-        columns = (*table.keys, *table.columns)
-        db.execute(
-            f"INSERT INTO {table.name}({', '.join(columns)}, state, created_at, "
-            f"updated_at) VALUES ({', '.join('?' * (len(columns) + 3))})",
-            (*(row[column] for column in columns), _ACTIVE, now, now),
-        )
+        insert_row(db, table.name, {**keys, **values, "created_at": now})
         return WriteOutcome.WRITTEN
     if existing["state"] == _ACTIVE and all(
         existing[column] == row[column] for column in table.columns
     ):
         return WriteOutcome.UNCHANGED
-    assignments = ", ".join(f"{column} = ?" for column in table.columns)
-    db.execute(
-        f"UPDATE {table.name} SET {assignments}, state = ?, updated_at = ? "
-        f"WHERE {_where(table)}",
-        (*(row[column] for column in table.columns), _ACTIVE, now, *key),
-    )
+    update_row(db, table.name, values, keys)
     return WriteOutcome.UPDATED
 
 

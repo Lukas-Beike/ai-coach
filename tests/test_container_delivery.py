@@ -238,6 +238,19 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual([call[0] for call in calls], ["ps", "run"])
 
+    def test_stop_removes_the_container_without_build_run_or_volumes(self):
+        result, calls = self.run_script("-Name", DEMO_NAME, "-Stop", ps_output="old\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Demo removed", result.stdout)
+        self.assertEqual(calls[1:], [["stop", DEMO_NAME], ["rm", DEMO_NAME]])
+        self.assertEqual(calls[0][0], "ps")
+        result, calls = self.run_script("-Name", DEMO_NAME, "-Stop")
+        self.assertEqual((result.returncode, [c[0] for c in calls]), (0, ["ps"]))
+        self.assertIn("No container named", result.stdout)
+        result, calls = self.run_script("-Name", "pacecraft", "-Stop")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+
     def test_run_arguments_keep_the_demo_on_loopback_and_disposable(self):
         _, calls = self.run_script(
             "-Name", DEMO_NAME, "-SkipBuild", "-Port", "8099", fail=("run",)

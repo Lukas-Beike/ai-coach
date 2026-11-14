@@ -147,19 +147,13 @@ class GarminFullResyncTests(unittest.TestCase):
             self._resync("partial").run("op-1", Mock())["status"], "partial"
         )
 
-    def test_a_contended_run_is_a_409_failure(self):
-        with self.assertRaises(AppError) as caught:
-            self._resync("already_running").run("op-1", Mock())
+    def test_a_contended_or_unconfigured_run_is_a_failure(self):
+        for status, http_status in (("already_running", 409), ("not_configured", 503)):
+            with self.subTest(status=status), self.assertRaises(AppError) as caught:
+                self._resync(status).run("op-1", Mock())
 
-        self.assertEqual(409, caught.exception.status)
-        self.assertEqual("already_running", caught.exception.reason)
-
-    def test_a_run_without_configuration_is_a_503_failure(self):
-        with self.assertRaises(AppError) as caught:
-            self._resync("not_configured").run("op-1", Mock())
-
-        self.assertEqual(503, caught.exception.status)
-        self.assertEqual("not_configured", caught.exception.reason)
+            self.assertEqual(http_status, caught.exception.status)
+            self.assertEqual(status, caught.exception.reason)
 
 
 class WahooFullResyncTests(unittest.TestCase):
@@ -177,32 +171,21 @@ class WahooFullResyncTests(unittest.TestCase):
             days=-1, reason="Vollständiger Resync", operation_id="op-1"
         )
 
-    def test_not_configured_run_is_a_503_failure(self):
-        resync, _sync = self._resync("not_configured")
+    def test_an_unconfigured_contended_or_truncated_run_is_a_failure(self):
+        # A truncated run is a failure, not a complete resync.
+        for status, http_status, reason in (
+            ("not_configured", 503, "not_configured"),
+            ("already_running", 409, "already_running"),
+            ("partial", 502, "partial_resync"),
+        ):
+            with self.subTest(status=status):
+                resync, _sync = self._resync(status)
 
-        with self.assertRaises(AppError) as caught:
-            resync.run("op-1", Mock())
+                with self.assertRaises(AppError) as caught:
+                    resync.run("op-1", Mock())
 
-        self.assertEqual(503, caught.exception.status)
-        self.assertEqual("not_configured", caught.exception.reason)
-
-    def test_contended_run_is_a_409_failure(self):
-        resync, _sync = self._resync("already_running")
-
-        with self.assertRaises(AppError) as caught:
-            resync.run("op-1", Mock())
-
-        self.assertEqual(409, caught.exception.status)
-        self.assertEqual("already_running", caught.exception.reason)
-
-    def test_truncated_run_is_a_failure_and_not_a_complete_resync(self):
-        resync, _sync = self._resync("partial")
-
-        with self.assertRaises(AppError) as caught:
-            resync.run("op-1", Mock())
-
-        self.assertEqual(502, caught.exception.status)
-        self.assertEqual("partial_resync", caught.exception.reason)
+                self.assertEqual(http_status, caught.exception.status)
+                self.assertEqual(reason, caught.exception.reason)
 
 
 if __name__ == "__main__":

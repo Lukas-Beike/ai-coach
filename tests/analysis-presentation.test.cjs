@@ -173,8 +173,8 @@ test("the power profile counts only measured durations as values", () => {
     CYCLING_POWER_PROFILE_DURATIONS: [[5, "5 Sekunden"], [60, "1 Minute"]],
   });
   assert.equal(cyclingPowerProfileHasValues({}), false);
-  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 5, status: "missing", watts: null }] } } }), false);
-  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 60, status: "ok", watts: 300 }] } } }), true);
+  assert.equal(cyclingPowerProfileHasValues({ all_time: { power: [{ duration_seconds: 5, status: "missing", watts: null }] } }), false);
+  assert.equal(cyclingPowerProfileHasValues({ all_time: { power: [{ duration_seconds: 60, status: "ok", watts: 300 }] } }), true);
 });
 
 test("a filled analysis chart is kept and is not listed as missing", () => {

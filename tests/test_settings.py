@@ -64,6 +64,14 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(self.service.save_model("gpt-6-luna"), {"model": "gpt-6-luna"})
         self.assertEqual(self.writes[-1], ("selected_model_openai", "gpt-6-luna"))
         self.assertEqual(self.service.selected_model(), "gpt-6-luna")
+        self.assertEqual(
+            [
+                o["id"]
+                for o in self.service.available_model_options()
+                if o["provider"] == "openai"
+            ],
+            ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"],
+        )
 
     def test_each_task_has_its_own_choice_and_falls_back_to_the_conversation(self):
         # Nothing saved per task: every task uses today's global choice.

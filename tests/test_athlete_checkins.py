@@ -231,11 +231,14 @@ class AthleteCheckinTests(unittest.TestCase):
         self.assertEqual(repository.limits, [1, 365])
 
     def test_save_upserts_and_returns_saved_row(self):
-        result = self.service.save({"soreness": 7, "notes": " tired "})
+        result = self.service.save(
+            {"soreness": 7, "notes": " tired ", "pain": "left knee"}
+        )
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["checkin"]["checkin_date"], TODAY.isoformat())
         self.assertEqual(result["checkin"]["soreness"], 7)
         self.assertEqual(result["checkin"]["notes"], "tired")
+        self.assertEqual(self.service.context()["today"]["pain"], "left knee")
         updated = self.service.save({"soreness": 3})
         self.assertEqual(updated["checkin"]["soreness"], 3)
 

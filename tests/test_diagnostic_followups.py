@@ -52,8 +52,10 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
-            with patch.object(server, "CONFIG", config):
+            config = replace(
+                server.CONFIG_HOLDER.value, garmin_fixture_path=str(fixture)
+            )
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 payload = server.GARMIN_ASSEMBLY.fixture_loader().load(2)
         self.assertEqual(
             payload["sleep"][0]["calendarDate"],
@@ -74,8 +76,10 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
-            with patch.object(server, "CONFIG", config):
+            config = replace(
+                server.CONFIG_HOLDER.value, garmin_fixture_path=str(fixture)
+            )
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 payload = server.GARMIN_ASSEMBLY.fixture_loader().load(2)
         today = server.ATHLETE_CLOCK.now().date()
         self.assertEqual(

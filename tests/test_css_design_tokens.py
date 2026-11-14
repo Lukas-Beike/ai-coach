@@ -264,15 +264,9 @@ class CssDesignTokenTests(unittest.TestCase):
                 for side, background in (("outside", outside), ("inside", inside)):
                     with self.subTest(theme=theme, on=outside_name, side=side):
                         self.assertGreaterEqual(_contrast_ratio(border, background), 3)
-            # The context-sharing notice on its tint over the page (and a card), and
-            # the low-confidence nutrition input on the input surface (#2630).
+            # The low-confidence nutrition input on the input surface (#2630).
             field = _colour(tokens, "--surface-input", surface)
             pairs = [
-                (f"sharing {side} on {name}", _colour(tokens, "--sharing-warning-border", tint), backdrop if side == "outside" else tint)
-                for name, backdrop in (("--bg", page), ("--surface", surface))
-                for tint in [_colour(tokens, "--sharing-warning-surface", backdrop)]
-                for side in ("outside", "inside")
-            ] + [
                 ("nutrition input", _colour(tokens, "--nutrition-warning-border", field), field),
                 ("nutrition card", _colour(tokens, "--nutrition-warning-border", surface), surface),
             ]

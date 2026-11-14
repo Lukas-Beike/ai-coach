@@ -121,8 +121,6 @@
   --planned-session-strength: #e0a35c;
   --planned-session-strength-on: var(--on-session);
   --planned-session-strength-surface: #e0a35c26;
-  --sharing-warning-border: rgba(255, 193, 7, .45);
-  --sharing-warning-surface: rgba(255, 193, 7, .06);
   --sync-progress-border: rgba(52, 207, 161, .38);
   --sync-progress-surface: rgba(52, 207, 161, .07);
   --progress-track: rgba(255, 255, 255, .12);
@@ -140,7 +138,6 @@
 
 :root[data-theme="light"] {
   --warning-border: var(--orange);
-  --sharing-warning-border: var(--orange);
   --nutrition-warning-border: var(--orange);
   color-scheme: light;
   --bg: #f4f5f6;
@@ -982,6 +979,43 @@ h2 {
 .planned-month-names span:last-child, .planned-month-kw { display: none; }
 .planned-month-day { display: grid; min-width: 0; min-height: 48px; justify-items: center; align-content: start; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; color: var(--ink); background: none; font: inherit; cursor: pointer; }
 .planned-month-day.is-outside { color: var(--muted); }
+.planned-month-day.has-blocked-event .planned-month-number { box-shadow: inset 0 -2px 0 var(--danger); }
+/* Personal calendar events (#2620): a band of chips above the day's units; the left edge names the impact. */
+.planned-event-band { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.planned-event-chip { --event-edge: var(--muted); display: inline-flex; max-width: 100%; min-height: 32px; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border: 1px solid var(--transparent); border-left: 3px solid var(--event-edge); border-radius: 9px; color: var(--ink); background: var(--surface-raised); font: inherit; font-size: .75rem; line-height: 1.3; text-align: left; cursor: pointer; }
+.planned-event-chip small { color: var(--muted); font-size: inherit; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.planned-event-name { min-width: 0; overflow-wrap: anywhere; }
+.planned-event-chip[data-impact="block"] { --event-edge: var(--danger); }
+.planned-event-chip[data-impact="short"] { --event-edge: var(--orange); }
+.planned-event-chip[data-impact="easy"] { --event-edge: var(--blue); }
+.planned-event-chip[data-impact="none"] { color: var(--muted); }
+.planned-event-chip[data-impact="open"] { --event-edge: var(--orange); border-color: var(--orange); border-style: dashed; border-left-style: solid; background: none; }
+.planned-event-chip:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-undecided-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 8px 8px 12px; border: 1px solid var(--orange); border-radius: 12px; color: var(--ink); background: var(--warning-surface-soft); font-size: .82rem; font-weight: 650; }
+.planned-undecided-banner > span:nth-child(2) { flex: 1; min-width: 0; }
+.planned-undecided-banner button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; color: var(--primary-control-ink); background: var(--primary-control-bg); font-weight: 700; }
+.planned-event-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--orange); }
+.planned-event-sheet { width: 100%; max-width: 100%; margin: auto 0 0; padding: 12px 16px max(18px, env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line-strong); border-radius: 20px 20px 0 0; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
+.planned-event-head { display: flex; align-items: center; gap: 10px; }
+.planned-event-head h3 { flex: 1; min-width: 0; margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
+.planned-event-meta { margin: 2px 0 12px; color: var(--muted); font-size: .8rem; }
+.planned-event-choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.planned-event-choices button { min-height: 48px; padding: 6px 4px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--ink); background: var(--surface); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+.planned-event-choices button[data-impact="block"] { color: var(--danger); }
+.planned-event-choices button[data-impact="short"] { color: var(--orange); }
+.planned-event-choices button[data-impact="easy"] { color: var(--blue); }
+.planned-event-choices button[data-impact="none"] { color: var(--muted); }
+.planned-event-choices button[aria-pressed="true"] { border: 2px solid var(--accent); background: var(--accent-soft); }
+.planned-event-scope { display: flex; gap: 4px; margin-top: 10px; padding: 3px; border-radius: 10px; background: var(--surface-raised); }
+.planned-event-scope button { flex: 1; min-height: 36px; border: 0; border-radius: 8px; color: var(--muted); background: none; font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.planned-event-scope button[aria-pressed="true"] { color: var(--ink); background: var(--surface); }
+.planned-event-choices button:focus-visible, .planned-event-scope button:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-event-status { margin: 8px 0 0; color: var(--danger-ink); font-size: .78rem; }
+.planned-event-status:empty { display: none; }
+@media (min-width: 1100px) {
+  .planned-event-sheet::backdrop { background: none; backdrop-filter: none; }
+  .planned-event-sheet { width: 380px; max-height: 100dvh; margin: 0 0 0 auto; height: 100dvh; border-top: 0; border-left: 1px solid var(--line-strong); border-radius: 0; padding: 18px; }
+}
 .planned-month-day:disabled { opacity: .45; cursor: default; }
 .planned-month-number { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid var(--transparent); border-radius: 50%; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .planned-month-day.is-today .planned-month-number { color: var(--on-accent); background: var(--accent); }
@@ -1037,7 +1071,6 @@ h2 {
 .more-segment-nav a { display: grid; min-height: 44px; min-width: 0; flex: 1 1 calc(33.333% - 4px); place-items: center; padding: 9px 6px; overflow-wrap: anywhere; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover { color: var(--ink); background: var(--accent-soft); }
 .more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
-.context-sharing-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--sharing-warning-border); border-radius: 12px; color: var(--muted); background: var(--sharing-warning-surface); font-size: .74rem; line-height: 1.45; }
 .library { display: grid; gap: 10px; margin-top: 10px; }
 /* One translucent card family: library sport groups and workout cards. */
 .library-sport, .library-card { border: 1px solid var(--line); border-radius: 15px; background: var(--translucent-surface); }
@@ -1343,6 +1376,11 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: var(--on-accent); background: var(--accent); font-size: .72rem; }
 .nav-item b:empty { display: none; }
+.nav-item:has(> b.nav-count) { position: relative; }
+.nav-item > b.nav-count { position: absolute; top: 4px; left: calc(50% + 4px); margin: 0; }
+@media (min-width: 1100px) {
+  .desktop-nav .nav-item > b.nav-count { position: static; margin-left: auto; }
+}
 /* Large text: labels that no longer fit collapse to icons; each link keeps its aria-label as accessible name.
    Thresholds are the bar's content width in rem at which the widest label ("Ernährung") stops fitting. */
 .bottom-nav, .desktop-nav { container-type: inline-size; }
@@ -1411,6 +1449,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   @container (max-width: 7.5rem) {
     .desktop-nav .nav-item { justify-content: center; }
     .desktop-nav .nav-item > span { display: none; }
+    .desktop-nav .nav-item > b.nav-count { position: absolute; margin: 0; }
   }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages,

@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { waitForSettledState } = require("./helpers/settled-state");
 const { waitForOlderSessions } = require("./helpers/calendar");
-const { showCalendarEntry, openSessionDetails } = require("./helpers/ui");
+const { contrastRatio, showCalendarEntry, openSessionDetails } = require("./helpers/ui");
 
 // #2530: WCAG AA text contrast of every main view and segment, collapsibles opened, in both themes.
 const THEMES = ["light", "dark"];
@@ -35,6 +35,11 @@ const INCOMPLETE_ALLOWED = [
     target: /svg|^text\[|^\.analysis-(date-tick|value-tick|axis-unit)\[/,
     message: /image node|overlapped by another element|too short to determine/,
     reason: "Chart axis ticks, units and value labels are SVG text drawn over the plot elements (or a one-character unit); axe reports an image node, an overlap or too little text and cannot decide.",
+  },
+  {
+    target: /^\.analysis-point-value\[/,
+    message: /image node|overlapped by another element|too short to determine/,
+    reason: "A chart value label is drawn with a halo over the plot lines; when it has one or two characters, crosses a line or sits on a plot mark axe cannot decide. Its fill against its halo and the card is asserted in \"chart value labels meet AA contrast\" below for every analysis view (#2708).",
   },
   {
     target: /(^| > )tr:nth-child\(\d+\) > t[dh]/,
@@ -176,6 +181,28 @@ test.describe("colour contrast sweep", () => {
       });
     }
   }
+
+  // #2708: the value labels' own contrast, measured from computed colours, whatever their length.
+  test("@responsive chart value labels meet AA contrast against their halo and card in both themes", async ({ page, request }) => {
+    expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
+    await page.goto("/");
+    await page.waitForFunction(() => state.initialStateLoaded);
+    for (const [segment, theme] of ["running", "cycling", "load", "recovery"].flatMap((name) => THEMES.map((mode) => [name, mode]))) {
+      await showView(page, `analysis/${segment}`);
+      await applyTheme(page, theme);
+      const labels = await page.locator(".panel.active .analysis-point-value").evaluateAll((nodes) => nodes.map((node) => {
+        let holder = node.parentElement;
+        while (holder && /rgba\([^)]*,\s*0\)|transparent/.test(getComputedStyle(holder).backgroundColor)) holder = holder.parentElement;
+        const style = getComputedStyle(node);
+        return { text: node.textContent, fill: style.fill, halo: style.stroke, card: getComputedStyle(holder || document.body).backgroundColor };
+      }));
+      if (segment === "load" || segment === "recovery") expect(labels.length, `${segment} ${theme}`).toBeGreaterThan(0);
+      for (const label of labels) {
+        expect(contrastRatio(label.fill, label.card), `${segment} ${theme} ${label.text} on card`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(label.fill, label.halo), `${segment} ${theme} ${label.text} on halo`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
 
   test.describe("login dialog", () => {
     // Start unauthenticated; the project default storage state holds the authenticated session.

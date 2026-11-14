@@ -211,6 +211,7 @@ class NormalizePlannedUnitTests(unittest.TestCase):
             "remote_event_id": "r" * 130,
             "remote_event_external_id": "e" * 210,
             "sync_conflict": {"type": "remote_changed"},
+            "private_calendar_adjustment": {"reason": "kept", "intensity_adjusted": 1},
             "ignored": "not projected",
         }
         before = copy.deepcopy(workout)
@@ -238,6 +239,10 @@ class NormalizePlannedUnitTests(unittest.TestCase):
         self.assertEqual(result["remote_event_id"], "r" * 120)
         self.assertEqual(result["remote_event_external_id"], "e" * 200)
         self.assertEqual(result["sync_conflict"], workout["sync_conflict"])
+        self.assertEqual(
+            result["private_calendar_adjustment"],
+            workout["private_calendar_adjustment"],
+        )
         self.assertNotIn("ignored", result)
 
     def test_requires_a_nonempty_string_sport(self):

@@ -254,27 +254,21 @@ class StartTimeTests(unittest.TestCase):
         assert record is not None
         self.assertEqual(datetime(2026, 10, 8, 5, 15, tzinfo=UTC), record.started_at)
 
-    def test_invalid_gmt_falls_back_to_local_with_issue(self) -> None:
-        record, issues = _one(startTimeGMT="not a time")
-
-        assert record is not None
-        self.assertEqual(datetime(2026, 10, 8, 5, 15, tzinfo=UTC), record.started_at)
-        self.assertEqual(
-            (MappingIssue("910009", "startTimeGMT", IssueReason.INVALID_TYPE),),
-            issues,
-        )
-
-    def test_gmt_unrepresentable_in_the_athlete_zone_falls_back(self) -> None:
-        # Parsed in UTC this instant is valid, but Berlin is ahead of UTC and the
+    def test_an_unusable_gmt_start_falls_back_to_local_with_an_issue(self) -> None:
+        # "9999-12-31T23:59:59" parses in UTC, but Berlin is ahead of UTC and the
         # conversion would overflow datetime's range, so local_date could not read it.
-        record, issues = _one(startTimeGMT="9999-12-31T23:59:59")
+        for gmt in ("not a time", "9999-12-31T23:59:59"):
+            with self.subTest(startTimeGMT=gmt):
+                record, issues = _one(startTimeGMT=gmt)
 
-        assert record is not None
-        self.assertEqual(datetime(2026, 10, 8, 5, 15, tzinfo=UTC), record.started_at)
-        self.assertEqual(
-            (MappingIssue("910009", "startTimeGMT", IssueReason.INVALID_TYPE),),
-            issues,
-        )
+                assert record is not None
+                self.assertEqual(
+                    datetime(2026, 10, 8, 5, 15, tzinfo=UTC), record.started_at
+                )
+                self.assertEqual(
+                    (MappingIssue("910009", "startTimeGMT", IssueReason.INVALID_TYPE),),
+                    issues,
+                )
 
     def test_naive_local_time_uses_the_athlete_zone(self) -> None:
         record, issues = _one(startTimeLocal="2026-10-08 07:15:00")
@@ -320,17 +314,13 @@ class StartTimeTests(unittest.TestCase):
             issues,
         )
 
-    def test_date_only_text_is_not_a_provider_timestamp(self) -> None:
-        record, issues = _one(startTimeLocal="2026-10-08")
+    def test_date_only_and_non_text_starts_are_invalid(self) -> None:
+        for start in ("2026-10-08", 1_234_567_890):
+            with self.subTest(startTimeLocal=start):
+                record, issues = _one(startTimeLocal=start)
 
-        self.assertIsNone(record)
-        self.assertEqual(IssueReason.INVALID_TYPE, issues[0].reason)
-
-    def test_non_text_start_is_invalid(self) -> None:
-        record, issues = _one(startTimeLocal=1_234_567_890)
-
-        self.assertIsNone(record)
-        self.assertEqual(IssueReason.INVALID_TYPE, issues[0].reason)
+                self.assertIsNone(record)
+                self.assertEqual(IssueReason.INVALID_TYPE, issues[0].reason)
 
     def test_missing_start_drops_the_record_with_missing_issue(self) -> None:
         record, issues = _one(startTimeLocal=None)

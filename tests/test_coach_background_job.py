@@ -23,6 +23,7 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         self.chat.run.return_value = {
             "status": "completed",
             "message": {"content": "synthetic"},
+            "session_key": "must-not-leave-server",
         }
         self.sessions = Mock()
         self.sessions.restore_coach_session_csrf_hash.return_value = "synthetic-session"
@@ -93,6 +94,7 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
             ).get_nowait()
             self.assertEqual(event, "completed")
             self.assertEqual(receipt["message"]["content"], "synthetic")
+            self.assertNotIn("session_key", receipt)
         finally:
             self.streams.unregister("synthetic-session", operation_id)
 
@@ -225,6 +227,26 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         )
         self.completion.complete.assert_not_called()
 
+    def test_sleep_not_ready_waits_a_quarter_hour_without_starting_the_turn(
+        self,
+    ) -> None:
+        self.morning.prepare.side_effect = AppError(
+            503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready"
+        )
+
+        self.runner.run(self.job("op-wait", request_kind="morning_checkin"))
+
+        self.jobs.requeue.assert_called_once_with(
+            "synthetic-turn", "garmin_sleep_not_ready", wait_seconds=900, max_waits=8
+        )
+        self.chat.run.assert_not_called()
+        self.failures.persist.assert_not_called()
+        self.jobs.requeue.return_value = False
+        self.failures.persist.return_value = {"status": "failed"}
+        self.runner.run(self.job("op-gave-up", request_kind="morning_checkin"))
+        self.failures.persist.assert_called_once()
+        self.chat.run.assert_not_called()
+
     def test_cancel_before_morning_prepare_skips_the_garmin_sync(self) -> None:
         self.failures.persist.return_value = {"status": "cancelled"}
         self.jobs.cancel_requested.return_value = True
@@ -269,12 +291,20 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         for reached in (False, True):
             with self.subTest(reached=reached):
                 self.chat.run.reset_mock()
+                self.jobs.merge_receipt.reset_mock()
                 session = f"synthetic-session-{reached}"
                 self.sessions.restore_coach_session_csrf_hash.return_value = session
                 operation_id, _ = self.streams.register(session)
 
                 self.runner.run(self.job(operation_id, openai_reached=reached))
 
+                # A checkpointed phase is not reset to "preparing".
+                self.jobs.merge_receipt.assert_called_once_with(
+                    "synthetic-turn",
+                    {"status": "running"}
+                    if reached
+                    else {"status": "running", "phase": "preparing"},
+                )
                 publish = self.chat.run.call_args.kwargs["on_text_delta"]
                 if reached:
                     # The first attempt may have shown text already.

@@ -31,10 +31,16 @@ class CoachPromptTests(unittest.TestCase):
             "Reply in German unless the athlete explicitly asks for another language.",
             "a nutrition playbook with the full rules is appended to these instructions",
             "single Markdown table with exactly three columns (Wochentag, Datum | Workout, Typ und Kurzbeschreibung | Nutzen)",
+            '"Leistungsfähigkeit und Entwicklung"',
+            "identify meaningful new evidence",
+            "Mention VO2max, FTP, threshold values",
+            "If there is no new indication for a metric, omit it entirely",
+            "Keep provider values clearly separated by source",
         )
         for marker in required_markers:
             with self.subTest(marker=marker):
                 self.assertIn(marker, COACH_PROMPT)
+        self.assertNotIn("eFTP", COACH_PROMPT)
 
     def test_rule_identifiers_are_unique(self):
         identifiers = re.findall(r"^(\d+[a-z]?)\. ", COACH_PROMPT, re.MULTILINE)

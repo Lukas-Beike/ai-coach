@@ -1,5 +1,6 @@
 import json
 import unittest
+import uuid
 from copy import deepcopy
 
 from backend.errors import AppError
@@ -32,6 +33,12 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(json.loads(result["target"]), {"pace": "4:30/km"})
         self.assertEqual(result["description"], "Course notes")
         self.assertEqual(result["planned_duration_s"], 10800)
+        self.assertEqual(
+            competitions.competition_category_and_priority({"priority": "a"}, "Race"),
+            ("RACE_A", "A"),
+        )
+        normalized_id = competitions.competition_normalized_id("not-a-uuid")
+        self.assertEqual(str(uuid.UUID(normalized_id)), normalized_id)
 
     def test_validation_rejects_missing_identity_and_invalid_bounds(self) -> None:
         cases = (
@@ -86,6 +93,11 @@ class PlanningCompetitionTests(unittest.TestCase):
                 self.assertEqual(
                     competitions.supported_competition_sport(alias), intervals_type
                 )
+                for spelling in (alias, alias.capitalize()):
+                    self.assertEqual(
+                        competitions.intervals_competition_sport(spelling),
+                        intervals_type,
+                    )
         self.assertEqual(
             competitions.supported_competition_sport(" VIRTUAL_RIDE "), "VirtualRide"
         )
@@ -138,6 +150,10 @@ class PlanningCompetitionTests(unittest.TestCase):
             {"id": "-7"},
         )
         self.assertEqual(competitions.competition_event_optional_payload({}), {})
+        self.assertEqual(
+            competitions.competition_event_optional_payload({"target": "Finish"}),
+            {"target": "Finish"},
+        )
         with self.assertRaises(ValueError):
             competitions.competition_event_optional_payload(
                 {"planned_duration_s": "bad"}
@@ -226,6 +242,8 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertIsNone(competitions.remote_competition_moving_time(604801))
         self.assertEqual(competitions.remote_competition_distance(42195), "42195")
         self.assertEqual(competitions.remote_competition_distance(42.5), "42.5")
+        self.assertEqual(competitions.remote_competition_distance(42195.5), "42195.5")
+        self.assertEqual(competitions.remote_competition_distance("42.195 km"), "42195")
         self.assertEqual(competitions.remote_competition_distance("42.5 km"), "42500")
         self.assertEqual(competitions.remote_competition_distance("trail"), "trail")
         self.assertEqual(competitions.remote_competition_distance(None), "")
@@ -279,6 +297,11 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(fallback["environment"], "unknown")
         self.assertEqual(fallback["category"], "RACE_B")
         self.assertEqual(fallback["intervals_event_id"], "7")
+        text_target = competitions.remote_competition_data(
+            {"date": "2026-10-04", "name": "Race", "target": "Sub 2:00"}
+        )
+        assert text_target is not None
+        self.assertEqual(text_target["target"], "Sub 2:00")
 
     def test_conflict_payload_has_explicit_timestamp_and_preserves_input(self) -> None:
         remote = {

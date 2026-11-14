@@ -17,9 +17,15 @@ brief is self-contained: the issues in order, the athlete rules (German with the
 athlete, English in the repository, every question through AskUserQuestion,
 UI questions only with rendered mockups), the hard limits from `AGENTS.md`, how
 to reach you (your thread id and its `environmentId` when the lane runs on
-another machine), and the closing sentence. A lane that cannot message your thread
-writes its reports in its own thread, prefixed `ORCHESTRATOR:`; read those
-threads on every periodic check.
+another machine), and the closing sentence. Every lane reports "started #N" when
+it begins an item. A lane that cannot message your thread writes its reports in
+its own thread, prefixed `ORCHESTRATOR:`; read those threads on every periodic
+check.
+
+Before moving queued issues from a lane to another thread, ask the lane which
+of them it has started. It pushes those as branches, stops work on every moved
+item and drops them from its queue; give the receiving thread the branch names
+to continue from instead of a rebuild (#2724).
 
 ## Hand over
 
@@ -44,6 +50,9 @@ personal data). The successor checks the handoff against the issues and ledger.
 - **Red develop:** when [develop-run-check](../pacecraft-develop-run-check/SKILL.md)
   or a lane reports a red `develop` push run that is not superseded, tell every
   lane to hold merges until it is green again.
+- **Go and hold messages:** send a "go" or a merge hold to a lane that is
+  working as a steer into its running turn, not as a message queued behind it
+  (#2735).
 
 ## Merge rules
 

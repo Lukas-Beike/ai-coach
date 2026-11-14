@@ -74,6 +74,7 @@ class WeatherSyncServiceTests(unittest.TestCase):
 
         result = service.sync(reason="manual", force=True)
 
+        self.preview.preview.assert_called_once_with()
         self.weather.state.assert_called_once_with(
             refresh=True,
             force=True,

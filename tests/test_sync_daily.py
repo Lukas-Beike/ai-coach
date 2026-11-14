@@ -93,6 +93,9 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
                 self.assertTrue(self.service.is_due(source, self.local_time))
                 self.service.mark(source, self.local_time)
                 self.assertFalse(self.service.is_due(source, self.local_time))
+                self.assertTrue(
+                    self.service.is_due(source, self.local_time + timedelta(hours=1))
+                )
 
     def test_explicit_and_default_now_are_supported(self):
         explicit = datetime(2026, 9, 21, 1, tzinfo=UTC)

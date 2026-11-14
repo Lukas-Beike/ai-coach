@@ -1306,43 +1306,31 @@ class HeartRateZoneMaxHrTests(unittest.TestCase):
         self.assertEqual(len(result.records), 100)
         self.assertEqual({obs.value.value for obs in result.records}, {150.0})
 
-    def test_max_hr_below_the_floor_is_an_issue(self) -> None:
-        result = _map(
-            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 79}]}
-        )
+    def test_max_hr_is_kept_inside_the_canonical_range_and_an_issue_outside(
+        self,
+    ) -> None:
+        for max_hr, kept in ((79, False), (80, True), (250, True), (255, False)):
+            with self.subTest(max_hr=max_hr):
+                zones = [{"calendarDate": DAY, "maxHeartRateUsed": max_hr}]
+                result = _map({"heart_rate_zones": zones})
 
-        self.assertEqual(result.records, ())
-        self.assertEqual(
-            _issues(result),
-            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
-        )
-
-    def test_max_hr_at_the_floor_is_kept(self) -> None:
-        result = _map(
-            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 80}]}
-        )
-
-        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 80.0)
-        self.assertEqual(_issues(result), [])
-
-    def test_max_hr_above_the_canonical_bound_is_out_of_range(self) -> None:
-        result = _map(
-            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 255}]}
-        )
-
-        self.assertEqual(result.records, ())
-        self.assertEqual(
-            _issues(result),
-            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
-        )
-
-    def test_max_hr_at_the_canonical_bound_is_kept(self) -> None:
-        result = _map(
-            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 250}]}
-        )
-
-        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 250.0)
-        self.assertEqual(_issues(result), [])
+                if kept:
+                    self.assertEqual(
+                        _find(result, MetricKind.MAX_HR).value.value, float(max_hr)
+                    )
+                    self.assertEqual(_issues(result), [])
+                else:
+                    self.assertEqual(result.records, ())
+                    self.assertEqual(
+                        _issues(result),
+                        [
+                            (
+                                "heart_rate_zones[0]",
+                                "maxHeartRateUsed",
+                                IssueReason.OUT_OF_RANGE,
+                            )
+                        ],
+                    )
 
     def test_invalid_max_hr_number_is_reported(self) -> None:
         result = _map(
@@ -1897,6 +1885,13 @@ class MorningReadinessTests(unittest.TestCase):
         self.assertEqual(
             _find(_map({"readiness": [_MORNING]}), MetricKind.READINESS).value.value,
             78.0,
+        )
+
+    def test_a_nested_training_readiness_wrapper_projects_no_readiness(self) -> None:
+        wrapper = {"calendarDate": DAY, "trainingReadinessScore": 78}
+        result = _map({"readiness": {"trainingReadiness": wrapper}})
+        self.assertEqual(
+            [o for o in result.records if o.kind is MetricKind.READINESS], []
         )
 
     def test_without_a_wake_up_flag_the_earliest_reading_wins(self) -> None:

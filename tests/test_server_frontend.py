@@ -377,7 +377,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("completed.error_class", app)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
 
-    def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
+    def test_coach_first_views_keep_removed_chrome_out_and_activity_feedback_coach_managed(
+        self,
+    ):
         public = server.PUBLIC_DIR
         coach = (public / "coach.js").read_text(encoding="utf-8")
         app = frontend_source()
@@ -400,6 +402,26 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn("today-priority", app)
         self.assertNotIn('id="analysisHistorySegment"', index)
+        # Activity feedback stays Coach-managed: no form, history tab or route.
+        sync_status = (public / "sync-status.js").read_text(encoding="utf-8")
+        backend = Path(server.__file__).read_text(encoding="utf-8")
+        for marker in (
+            'id="feedbackForm"',
+            "Lokales Athleten-Feedback",
+            'data-analysis-segment="history"',
+            'id="activityDirtyIndicator"',
+        ):
+            self.assertNotIn(marker, index)
+        for marker in (
+            "function saveActivityFeedback",
+            "Besonderheiten speichern",
+            "activity-type-button",
+        ):
+            self.assertNotIn(marker, sync_status)
+        self.assertIn(
+            'activity_feedback: ["feedback", "plan", "performance"]', sync_status
+        )
+        self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
         self.assertNotIn("function analysisSegmentFromRoute(", navigation)
         self.assertNotIn("function renderActivities(", app)
         self.assertNotIn("activityFromDate", app + state + index)
@@ -442,7 +464,7 @@ class ServerFrontendTests(ServerTestCase):
         plan_views = (root / "plan-views.js").read_text(encoding="utf-8")
         styles = (root / "styles.css").read_text(encoding="utf-8")
         self.assertIn(
-            "plannedDayNotes(dayContext, state.data?.competitions, dateKey)",
+            "plannedDayNotes(noteContext, state.data?.competitions, dateKey)",
             plan_views,
         )
         self.assertIn("state.data?.competitions, state.data?.weather", plan_views)
@@ -503,7 +525,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("window.confirm", app_source)
         self.assertNotIn("window.prompt", app_source)
 
-    def test_task9_browser_regression_contract_covers_routes_and_responsive_guards(
+    def test_browser_regression_contract_covers_routes_and_responsive_guards(
         self,
     ):
         e2e_source = (server.PUBLIC_DIR.parent / "e2e" / "coach.spec.js").read_text(
@@ -557,27 +579,20 @@ class ServerFrontendTests(ServerTestCase):
 
         self.assertEqual(error.exception.status, 403)
 
-    def test_nutrition_asset_is_served_as_immutable_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/nutrition.js", asset_ref("/nutrition.js"), None
-        )
-        self.assertEqual(response.status, 200)
-        self.assertIn("javascript", dict(response.headers)["Content-Type"])
-        self.assertEqual(
-            dict(response.headers)["Cache-Control"],
-            "public, max-age=31536000, immutable",
-        )
-
-    def test_view_refresh_asset_is_served_as_immutable_javascript(self):
-        response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/view-refresh.js", asset_ref("/view-refresh.js"), None
-        )
-        self.assertEqual(response.status, 200)
-        self.assertIn("javascript", dict(response.headers)["Content-Type"])
-        self.assertEqual(
-            dict(response.headers)["Cache-Control"],
-            "public, max-age=31536000, immutable",
-        )
+    def test_nutrition_and_view_refresh_assets_are_served_as_immutable_javascript(
+        self,
+    ):
+        for path in ("/nutrition.js", "/view-refresh.js"):
+            with self.subTest(path=path):
+                response = StaticAssetService(server.PUBLIC_DIR).render(
+                    path, asset_ref(path), None
+                )
+                self.assertEqual(response.status, 200)
+                self.assertIn("javascript", dict(response.headers)["Content-Type"])
+                self.assertEqual(
+                    dict(response.headers)["Cache-Control"],
+                    "public, max-age=31536000, immutable",
+                )
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
@@ -945,8 +960,18 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_provider_refresh_markup_and_versioned_icon(self):
         index = served_page("index.html")
-        for provider in ("garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"):
-            self.assertIn(f'<details id="connection-{provider}" class="connection-card">', index)
+        for provider in (
+            "garmin",
+            "wahoo",
+            "intervals",
+            "openai",
+            "yazio",
+            "calendar",
+            "weather",
+        ):
+            self.assertIn(
+                f'<details id="connection-{provider}" class="connection-card">', index
+            )
         # Only the registered providers have freshness and retry entries.
         for provider in ("garmin", "wahoo", "intervals", "calendar", "weather"):
             self.assertIn(f'id="freshness-{provider}"', index)

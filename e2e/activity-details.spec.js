@@ -40,7 +40,7 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   await expect(dialog.getByText("Session-RPE-Last: 403 AU · RPE 6,5 (Athletenfeedback) × 62 min")).toBeVisible();
   await dialog.getByRole("button", { name: "Zurück zum Kalender" }).click();
   await page.reload();
-  const response = await request.get("/api/activities/FixtureCase-1");
+  const response = await request.get("/api/activities/9000001");
   const payload = await response.json();
   expect(payload.contract).toBe("activity_detail.v1");
   expect(payload.detail_data.display_sampled).toBe(true);

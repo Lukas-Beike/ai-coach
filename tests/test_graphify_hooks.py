@@ -58,7 +58,10 @@ class GraphifyHookTests(unittest.TestCase):
         )
         explorer = (ROOT / ".claude/agents/explorer.md").read_text(encoding="utf-8")
 
-        self.assertEqual(claude["permissions"]["allow"], tools)
+        # The only other allow rule is the review-thread resolve script (athlete
+        # decision #2629); anything else added here still fails.
+        resolve = ["Bash(python scripts/resolve_review_thread.py:*)"]
+        self.assertEqual(claude["permissions"]["allow"], tools + resolve)
         self.assertIn(f"tools: Read, Grep, Glob, {', '.join(tools)}\n", explorer)
         self.assertIn("  - graphify-local:\n", explorer)
         self.assertIn('args: ["scripts/graphify_local.py", "mcp"]\n', explorer)

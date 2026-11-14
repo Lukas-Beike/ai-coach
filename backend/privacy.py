@@ -304,12 +304,13 @@ class PrivacyDeleteService:
 
         Runs after the commit under the held maintenance gate. The delete is
         already durable, so a failure is logged and never fails the request;
-        both statements are atomic and leave the data unchanged on error.
+        both statements are atomic and leave the data unchanged on error. The
+        manager's writer excludes every other write; VACUUM cannot run inside a
+        unit of work, so no lock or outer transaction wraps it.
         """
         dependencies = self._dependencies
         try:
-            with dependencies.database_lock:
-                complete = dependencies.database_manager.reclaim_space()
+            complete = dependencies.database_manager.reclaim_space()
         except Exception as exc:  # noqa: BLE001 - the committed delete stands
             dependencies.logger.warning(
                 "Deleted database pages could not be reclaimed",

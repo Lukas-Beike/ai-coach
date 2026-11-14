@@ -38,42 +38,37 @@ def _pairs(planned, activities, result):
 
 
 class DateOnlyBestFitTests(unittest.TestCase):
-    def test_same_day_ride_and_run_pair_by_sport_then_duration(self):
-        planned = [_unit("ride", "Ride", 60), _unit("run", "Run", 30)]
-        activities = [
-            _activity("run-35", "Run", 35),
-            _activity("ride-65", "VirtualRide", 65),
-        ]
-        expected = {"ride": "ride-65", "run": "run-35"}
-        for planned_order, activity_order in itertools.product(
-            [planned, list(reversed(planned))],
-            [activities, list(reversed(activities))],
-        ):
-            with self.subTest(
-                planned=[unit["id"] for unit in planned_order],
-                activities=[activity["id"] for activity in activity_order],
+    def test_same_day_units_pair_by_sport_then_closest_duration_regardless_of_order(
+        self,
+    ):
+        cases = (
+            (
+                [_unit("ride", "Ride", 60), _unit("run", "Run", 30)],
+                [
+                    _activity("run-35", "Run", 35),
+                    _activity("ride-65", "VirtualRide", 65),
+                ],
+                {"ride": "ride-65", "run": "run-35"},
+            ),
+            (
+                [_unit("short", "Run", 30), _unit("long", "Run", 60)],
+                [_activity("a-65", "Run", 65), _activity("a-35", "Run", 35)],
+                {"short": "a-35", "long": "a-65"},
+            ),
+        )
+        for planned, activities, expected in cases:
+            for planned_order, activity_order in itertools.product(
+                [planned, list(reversed(planned))],
+                [activities, list(reversed(activities))],
             ):
-                result = match_planned_workouts(planned_order, activity_order)
-                self.assertEqual(
-                    _pairs(planned_order, activity_order, result), expected
-                )
-
-    def test_same_sport_units_prefer_closest_duration_regardless_of_order(self):
-        planned = [_unit("short", "Run", 30), _unit("long", "Run", 60)]
-        activities = [_activity("a-65", "Run", 65), _activity("a-35", "Run", 35)]
-        expected = {"short": "a-35", "long": "a-65"}
-        for planned_order, activity_order in itertools.product(
-            [planned, list(reversed(planned))],
-            [activities, list(reversed(activities))],
-        ):
-            with self.subTest(
-                planned=[unit["id"] for unit in planned_order],
-                activities=[activity["id"] for activity in activity_order],
-            ):
-                result = match_planned_workouts(planned_order, activity_order)
-                self.assertEqual(
-                    _pairs(planned_order, activity_order, result), expected
-                )
+                with self.subTest(
+                    planned=[unit["id"] for unit in planned_order],
+                    activities=[activity["id"] for activity in activity_order],
+                ):
+                    result = match_planned_workouts(planned_order, activity_order)
+                    self.assertEqual(
+                        _pairs(planned_order, activity_order, result), expected
+                    )
 
     def test_sport_family_members_are_equivalent(self):
         cases = [

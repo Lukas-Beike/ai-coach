@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from backend import change_history
 from backend.athlete.profile import DEFAULT_PROFILE
+from backend.coach import limits as coach_limits
 from backend.errors import AppError
 
 
@@ -104,6 +105,11 @@ class ChangeHistoryTests(unittest.TestCase):
         )
         count = self.db.execute("SELECT COUNT(*) FROM change_history").fetchone()[0]
         self.assertEqual(count, change_history.MAX_ROWS)
+
+    def test_history_capacity_covers_one_complete_plan_replacement(self):
+        self.assertGreaterEqual(
+            change_history.MAX_ROWS, coach_limits.COACH_TRAINING_CHANGE_LIMIT * 2
+        )
 
     def test_public_view_never_exposes_diff_values(self):
         row = {

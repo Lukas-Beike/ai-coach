@@ -9,7 +9,7 @@ import unittest
 import uuid
 from contextlib import contextmanager
 from typing import cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.coach.conversation import (
     CoachConversationProvisionService,
@@ -35,6 +35,7 @@ class _Manager:
             CREATE TABLE messages(id INTEGER PRIMARY KEY, content TEXT);
             CREATE TABLE coach_action_proposals(action_type TEXT, status TEXT, action_token_hash TEXT);
             CREATE TABLE coach_plan_artifacts(status TEXT, updated_at TEXT);
+            INSERT INTO coach_plan_artifacts(status, updated_at) VALUES ('draft', '');
             INSERT INTO messages(content) VALUES ('old chat');
             INSERT INTO coach_commands(client_turn_id, receipt, status)
                 VALUES ('turn-1', '{"operation_id":"op-1","status":"running"}', 'running');
@@ -138,6 +139,26 @@ class CoachConversationResetTests(unittest.TestCase):
         thread = self.remote_thread(self.service)
         thread.join(WAIT_SECONDS)
         self.assertFalse(thread.is_alive())
+        with self.manager.unit_of_work() as db:
+            rows = db.execute("SELECT status FROM coach_plan_artifacts").fetchall()
+        self.assertEqual([row[0] for row in rows], ["superseded"])
+
+    def test_a_failing_reset_transaction_keeps_the_local_history(self) -> None:
+        original = self.key_values.set
+
+        def fail_pending_request(db, key, value):
+            if key == "coach_pending_request":
+                raise RuntimeError("synthetic reset failure")
+            return original(db, key, value)
+
+        with (
+            patch.object(self.key_values, "set", side_effect=fail_pending_request),
+            self.assertRaisesRegex(RuntimeError, "synthetic reset failure"),
+        ):
+            self.service.reset()
+
+        self.assertEqual(self.count_messages(), 1)
+        self.assertEqual(self.read("chat_generation"), "old-generation")
 
     def test_reset_cancels_running_turn_before_waiting_for_the_lock(self) -> None:
         turn_saw_cancel: list[bool] = []

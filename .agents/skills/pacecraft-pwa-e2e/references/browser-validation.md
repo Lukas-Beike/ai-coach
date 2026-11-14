@@ -25,6 +25,17 @@ detection, which follows `visualViewport`; verify keyboard-open on a device.
 Confirm automated touch-target and label flags in the rendered state:
 controls inside closed `<details>` and `::before` hit areas are false positives.
 
+Before proposing a change to how fixture rows are stored or counted, check the
+two deciding facts first (#2722):
+- **The spec's own fixture state:** under the shared runner each spec gets a
+  fresh fixture. Its state comes from that spec's own `/api/fixture/*` calls,
+  its `page.route` stubs and the rows it writes itself. Read it from a one-spec
+  run's error context or from those sources. The demo container
+  (`FIXTURE_AUTO_SEED=1`) matches only a spec that calls `/api/fixture/demo`.
+- **The provider mapper:** check its type table and field list before routing
+  fixture rows through it. For example, Wahoo has no strength type and no RPE,
+  and Garmin has no TSS.
+
 For manual fixtures, in `finally`, stop/remove only the observed disposable
 container, never with
 `docker rm -v`. Restore previous E2E environment values. Keep artifact and

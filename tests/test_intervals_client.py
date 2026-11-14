@@ -57,6 +57,21 @@ class IntervalsClientTests(unittest.TestCase):
         client = IntervalsClient(config, request=Mock(), now=lambda: now)
         self.assertEqual(client.local_today().isoformat(), "2026-09-20")
 
+    def test_pacecraft_folder_wins_over_the_legacy_folder(self) -> None:
+        folders = [
+            {"id": 77, "name": "Intervals Coach", "type": "FOLDER"},
+            {"id": 9, "name": "Plans", "children": [{"id": 88, "name": "Pacecraft"}]},
+        ]
+        config = type(
+            "ConfigStub",
+            (),
+            {"intervals_api_key": "key", "intervals_athlete_id": "a-1"},
+        )()
+        client = IntervalsClient(config, request=Mock(return_value=folders))
+        with patch.object(client, "post") as post:
+            self.assertEqual(client.get_or_create_workout_folder(), 88)
+        post.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

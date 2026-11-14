@@ -124,4 +124,40 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the previous walk/);
   assert.doesNotMatch(done.stdout, /fake-login-value/);
+  // An out-dir that cannot be created (a file already holds its path) exits 2 without a stack trace (#2661).
+  const blocked = fs.mkdtempSync(path.join(os.tmpdir(), "walk-blocked-"));
+  fs.writeFileSync(path.join(blocked, "file"), "x");
+  fs.writeFileSync(path.join(blocked, "secret"), "fake-login-value");
+  done = run("--url", "http://127.0.0.1:9", "--password-file", path.join(blocked, "secret"), "--out-dir", path.join(blocked, "file"));
+  fs.rmSync(blocked, { recursive: true, force: true });
+  assert.equal(done.status, 2);
+  assert.match(done.stdout, /^FAIL cannot create the out-dir$/m);
+  assert.doesNotMatch(done.stderr, /at .*ui_walk/);
+});
+
+test("ui walk refuses a file, link or hard link at a fixed name instead of following it (#2661)", async () => {
+  const walk = await load();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-out-"));
+  const victimDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-victim-"));
+  const victim = path.join(victimDir, "kept.txt");
+  try {
+    fs.writeFileSync(victim, "original");
+    fs.linkSync(victim, path.join(outDir, "ui-walk.json"));
+    assert.throws(() => walk.writeFresh(outDir, "ui-walk.json", "{}"), { code: "EEXIST" });
+    try {
+      fs.symlinkSync(victim, path.join(outDir, "mobile-coach.png"), "file");
+      assert.throws(() => walk.writeFresh(outDir, "mobile-coach.png", "png"), { code: "EEXIST" });
+    } catch (error) {
+      if (error.code !== "EPERM") throw error; // Windows without the symlink privilege: the hard link covers it.
+    }
+    assert.equal(fs.readFileSync(victim, "utf8"), "original");
+    // A fresh name is written; an out-dir outside the temp directory is refused before any write.
+    walk.writeFresh(outDir, "desktop-coach.png", "png");
+    assert.equal(fs.readFileSync(path.join(outDir, "desktop-coach.png"), "utf8"), "png");
+    assert.throws(() => walk.writeFresh(path.join(__dirname, ".."), "ui-walk.json", "{}"), /system temp directory/);
+    assert.match(walk.FRESH_OUT_DIR, /fresh --out-dir/);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+    fs.rmSync(victimDir, { recursive: true, force: true });
+  }
 });

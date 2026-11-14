@@ -98,10 +98,10 @@ test("the manifest matches the app colours and the downloads use the Pacecraft n
 });
 
 test("only the kept explanations remain as helper texts", () => {
-  for (const text of ["nicht das Passwort", "Bestätigungscode geschickt", "CC BY 4.0", "nur mit demselben APP_PASSWORD wiederhergestellt", "in Coach-Anfragen an OpenAI eingehen"]) {
+  for (const text of ["nicht das Passwort", "Bestätigungscode geschickt", "CC BY 4.0", "nur mit demselben APP_PASSWORD wiederhergestellt"]) {
     assert.ok(index.includes(text), `${text} must stay`);
   }
-  for (const text of ["Leer = Standard-Obergrenzen", "Optional, aus Labortest", "-1 lädt alle", "0 = keine vergangene Woche", "Wähle die Balance", "Thinking Level steuert"]) {
+  for (const text of ["Leer = Standard-Obergrenzen", "Optional, aus Labortest", "-1 lädt alle", "0 = keine vergangene Woche", "Wähle die Balance", "Thinking Level steuert", "in Coach-Anfragen an OpenAI eingehen"]) {
     assert.ok(!index.includes(text), `${text} was removed`);
   }
   assert.ok(!/class="eyebrow"/.test(index));

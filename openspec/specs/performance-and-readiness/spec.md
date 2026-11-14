@@ -176,7 +176,7 @@ The system SHALL provide bounded dated performance and provider-metric histories
 
 #### Scenario: Power profile reads only the local curve
 - **WHEN** the analysis cycling power profile is shown while Intervals.icu power curve rows are stored
-- **THEN** its best power per duration comes only from the local mean-maximal curve of the last 90 days; the analysis history has no `cycling_power_profile` and the stored Intervals.icu power curve feeds no view.
+- **THEN** its best power per duration comes only from the local mean-maximal curve of all stored sessions (all-time bests, each with its date); the analysis history has no `cycling_power_profile` and the stored Intervals.icu power curve feeds no view.
 
 #### Scenario: History payload
 - **WHEN** the analysis history is composed

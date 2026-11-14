@@ -44,8 +44,6 @@ earns its place. A seam with one implementation is hypothetical; add it only
 when two vary across it. A compact diff must remain readable;
 do not compress code or relocate orchestration to bypass ownership rules. Remove
 code only when the requested change makes it unnecessary.
-Change code or test text that contains backslashes with the Edit tool or a
-script file in the scratchpad, never with an inline heredoc or a `-c` one-liner.
 
 Preserve security, privacy, data integrity, accessibility, error handling, and
 explicit approvals. Simplification never waives migrations, protected workflows,

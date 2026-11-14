@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 from support import dispatch_route
 
@@ -20,7 +20,9 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = Mock()
         self.service.update.return_value = {"status": "local"}
-        self.routes = PlannedUnitFocusPostRoutes(lambda: self.service, threading.Lock())
+        self.routes = PlannedUnitFocusPostRoutes(
+            lambda: self.service, lambda: MagicMock(), threading.Lock()
+        )
 
     def handler(self, payload):
         return SimpleNamespace(read_json=Mock(return_value=payload), send_json=Mock())

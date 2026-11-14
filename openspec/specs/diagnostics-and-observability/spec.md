@@ -171,4 +171,4 @@ The application SHALL retain safe request/operation correlation for concurrent w
 - **WHEN** a request fails or is not a reduced-level routine poll
 - **THEN** the access log retains the applicable INFO-level visibility
 
-Evidence: `backend/observability.py::http_access_log_level`; `backend/observability.py::JsonLogFormatter`; `backend/http_api/handler.py::RequestHandler`. Tests: `tests/test_server_runtime.py::test_parallel_operations_keep_distinct_safe_correlation_ids`; `tests/test_observability.py::test_successful_routine_get_polls_log_at_debug`; `tests/test_observability.py::test_errors_and_other_requests_keep_info`.
+Evidence: `backend/observability.py::http_access_log_level`; `backend/observability.py::JsonLogFormatter`; `backend/http_api/handler.py::RequestHandler`. Tests: `tests/test_sync_observation.py::test_context_is_isolated_between_threads`; `tests/test_observability.py::test_successful_routine_get_polls_log_at_debug`; `tests/test_observability.py::test_errors_and_other_requests_keep_info`.

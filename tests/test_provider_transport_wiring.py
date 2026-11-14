@@ -57,6 +57,21 @@ class ProviderTransportWiringTests(unittest.TestCase):
         self.assertIs(details.cache_key(), self.late["provider_state"].return_value)
         self.assertIs(args.kwargs["opener"], opener)
 
+    def test_observed_opener_binds_the_log_capture_and_operation_context(self):
+        with patch("backend.providers.transport_wiring.observed_opener") as observed:
+            services = self.make_services()
+            self.assertIs(
+                services.observed_opener("wahoo", include_path=False),
+                observed.return_value,
+            )
+        observed.assert_called_once_with(
+            "wahoo",
+            logger=self.logger,
+            diagnostic_capture=self.capture,
+            operation_context=self.operation_context,
+            include_path=False,
+        )
+
     def test_intervals_client_uses_the_shared_transport_and_active_config(self):
         services = self.make_services()
         request = Mock(name="request")

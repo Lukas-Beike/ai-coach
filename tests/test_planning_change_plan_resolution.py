@@ -294,6 +294,16 @@ class StructuredTrainingPlanResolverTests(unittest.TestCase):
         )
         self.assertEqual(self.derive([create]), ({}, set()))
         self.assertEqual(self.derive([{**create, "plan_id": ""}]), ({}, set()))
+        # A rename plus a standalone create leaves the referenced plan's bounds alone.
+        self.assertEqual(
+            self.derive(
+                [
+                    {"local_id": "unit-a", "action": "update", "name": "Renamed"},
+                    {**create, "plan_id": ""},
+                ]
+            )[1],
+            set(),
+        )
         self.assert_app_error(
             lambda: self.derive(
                 [{"local_id": "unit-a"}, {**create, "plan_id": "other"}]

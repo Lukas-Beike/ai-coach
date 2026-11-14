@@ -72,6 +72,11 @@ from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.report import DiagnosticReportService
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
+from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.export_streams import ExportStreamTransport
+from backend.http_api.library_page import LibraryPageService
+from backend.http_api.readiness import ReadinessService
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
@@ -135,10 +140,9 @@ from backend.sync.garmin_activity_details import GarminActivityDetailService
 from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.garmin_service import (
-    GarminAnalysisRefreshService,
-    GarminNutritionRefreshService,
     GarminRemoteReader,
     GarminSyncService,
+    GarminTargetedRefreshService,
 )
 from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
 from backend.sync.library import (
@@ -357,7 +361,7 @@ class CompositionRootTests(ServerTestCase):
         self.assertIs(provider.json_http_client(), http_client)
         self.assertIs(server.APP.provider_transport, provider)
         self.assertIsInstance(provider.intervals_client(), IntervalsClient)
-        explicit = replace(server.CONFIG, intervals_api_key="test-key")
+        explicit = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         self.assertIs(provider.intervals_client(explicit).config, explicit)
 
         model = server.MODEL_TRANSPORT
@@ -424,10 +428,9 @@ class CompositionRootTests(ServerTestCase):
             (garmin.remote_reader, GarminRemoteReader),
             (garmin.sync_service, GarminSyncService),
             (garmin.activity_detail_service, GarminActivityDetailService),
-            (garmin.nutrition_refresh_service, GarminNutritionRefreshService),
+            (garmin.targeted_refresh_service, GarminTargetedRefreshService),
             (garmin.wellness_history_service, GarminWellnessHistoryService),
             (garmin.stream_backfill_service, StreamBackfillService),
-            (garmin.analysis_refresh_service, GarminAnalysisRefreshService),
             (garmin.projection_service, GarminProjectionService),
         ):
             with self.subTest(kind=kind.__name__):
@@ -602,6 +605,19 @@ class CompositionRootTests(ServerTestCase):
         self.assertIsInstance(dispatch, CoachToolDispatchService)
         self.assertIs(dispatch, server.COACH_TOOL_DISPATCH.service())
 
+    def test_http_api_services_resolve_through_the_root(self) -> None:
+        api = server.HTTP_API
+
+        self.assertIsInstance(api.readiness_service(), ReadinessService)
+        self.assertIsInstance(api.export_stream_transport(), ExportStreamTransport)
+        self.assertIsInstance(api.library_page_service(), LibraryPageService)
+        self.assertIsInstance(api.chat_history_page_service(), ChatHistoryPageService)
+        self.assertIsInstance(api.sync_command_endpoint(), SyncCommandEndpoint)
+        self.assertEqual(
+            f"Pacecraft/{server.APP_VERSION}",
+            api.request_handler_class().server_version,
+        )
+
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.
         services = SimpleNamespace(secret_values=lambda: ("yazio-token",))
@@ -609,8 +625,10 @@ class CompositionRootTests(ServerTestCase):
             self.assertIn("yazio-token", server._nutrition_secret_values())
 
     def test_the_context_reads_the_live_configuration_and_database(self) -> None:
-        replaced = replace(server.CONFIG, calendar_ical_url="https://example.invalid")
-        with patch.object(server, "CONFIG", replaced):
+        replaced = replace(
+            server.CONFIG_HOLDER.value, calendar_ical_url="https://example.invalid"
+        )
+        with patch.object(server.CONFIG_HOLDER, "value", replaced):
             self.assertIs(replaced, server.APP.config())
         self.assertIs(server.database_manager(), server.APP.database())
 

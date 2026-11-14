@@ -49,7 +49,7 @@ _SERVER_HOOKS = (
     (provider_http.JsonHttpClient, "request"),
     (server.APP, "coach_conversation"),
     (server, "initialise_database"),
-    (server.HTTP_API, "request_handler_class"),
+    (server, "HTTP_API"),
     (http_auth.RATE_LIMITER, "allow"),
 )
 with ExitStack() as stack:
@@ -80,8 +80,9 @@ def _canonical_details(db, snapshot):
     activities = {row["id"]: row for row in snapshot["recent_activities"]}
     details = []
     for activity_id, activity in activities.items():
-        sets = detail_sets_for(db, "wahoo", activity_id)
-        analysis = analysis_row_for_record(db, "wahoo", activity_id)
+        wahoo_id = fixture_runtime.fixture_wahoo_id(activity_id)
+        sets = detail_sets_for(db, "wahoo", wahoo_id)
+        analysis = analysis_row_for_record(db, "wahoo", wahoo_id)
         streams = {
             _LEGACY_STREAM_NAMES.get(channel, channel.value): list(values)
             for item in sets
@@ -123,21 +124,31 @@ class StandardFixtureTestCase(unittest.TestCase):
     @contextmanager
     def _temporary_fixture_database(self, prefix):
         server = fixture_runtime.server
-        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        original = (
+            server.CONFIG_HOLDER.value,
+            server.DATA_DIR,
+            server.DB_PATH,
+            server.LOG_PATH,
+        )
         with TemporaryDirectory(prefix=prefix) as directory:
             root = Path(directory)
             try:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.CONFIG_HOLDER.value = replace(
+                    server.CONFIG_HOLDER.value, app_password=""
+                )
                 server.DATA_DIR = root
                 server.DB_PATH = root / "fixture.db"
                 server.LOG_PATH = root / "fixture.log"
                 yield server
             finally:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
-                    original
-                )
+                (
+                    server.CONFIG_HOLDER.value,
+                    server.DATA_DIR,
+                    server.DB_PATH,
+                    server.LOG_PATH,
+                ) = original
 
 
 class StandardFixtureDataTests(StandardFixtureTestCase):
@@ -465,12 +476,19 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
 
     def test_demo_seed_populates_and_repeats_in_temporary_database(self):
         server = fixture_runtime.server
-        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        original = (
+            server.CONFIG_HOLDER.value,
+            server.DATA_DIR,
+            server.DB_PATH,
+            server.LOG_PATH,
+        )
         with TemporaryDirectory(prefix="fixture-demo-test-") as directory:
             root = Path(directory)
             try:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.CONFIG_HOLDER.value = replace(
+                    server.CONFIG_HOLDER.value, app_password=""
+                )
                 server.DATA_DIR = root
                 server.DB_PATH = root / "fixture.db"
                 server.LOG_PATH = root / "fixture.log"
@@ -532,9 +550,12 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                     ).fetchone()["count"]
             finally:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
-                    original
-                )
+                (
+                    server.CONFIG_HOLDER.value,
+                    server.DATA_DIR,
+                    server.DB_PATH,
+                    server.LOG_PATH,
+                ) = original
 
         self.assertEqual(first, {"ready": True})
         self.assertEqual(
@@ -697,7 +718,12 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
 class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
     def test_auto_seeded_restarts_and_explicit_seeds_keep_data_stable(self):
         server = fixture_runtime.server
-        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        original = (
+            server.CONFIG_HOLDER.value,
+            server.DATA_DIR,
+            server.DB_PATH,
+            server.LOG_PATH,
+        )
 
         def counts():
             with server.database_manager().unit_of_work() as db:
@@ -728,7 +754,9 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             root = Path(directory)
             try:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.CONFIG_HOLDER.value = replace(
+                    server.CONFIG_HOLDER.value, app_password=""
+                )
                 server.DATA_DIR = root
                 server.DB_PATH = root / "fixture.db"
                 server.LOG_PATH = root / "fixture.log"
@@ -747,9 +775,12 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
                 feature_garmin = self._garmin_snapshot(server)
             finally:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
-                    original
-                )
+                (
+                    server.CONFIG_HOLDER.value,
+                    server.DATA_DIR,
+                    server.DB_PATH,
+                    server.LOG_PATH,
+                ) = original
 
         self.assertEqual(restarted, first)
         self.assertEqual(first["scenario_units"], 3)
@@ -1128,7 +1159,12 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
 class StandardFixtureStagingTests(StandardFixtureTestCase):
     def test_staged_plan_never_collides_with_seeded_units_on_any_weekday(self):
         server = fixture_runtime.server
-        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        original = (
+            server.CONFIG_HOLDER.value,
+            server.DATA_DIR,
+            server.DB_PATH,
+            server.LOG_PATH,
+        )
         # Seven consecutive athlete-local "today" values cover every weekday.
         first_today = date(2026, 10, 5)
         for offset in range(7):
@@ -1138,7 +1174,9 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                     root = Path(directory)
                     try:
                         DATABASE_MANAGER_CACHE.reset()
-                        server.CONFIG = replace(server.CONFIG, app_password="")
+                        server.CONFIG_HOLDER.value = replace(
+                            server.CONFIG_HOLDER.value, app_password=""
+                        )
                         server.DATA_DIR = root
                         server.DB_PATH = root / "fixture.db"
                         server.LOG_PATH = root / "fixture.log"
@@ -1171,7 +1209,7 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                     finally:
                         DATABASE_MANAGER_CACHE.reset()
                         (
-                            server.CONFIG,
+                            server.CONFIG_HOLDER.value,
                             server.DATA_DIR,
                             server.DB_PATH,
                             server.LOG_PATH,

@@ -66,6 +66,7 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         self.assertEqual(vo2["source"], "Garmin")
         self.assertEqual(vo2["observed_at"], "2026-09-15")
         self.assertIs(vo2["historical_comparison"], comparison)
+        self.assertIn("direct_support", result["validation_outcome_enum"])
 
     def test_cycling_activity_adds_plausible_ftp_ratio_and_keeps_sources(self):
         result = activity_performance_validation(
@@ -167,6 +168,85 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
             ),
             {"activity_configured_ftp_watts": 300},
         )
+
+    def test_implausible_provider_references_are_omitted(self):
+        validation = activity_performance_validation(
+            [
+                {
+                    "id": "invalid-provider",
+                    "sport": "run",
+                    "started_at_local": "2026-09-12T08:00:00",
+                }
+            ],
+            {
+                "running_vo2max_ml_kg_min": {
+                    "value": 500,
+                    "unit": "ml/kg/min",
+                    "source": "Intervals.icu",
+                },
+                "run_threshold_pace_seconds_per_km": {
+                    "value": 9999,
+                    "unit": "s/km",
+                    "source": "Intervals.icu",
+                },
+                "run_threshold_hr_bpm": {
+                    "value": 9999,
+                    "unit": "bpm",
+                    "source": "Intervals.icu",
+                },
+            },
+            {},
+        )
+
+        reference_metrics = {
+            item["metric"] for item in validation["provider_references"]
+        }
+        self.assertNotIn("running_vo2max_ml_kg_min", reference_metrics)
+        self.assertNotIn("run_threshold_pace_seconds_per_km", reference_metrics)
+        self.assertNotIn("run_threshold_hr_bpm", reference_metrics)
+
+    def test_the_power_ratio_is_omitted_for_an_invalid_or_implausible_ftp(self):
+        activity = {
+            "id": "invalid-ftp",
+            "sport": "ride",
+            "started_at_local": "2026-09-12T08:00:00",
+            "normalized_power": 270,
+        }
+        for ftp in (-1, 10):
+            with self.subTest(ftp=ftp):
+                validation = activity_performance_validation(
+                    [activity],
+                    {"cycling_ftp_watts": {"value": ftp}},
+                    {},
+                )
+                self.assertNotIn(
+                    "power_as_percent_of_current_ftp", validation["activity"]
+                )
+
+    def test_implausible_measured_evidence_is_omitted(self):
+        validation = activity_performance_validation(
+            [
+                {
+                    "id": "invalid-evidence",
+                    "sport": "ride",
+                    "started_at_local": "2026-09-12T08:00:00",
+                    "moving_duration_s": 3600,
+                    "avg_hr": 9999,
+                    "avg_power": -10,
+                    "rpe": 100,
+                    "intensity": 999,
+                }
+            ],
+            {},
+            {},
+        )
+
+        evidence = validation["activity"]
+        self.assertEqual(evidence["duration_seconds"], 3600)
+        self.assertNotIn("average_heart_rate_bpm", evidence)
+        self.assertNotIn("average_power_watts", evidence)
+        self.assertNotIn("rpe", evidence)
+        self.assertNotIn("intensity", evidence)
 
     def test_latest_timestamp_uses_id_tiebreak_and_inputs_are_not_mutated(self):
         activities = [

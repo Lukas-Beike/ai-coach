@@ -64,14 +64,9 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
 
         @contextmanager
         def drain():
-            self.assertTrue(self.lock._is_owned())
             self.assertTrue(self.gate.state()["active"])
             self.calls.append("drain")
             yield
-
-        def manager():
-            self.assertTrue(self.lock._is_owned())
-            return self.manager
 
         self.validation.stage.side_effect = stage
         self.validation.validate.side_effect = validate
@@ -102,8 +97,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 profile_mutation_coordinator=threading.RLock(),
                 validation=self.validation,
                 backup=self.backup,
-                database_manager=manager,
-                database_lock=self.lock,
+                database_manager=lambda: self.manager,
                 maintenance_gate=self.gate,
                 sync_jobs=self.sync_jobs,
                 coach_jobs=self.coach_jobs,

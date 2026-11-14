@@ -36,7 +36,6 @@ from backend.canonical.records import (
     Provenance,
 )
 from backend.canonical.vocabulary import (
-    ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
@@ -72,7 +71,6 @@ _LOGGER = logging.getLogger("intervals_coach")
 STAGE: Final = "session_metrics"
 STATE_KEY: Final = "session_metrics_state"
 DEFAULT_BATCH_SIZE: Final = 100
-_INTERVALS: Final = ProviderId.INTERVALS.value
 
 
 def _members(records: Sequence[ActivityRecord]) -> list[list[object]]:
@@ -358,14 +356,9 @@ class SessionMetricsStage:
             )
             if wants_metrics(summary)
         ]
-        # Like the session analysis (#1685), Intervals.icu streams are not read.
-        stream_keys = {
-            session_id: own
-            for session_id, keys in activity_detail_store.full_stream_keys(
-                db, [str(summary["id"]) for summary in summaries]
-            ).items()
-            if (own := tuple(key for key in keys if key.provider != _INTERVALS))
-        }
+        stream_keys = activity_detail_store.full_stream_keys(
+            db, [str(summary["id"]) for summary in summaries]
+        )
         stored = stored_session_metrics(db)
         state = self._state(db)
         plan = _plan(summaries, sessions, stream_keys, stored, state.get("empty") or {})

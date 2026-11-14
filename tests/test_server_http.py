@@ -3,7 +3,6 @@
 import ast
 import http.client
 import json
-import queue
 import re
 import tempfile
 import threading
@@ -16,10 +15,8 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
-from unittest.mock import ANY, Mock, call, patch
-from urllib.error import HTTPError
+from unittest.mock import Mock, call, patch
 
-import remote_reconcilers
 import snapshot_seed
 from server_test_support import (
     ServerTestCase,
@@ -30,16 +27,13 @@ from server_test_support import (
 from support import dispatch_route, store_garmin_activities
 
 from backend.coach import streams as coach_streams
-from backend.errors import AppError, ClientDisconnected, public_error_contract
+from backend.errors import AppError, public_error_contract
 from backend.http_api import auth as http_auth
-from backend.http_api import readiness as readiness_module
 from backend.http_api import response_transport, responses
 from backend.http_api.handler import create_request_handler
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.route_table import PUBLIC_API_ROUTES, Access, RouteTable
-from backend.http_api.state_events_get import StateEventsGetRoutes
-from backend.http_api.state_events_transport import StateEventTransport
 from backend.providers import http as provider_http
 from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
@@ -67,12 +61,35 @@ def _api_route_paths() -> set[str]:
     return paths | {f"{path}/{SAMPLE_ID}" for path in paths}
 
 
+def _request_status(method, path, headers, port):
+    """Status of one request; a socket aborted before the reply is sent once more.
+
+    Under full-suite load on Windows the socket was aborted (WinError 10053)
+    before the status line arrived (#2734). A second attempt keeps every
+    assertion: a handler that ran is still recorded by the caller.
+    """
+    try:
+        return _send_once(method, path, headers, port)
+    except ConnectionAbortedError, ConnectionResetError:
+        return _send_once(method, path, headers, port)
+
+
+def _send_once(method, path, headers, port):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        body = None if method == "GET" else b"{}"
+        connection.request(method, path, body=body, headers=headers)
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
 class ServerHttpTests(ServerTestCase):
     def test_every_api_route_rejects_a_request_without_session(self):
         auth = http_auth.SessionAuthService(
             Mock(),
             threading.RLock(),
-            replace(server.CONFIG, app_password="synthetic-password-123"),
+            replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
             True,
             RateLimiter(),
         )
@@ -143,7 +160,9 @@ class ServerHttpTests(ServerTestCase):
         restoring = runtime_maintenance.MaintenanceGate()
         restoring.restoring = True
         maintenance_port = serve(replace(dependencies, maintenance_gate=restoring))
-        config = replace(server.CONFIG, app_password="synthetic-password-123")
+        config = replace(
+            server.CONFIG_HOLDER.value, app_password="synthetic-password-123"
+        )
         without_session = http_auth.SessionAuthService(
             Mock(), threading.RLock(), config, True, RateLimiter()
         )
@@ -159,13 +178,9 @@ class ServerHttpTests(ServerTestCase):
                     if access is not None and route.access is not access:
                         continue
                     path = re.sub(r"\{.*?\}", "abc-123", route.path)
-                    connection = http.client.HTTPConnection(
-                        "127.0.0.1", port, timeout=10
+                    found[route.method, path] = _request_status(
+                        route.method, path, headers, port
                     )
-                    body = None if route.method == "GET" else b"{}"
-                    connection.request(route.method, path, body=body, headers=headers)
-                    found[route.method, path] = connection.getresponse().status
-                    connection.close()
             return found
 
         anonymous = {
@@ -212,6 +227,62 @@ class ServerHttpTests(ServerTestCase):
             ),
             sorted(called),
         )
+
+    def test_post_checks_session_then_csrf_then_maintenance(self):
+        # A restore is in progress, so the gate refuses every gated POST. The
+        # access checks still answer first: no session is 401, a session without
+        # the CSRF token is 403, and only a complete request reaches the gate.
+        called = []
+
+        def refuse(handler, request):
+            called.append(request.path)
+            raise AssertionError("route handler ran during the maintenance gate")
+
+        route = replace(
+            next(
+                r
+                for r in server.HTTP_API.route_table.routes
+                if (r.method, r.path) == ("POST", "/api/weather/sync")
+            ),
+            handle=refuse,
+        )
+        self.assertTrue(route.gated)
+        restoring = runtime_maintenance.MaintenanceGate()
+        restoring.restoring = True
+        dependencies = replace(
+            server.HTTP_API.request_handler_class().dependencies,
+            route_table=RouteTable([route]),
+            maintenance_gate=restoring,
+        )
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), create_request_handler(dependencies)
+        )
+        self.addCleanup(httpd.server_close)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        auth = http_auth.SessionAuthService(
+            server.database_manager(),
+            server.DB_LOCK,
+            replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
+            True,
+            RateLimiter(),
+        )
+        cookie = {"Cookie": f"{http_auth.SESSION_COOKIE}={create_test_session(server)}"}
+
+        def post(headers):
+            connection = http.client.HTTPConnection(
+                "127.0.0.1", httpd.server_address[1], timeout=10
+            )
+            connection.request("POST", "/api/weather/sync", body=b"{}", headers=headers)
+            status = connection.getresponse().status
+            connection.close()
+            return status
+
+        with patch.object(server, "get_session_auth_service", return_value=auth):
+            self.assertEqual(401, post({}))
+            self.assertEqual(403, post(cookie))
+            self.assertEqual(503, post({**cookie, "X-CSRF-Token": "csrf"}))
+        self.assertEqual([], called)
 
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
         for method in ("GET", "POST", "PUT"):
@@ -290,27 +361,15 @@ class ServerHttpTests(ServerTestCase):
             transport.send_json.call_args.args[3], {"WWW-Authenticate": "Session"}
         )
 
-    def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(
+    def test_http_api_keeps_dispatchers_shared_and_handler_configuration_lazy(
         self,
     ):
-        initial = server.HTTP_API._handler_configuration()
-        updated = replace(
-            initial,
-            identity=replace(initial.identity, app_version="synthetic-next"),
-        )
-        with patch.object(
-            server.HTTP_API,
-            "_handler_configuration",
-            side_effect=(initial, updated),
-        ) as configuration:
-            first = server.HTTP_API.request_handler_class()
+        first = server.HTTP_API.request_handler_class()
+        with patch.object(server.APP, "app_version", "synthetic-next"):
             second = server.HTTP_API.request_handler_class()
 
-        self.assertEqual(configuration.call_count, 2)
         self.assertIsNot(first, second)
-        self.assertEqual(
-            first.server_version, f"Pacecraft/{initial.identity.app_version}"
-        )
+        self.assertEqual(first.server_version, f"Pacecraft/{server.APP_VERSION}")
         self.assertEqual(second.server_version, "Pacecraft/synthetic-next")
         self.assertIs(first.dependencies.route_table, server.HTTP_API.route_table)
         self.assertIs(second.dependencies.route_table, server.HTTP_API.route_table)
@@ -318,84 +377,6 @@ class ServerHttpTests(ServerTestCase):
             first.dependencies.response_transport, server.HTTP_API.response_transport
         )
         self.assertIsNot(first.static_asset_service, second.static_asset_service)
-
-    def test_weather_handler_calls_public_weather_service(self):
-        handler = object.__new__(server.HTTP_API.request_handler_class())
-        handler.path = "/api/weather?local=1"
-        handler.send_json = Mock()
-        endpoint = Mock()
-        endpoint.state.return_value = {"configured": True, "loading": True}
-
-        with patch.object(
-            server.HTTP_API.planning_get_routes,
-            "_public_weather_state_service",
-            return_value=endpoint,
-        ) as factory:
-            self.assertTrue(
-                dispatch_route(
-                    server.HTTP_API.planning_get_routes, handler, "/api/weather"
-                )
-            )
-
-        factory.assert_called_once_with()
-        endpoint.state.assert_called_once_with(local_only=True)
-        handler.send_json.assert_called_once_with(
-            200, {"configured": True, "loading": True}
-        )
-
-    def test_sync_post_handler_keeps_bodyless_routes_and_unknown_posts_transport_only(
-        self,
-    ):
-        handler = object.__new__(server.HTTP_API.request_handler_class())
-        handler.read_json = Mock(return_value={"ignored": True})
-        handler.send_json = Mock()
-        endpoint = Mock()
-        endpoint.execute.return_value = (202, {"id": "job-3"})
-        with patch.object(
-            server.HTTP_API, "sync_command_endpoint", return_value=endpoint
-        ) as factory:
-            self.assertFalse(
-                dispatch_route(
-                    server.HTTP_API.sync_command_post_route,
-                    handler,
-                    "/api/unknown",
-                    method="POST",
-                )
-            )
-            factory.assert_not_called()
-            self.assertTrue(
-                dispatch_route(
-                    server.HTTP_API.sync_command_post_route,
-                    handler,
-                    "/api/weather/sync",
-                    method="POST",
-                )
-            )
-        handler.read_json.assert_not_called()
-        endpoint.execute.assert_called_once_with("/api/weather/sync", None)
-        handler.send_json.assert_called_once_with(202, {"id": "job-3"})
-
-    def test_plan_handler_delegates_local_and_refresh_reads_to_service(self):
-        for local_only in (True, False):
-            with self.subTest(local_only=local_only):
-                handler = object.__new__(server.HTTP_API.request_handler_class())
-                handler.path = "/api/plan?local=1" if local_only else "/api/plan"
-                handler.send_json = Mock()
-                service = Mock()
-                service.read_public.return_value = {"plans": []}
-                with patch.object(
-                    server.HTTP_API.planning_get_routes,
-                    "_public_plan_state_service",
-                    return_value=service,
-                ) as service_factory:
-                    self.assertTrue(
-                        dispatch_route(
-                            server.HTTP_API.planning_get_routes, handler, "/api/plan"
-                        )
-                    )
-                service_factory.assert_called_once_with()
-                service.read_public.assert_called_once_with(local_only=local_only)
-                handler.send_json.assert_called_once_with(200, {"plans": []})
 
     def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
         first = server.PLANNING_DATA.planned_unit().create(
@@ -484,7 +465,9 @@ class ServerHttpTests(ServerTestCase):
         self.assertIn("HttpOnly", insecure[0])
         self.assertNotIn("HttpOnly", insecure[1])
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, secure_cookies=True)
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, secure_cookies=True),
         ):
             secure = server.session_auth_service().session_cookie_headers(
                 "session-token", "csrf-token"
@@ -647,17 +630,9 @@ class ServerHttpTests(ServerTestCase):
         auth.logout_user(Handler(f"ic_session={token}"))
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
 
-    def test_public_state_exposes_checkin_history(self):
-        server.ATHLETE_DATA.checkin().save(
-            {"checkin_date": "2026-08-30", "motivation": 8}
-        )
-        state = server.PUBLIC_STATE.feedback_state_service().feedback_state()
-        self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
-        self.assertEqual(state["checkins"][0]["motivation"], 8)
-
     def test_public_states_keep_empty_usage_when_openai_is_not_configured(self):
-        config = replace(server.CONFIG, openai_api_key="")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
 
         self.assertEqual(bootstrap["usage"]["requests"], 0)
@@ -682,42 +657,6 @@ class ServerHttpTests(ServerTestCase):
         state = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
-
-    def test_activity_pagination_has_stable_cursor_without_duplicates(self):
-        today = server.ATHLETE_CLOCK.now().date()
-        store_garmin_activities(
-            server,
-            [
-                {
-                    "activityId": f"activity-{index}",
-                    "activityName": f"Activity {index}",
-                    "activityType": {"typeKey": "cycling"},
-                    "startTimeLocal": f"{today.isoformat()} 08:0{index}:00",
-                }
-                for index in range(5)
-            ]
-            + [
-                {
-                    "activityId": "old",
-                    "activityName": "Old",
-                    "activityType": {"typeKey": "cycling"},
-                    "startTimeLocal": "2000-01-01 08:00:00",
-                }
-            ],
-        )
-        service = server.ACTIVITY_READS.activity_read()
-        first = service.page(limit=2, days=1, today=today)
-        second = service.page(first["next_cursor"], 2, 1, today=today)
-        third = service.page(second["next_cursor"], 2, 1, today=today)
-        ids = [
-            item["record_ids"]["garmin"]
-            for page in (first, second, third)
-            for item in page["activities"]
-        ]
-        self.assertEqual(
-            ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]
-        )
-        self.assertIsNone(third["next_cursor"])
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
@@ -764,26 +703,6 @@ class ServerHttpTests(ServerTestCase):
                 self.assertEqual(
                     [item["content"] for item in page["messages"]], [expected]
                 )
-
-    def test_library_pagination_has_stable_type_name_id_cursor(self):
-        remote_reconcilers.library_reconciler(server).reconcile(
-            [
-                {
-                    "id": f"template-{index}",
-                    "name": f"Template {index}",
-                    "type": "Ride",
-                    "description": "- 30m Z2",
-                }
-                for index in range(3)
-            ]
-        )
-        first = server.HTTP_API.library_page_service().page(limit=2)
-        second = server.HTTP_API.library_page_service().page(
-            cursor=first["next_cursor"], limit=2
-        )
-        names = [item["name"] for page in (first, second) for item in page["workouts"]]
-        self.assertEqual(names, ["Template 0", "Template 1", "Template 2"])
-        self.assertIsNone(second["next_cursor"])
 
     def test_coach_and_http_library_views_include_the_same_active_templates(self):
         with server.database_manager().unit_of_work() as db:
@@ -952,82 +871,6 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(len(current["events"]), 1)
         self.assertNotIn("athlete content", json.dumps(current))
 
-    def test_state_events_validate_cursor_and_publish_job_progress(self):
-        with self.assertRaises(AppError) as raised:
-            runtime_events.STATE_EVENT_BUFFER.since("not-a-number")
-        self.assertEqual(raised.exception.reason, "invalid_event_cursor")
-        event = runtime_events.STATE_EVENT_BUFFER.publish(
-            "job",
-            {
-                "job_id": "job-1",
-                "status": "completed",
-                "progress": {"completed": 1, "total": 1},
-            },
-        )
-        self.assertEqual(
-            runtime_events.STATE_EVENT_BUFFER.since(event["event_id"] - 1)["events"][0][
-                "data"
-            ]["progress"]["completed"],
-            1,
-        )
-
-    def test_state_event_batch_sends_events_and_resets_for_gaps(self):
-        transport = StateEventTransport(runtime_events.STATE_EVENT_BUFFER)
-        sent = []
-        since, gap = transport.send_batch(
-            {
-                "gap": False,
-                "latest_event_id": 5,
-                "events": [
-                    {"event_id": 4, "event": "provider", "data": {"status": "running"}},
-                    {
-                        "event_id": 5,
-                        "event": "provider",
-                        "data": {"status": "completed"},
-                    },
-                ],
-            },
-            3,
-            lambda event, payload, event_id=None: sent.append(
-                (event, payload, event_id)
-            ),
-        )
-        self.assertEqual((since, gap), (5, False))
-        self.assertEqual(sent[-1], ("provider", {"status": "completed"}, 5))
-        since, gap = transport.send_batch(
-            {"gap": True, "latest_event_id": 9, "events": []},
-            since,
-            lambda event, payload, event_id=None: sent.append(
-                (event, payload, event_id)
-            ),
-        )
-        self.assertEqual((since, gap), (9, True))
-        self.assertEqual(
-            sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9)
-        )
-
-    def test_state_events_route_hands_the_request_to_the_transport(self):
-        handler = object.__new__(server.HTTP_API.request_handler_class())
-        handler.path = "/api/state/events?since=0"
-        handler.connection = Mock()
-        handler.send_sse_headers = Mock()
-        handler.send_sse_event = Mock()
-        transport = Mock()
-        routes = StateEventsGetRoutes(lambda: Mock(), transport)
-
-        self.assertTrue(dispatch_route(routes, handler, "/api/state/events"))
-        transport.handle.assert_called_once_with(
-            handler.path,
-            send_headers=handler.send_sse_headers,
-            send_event=handler.send_sse_event,
-            set_connection_timeout=handler.connection.settimeout,
-            client_is_connected=ANY,
-            session_is_active=ANY,
-        )
-        transport.handle.reset_mock()
-        self.assertFalse(dispatch_route(routes, handler, "/api/state/events/extra"))
-        transport.handle.assert_not_called()
-
     def test_http_response_helpers_are_dependency_light_and_preserve_headers(self):
         from backend.http_api import responses
 
@@ -1182,21 +1025,6 @@ class ServerHttpTests(ServerTestCase):
             list(truncated)
         self.assertEqual(incomplete.exception.status, 400)
 
-    def test_intervals_collection_pagination_is_bounded(self):
-        client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(server.CONFIG, intervals_api_key="test-key")
-        )
-        first_page = [{"id": f"activity-{index}"} for index in range(500)]
-        second_page = [{"id": "activity-500"}]
-        with patch.object(
-            client._api, "get", side_effect=[first_page, second_page]
-        ) as get:
-            rows = client.get_paged_collection(
-                "/athlete/0/activities", {"oldest": "2026-01-01"}, "activities"
-            )
-        self.assertEqual(len(rows), 501)
-        self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
-
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
         server.key_value_service().set(
             "last_garmin_error",
@@ -1226,140 +1054,6 @@ class ServerHttpTests(ServerTestCase):
             public_error_contract(AppError(401, "Anmeldung erforderlich."))[0],
             401,
         )
-
-    def test_http_json_cancels_while_waiting_for_provider_headers(self):
-        started = threading.Event()
-        release = threading.Event()
-        finished = threading.Event()
-        cancelled = threading.Event()
-        outcome = {}
-
-        class Response:
-            status = 200
-            headers: ClassVar = {}
-
-            def read(self, *args):
-                return b"{}"
-
-            def close(self):
-                return None
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                self.close()
-
-        def blocked_urlopen(*args, **kwargs):
-            started.set()
-            release.wait(2)
-            finished.set()
-            return Response()
-
-        def send_request():
-            try:
-                server.PROVIDER_TRANSPORT.json_http_client().request(
-                    "POST",
-                    "https://api.openai.com/v1/responses",
-                    {},
-                    cancel_event=cancelled,
-                )
-            except AppError as exc:
-                outcome["error"] = exc
-
-        with patch.object(
-            server.PROVIDER_TRANSPORT.json_http_client(),
-            "opener",
-            side_effect=blocked_urlopen,
-        ):
-            caller = threading.Thread(target=send_request)
-            caller.start()
-            self.assertTrue(started.wait(1))
-            cancelled.set()
-            caller.join(1)
-            release.set()
-            self.assertTrue(finished.wait(1))
-
-        self.assertFalse(caller.is_alive())
-        self.assertEqual(outcome["error"].status, 499)
-
-    def test_http_json_clears_provider_response_handle_after_read(self):
-        cancel_event = threading.Event()
-
-        class Response:
-            status = 200
-            headers: ClassVar = {}
-
-            def read(self, *_args):
-                return b"{}"
-
-            def close(self):
-                return None
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                self.close()
-
-        response = Response()
-        with patch.object(
-            server.PROVIDER_TRANSPORT.json_http_client(),
-            "opener",
-            return_value=response,
-        ):
-            self.assertEqual(
-                server.PROVIDER_TRANSPORT.json_http_client().request(
-                    "GET",
-                    "https://intervals.icu/api/v1/athlete/0",
-                    service="intervals",
-                    cancel_event=cancel_event,
-                ),
-                {},
-            )
-        self.assertIsNone(getattr(cancel_event, "_provider_response", None))
-
-    def test_http_json_rechecks_cancellation_after_provider_response(self):
-        cancel_event = threading.Event()
-
-        class Response:
-            status = 200
-            headers: ClassVar = {}
-
-            def read(self, *_args):
-                raise AssertionError("cancelled response must not be read")
-
-            def close(self):
-                return None
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                self.close()
-
-        response = Response()
-
-        def return_cancelled_response(*_args, **_kwargs):
-            cancel_event.set()
-            return response
-
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "opener",
-                side_effect=return_cancelled_response,
-            ),
-            self.assertRaises(AppError) as raised,
-        ):
-            server.PROVIDER_TRANSPORT.json_http_client().request(
-                "GET",
-                "https://intervals.icu/api/v1/athlete/0",
-                service="intervals",
-                cancel_event=cancel_event,
-            )
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-        self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
     def test_http_json_preserves_empty_body_and_oversized_response_contracts(self):
         class EmptyResponse:
@@ -1443,10 +1137,10 @@ class ServerHttpTests(ServerTestCase):
         audio = b"fake-webm-audio"
         with (
             patch.object(
-                server,
-                "CONFIG",
+                server.CONFIG_HOLDER,
+                "value",
                 replace(
-                    server.CONFIG,
+                    server.CONFIG_HOLDER.value,
                     openai_api_key="test-key",
                     openai_base_url="https://foundry.example.invalid/openai/v1/",
                 ),
@@ -1475,8 +1169,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
 
     def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
-        config = replace(server.CONFIG, openai_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="test-key")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             with self.assertRaises(AppError) as unsupported:
                 _transcribe_via_http_route(b"audio", "audio/flac")
             with self.assertRaises(AppError) as oversized:
@@ -1485,83 +1179,6 @@ class ServerHttpTests(ServerTestCase):
                 )
         self.assertEqual(unsupported.exception.status, 415)
         self.assertEqual(oversized.exception.status, 413)
-
-    def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
-        old = server.PLANNING_DATA.planned_unit().create(
-            {
-                "date": (
-                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
-                ).isoformat(),
-                "sport": "Ride",
-                "name": "Old",
-                "description": "- 30m 60% easy",
-            }
-        )
-        state = server.PLANNING_WORKFLOWS.structured_training_state_service().read()
-        intent = {
-            "intent": "local_action",
-            "operation": "replace_training_plan",
-            "target_system": "local",
-            "artifact_id": None,
-            "ambiguities": [],
-            "authorization_scope": ["local_plan"],
-            "follow_up_operations": [],
-        }
-        result = server.COACH_TOOL_DISPATCH.service().execute(
-            "replace_training_plan",
-            {
-                "expected_revision": state["planning_revision"],
-                "payload": {
-                    "plan_name": "Replacement",
-                    "goal": "Base",
-                    "workouts": [
-                        {
-                            "date": (
-                                server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
-                            ).isoformat(),
-                            "sport": "Ride",
-                            "name": "New 1",
-                            "description": "- 40m 60% easy",
-                            "duration_minutes": 40,
-                            "target": "AUTO",
-                            "rationale": "Base",
-                        },
-                        {
-                            "date": (
-                                server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
-                            ).isoformat(),
-                            "sport": "Run",
-                            "name": "New 2",
-                            "description": "- 30m 60% easy",
-                            "duration_minutes": 30,
-                            "target": "AUTO",
-                            "rationale": "Base",
-                        },
-                    ],
-                },
-            },
-            intent=intent,
-            conversation_id="conversation-replace",
-            client_turn_id="turn-replace",
-            session_csrf_hash="",
-            sync_job_ids=[],
-        )
-        self.assertEqual(result["status"], "replaced")
-        self.assertEqual(result["archived_count"], 1)
-        self.assertEqual(result["created_count"], 2)
-        self.assertEqual(
-            {item["name"] for item in server.PLANNING_DATA.planned_unit().list()},
-            {"New 1", "New 2"},
-        )
-        archived = next(
-            item
-            for item in server.PLANNING_DATA.planned_unit().list(
-                20, include_archived=True
-            )
-            if item["id"] == old["id"]
-        )
-        self.assertTrue(archived["archived"])
-        self.assertTrue(archived["local_deleted"])
 
     def test_background_coach_job_is_persisted_and_session_scoped(self):
         job = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
@@ -1621,10 +1238,10 @@ class ServerHttpTests(ServerTestCase):
             except AppError as error:
                 errors.append(error)
 
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
         with (
             patch.object(service, "active", side_effect=synchronized_active),
-            patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish"),
+            patch.object(runtime_events.STATE_EVENT_BUFFER, "publish"),
             patch.object(registry, "set_background_event"),
             patch.object(server.COACH_JOB_WORKER.wake_event, "set"),
         ):
@@ -1738,44 +1355,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(context["error_type"], "ConnectionResetError")
         self.assertGreaterEqual(context["response_duration_ms"], 0)
 
-    def test_http_error_response_body_is_closed_after_reading(self):
-        response_body = BytesIO(b'{"error":{"message":"temporary failure"}}')
-        upstream_error = HTTPError(
-            "https://intervals.icu/api/v1/athlete/0",
-            503,
-            "Service Unavailable",
-            {},
-            response_body,
-        )
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "opener",
-                side_effect=upstream_error,
-            ),
-            self.assertRaises(AppError),
-        ):
-            server.PROVIDER_TRANSPORT.json_http_client().request(
-                "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
-            )
-        self.assertTrue(response_body.closed)
-
-    def test_intervals_public_state_reports_sync_health(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            server.key_value_service().set(
-                "last_library_push_at", "2026-08-31T08:00:00+00:00"
-            )
-            state = server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
-        self.assertEqual(state["state"], "connected")
-        self.assertNotIn("last_sync_at", state)
-        self.assertEqual(
-            state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00"
-        )
-        self.assertIsNone(state["last_error"])
-
     def test_intervals_public_state_follows_the_output_stamps(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         keys = (
             "intervals_last_output_ok_at",
             "intervals_last_output_failed_at",
@@ -1792,7 +1373,7 @@ class ServerHttpTests(ServerTestCase):
         def read_state(**stamps):
             for key, value in stamps.items():
                 server.key_value_service().set(f"intervals_last_output_{key}_at", value)
-            with patch.object(server, "CONFIG", config):
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
 
         clear()
@@ -1826,35 +1407,6 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(
             read_state(ok="kaputt", failed="kaputt")["state"], "configured"
         )
-
-    def test_intervals_public_state_reports_library_error(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            server.key_value_service().set(
-                "last_library_sync_error",
-                "Intervals.icu weist die Anfrage zurück (422): Invalid workout type",
-            )
-            state = server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
-        self.assertEqual(state["state"], "error")
-        self.assertIn("422", state["last_error"])
-
-    def test_readiness_is_safe_and_separate_from_liveness(self):
-        with tempfile.TemporaryDirectory() as data_dir:
-            readiness = ReadinessService(
-                server.database_manager,
-                Path(data_dir),
-                runtime_maintenance.MAINTENANCE_GATE,
-            ).state()
-            self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
-        self.assertEqual(readiness["status"], "ready")
-        self.assertTrue(readiness["ready"])
-        self.assertEqual(
-            set(readiness["checks"]),
-            {"database", "schema", "data_directory", "maintenance"},
-        )
-        self.assertNotIn("path", json.dumps(readiness).casefold())
-        self.assertNotIn("athlete", json.dumps(readiness).casefold())
-        self.assertNotIn("password", json.dumps(readiness).casefold())
 
     def test_readiness_handler_composition_preserves_status_and_json_contract(self):
         ready = {
@@ -1892,8 +1444,8 @@ class ServerHttpTests(ServerTestCase):
 
         with (
             patch.object(
-                server,
-                "database_manager",
+                server.APP,
+                "database",
                 side_effect=[original_manager, switched_manager],
             ),
             patch.object(
@@ -1924,7 +1476,7 @@ class ServerHttpTests(ServerTestCase):
             tempfile.TemporaryDirectory() as data_dir,
             patch.object(server, "DATA_DIR", Path(data_dir)),
             patch.object(
-                server, "database_manager", side_effect=OSError("mount unavailable")
+                server.APP, "database", side_effect=OSError("mount unavailable")
             ),
         ):
             self.assertTrue(
@@ -1938,59 +1490,6 @@ class ServerHttpTests(ServerTestCase):
         self.assertFalse(payload["checks"]["database"])
         self.assertFalse(payload["checks"]["schema"])
         self.assertNotIn("mount unavailable", json.dumps(payload))
-
-    def test_readiness_fails_when_data_directory_is_read_only(self):
-        with (
-            tempfile.TemporaryDirectory() as data_dir,
-            patch.object(
-                readiness_module.tempfile,
-                "NamedTemporaryFile",
-                side_effect=OSError("read-only"),
-            ),
-        ):
-            readiness = ReadinessService(
-                server.database_manager,
-                Path(data_dir),
-                runtime_maintenance.MAINTENANCE_GATE,
-            ).state()
-        self.assertEqual(readiness["status"], "not_ready")
-        self.assertFalse(readiness["ready"])
-        self.assertFalse(readiness["checks"]["data_directory"])
-
-    def test_readiness_cleans_up_probe_after_write_failure(self):
-        with tempfile.TemporaryDirectory() as data_dir:
-            named_temporary_file = readiness_module.tempfile.NamedTemporaryFile
-
-            def broken_probe(**kwargs):
-                handle = named_temporary_file(**kwargs)
-
-                class BrokenWriter:
-                    name = handle.name
-
-                    def __enter__(self):
-                        handle.__enter__()
-                        return self
-
-                    def __exit__(self, *args):
-                        return handle.__exit__(*args)
-
-                    def write(self, _content):
-                        raise OSError("probe write failed")
-
-                return BrokenWriter()
-
-            with patch.object(
-                readiness_module.tempfile,
-                "NamedTemporaryFile",
-                side_effect=broken_probe,
-            ):
-                readiness = ReadinessService(
-                    server.database_manager,
-                    Path(data_dir),
-                    runtime_maintenance.MAINTENANCE_GATE,
-                ).state()
-            self.assertFalse(readiness["checks"]["data_directory"])
-            self.assertEqual([], list(Path(data_dir).glob(".readiness-*.probe")))
 
     def test_rate_limit_cleanup_removes_old_bounded_buckets(self):
         limiter = RateLimiter()
@@ -2103,197 +1602,6 @@ class ServerHttpTests(ServerTestCase):
             on_response_id=on_response_id,
         )
 
-    def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(
-        self,
-    ):
-        session_key = "session-stream-test"
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
-            session_key
-        )
-        try:
-            with self.assertRaises(AppError) as duplicate:
-                coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
-            self.assertEqual(duplicate.exception.reason, "chat_already_running")
-            with self.assertRaises(AppError) as raised:
-                server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
-                    session_key, "other-operation"
-                )
-            self.assertEqual(raised.exception.status, 409)
-            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
-                session_key, operation_id
-            )
-            self.assertEqual(result["status"], "cancelling")
-            self.assertTrue(cancel_event.is_set())
-        finally:
-            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
-
-    def test_chat_stream_status_is_scoped_to_the_session(self):
-        session_key = "session-stream-status-test"
-        service = server.COACH_BACKGROUND_JOBS.job_submission_service()
-        self.assertEqual(
-            service.stream_status(session_key), {"status": "idle", "operation_id": None}
-        )
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
-            session_key
-        )
-        try:
-            self.assertEqual(
-                service.stream_status(session_key),
-                {"status": "running", "operation_id": operation_id},
-            )
-            self.assertEqual(
-                service.stream_status("other-session"),
-                {"status": "idle", "operation_id": None},
-            )
-            self.assertFalse(cancel_event.is_set())
-        finally:
-            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
-
-    def test_chat_stream_registry_isolates_sessions_and_preserves_event_order(self):
-        registry = coach_streams.ChatStreamRegistry()
-        first_operation, _ = registry.register("session-one")
-        second_operation, _ = registry.register("session-two")
-        try:
-            self.assertNotEqual(first_operation, second_operation)
-            self.assertIsNone(registry.events("session-two", first_operation))
-            self.assertTrue(registry.publish(first_operation, "delta", {"text": "one"}))
-            self.assertTrue(
-                registry.publish(first_operation, "completed", {"status": "done"})
-            )
-            first_events = registry.events("session-one", first_operation)
-            self.assertEqual(first_events.get_nowait(), ("delta", {"text": "one"}))
-            self.assertEqual(
-                first_events.get_nowait(), ("completed", {"status": "done"})
-            )
-            self.assertFalse(registry.publish("unknown-operation", "error", {}))
-        finally:
-            registry.unregister("session-one", first_operation)
-            registry.unregister("session-two", second_operation)
-        self.assertFalse(
-            registry.publish(first_operation, "delta", {"text": "after detach"})
-        )
-
-    def test_disconnected_chat_stream_continues_and_does_not_cancel_provider_work(self):
-        session_key = "session-stream-disconnect-test"
-        operation_id = "operation-disconnect-test"
-        cancel_event = threading.Event()
-        handler_class = server.HTTP_API.request_handler_class()
-        handler = handler_class.__new__(handler_class)
-        handler.read_json = Mock(
-            return_value={
-                "message": "Bleibt bestehen",
-                "client_turn_id": "turn-disconnect-test",
-            }
-        )
-        handler.connection = Mock()
-        handler.send_sse_headers = Mock()
-        handler.send_sse_event = Mock(side_effect=[None, ClientDisconnected()])
-        events = queue.Queue()
-        events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
-        events.put(("completed", {"message": {"id": 2}}))
-
-        registry = coach_streams.CHAT_STREAM_REGISTRY
-        with (
-            patch.object(
-                registry, "register", return_value=(operation_id, cancel_event)
-            ),
-            patch.object(registry, "unregister") as unregister,
-            patch.object(registry, "events", return_value=events),
-        ):
-            server.HTTP_API.chat_stream_transport.handle(
-                handler, {"csrf_hash": session_key}
-            )
-
-        with server.database_manager().unit_of_work() as db:
-            self.assertIsNotNone(
-                db.execute(
-                    "SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'"
-                ).fetchone()
-            )
-        self.assertFalse(cancel_event.is_set())
-        unregister.assert_called_once_with(session_key, operation_id)
-
-    def test_durable_chat_stream_relays_worker_deltas_and_completion(self):
-        session_key = "session-background-stream-test"
-        operation_id = "operation-background-stream-test"
-        cancel_event = threading.Event()
-        handler_class = server.HTTP_API.request_handler_class()
-        handler = handler_class.__new__(handler_class)
-        handler.read_json = Mock(
-            return_value={
-                "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
-                "client_turn_id": "turn-background-stream-test",
-            }
-        )
-        handler.connection = Mock()
-        handler.send_sse_headers = Mock()
-        handler.send_sse_event = Mock()
-        events = queue.Queue()
-        events.put(("delta", {"text": "Dein Plan "}))
-        events.put(("delta", {"text": "ist fertig."}))
-        events.put(
-            (
-                "completed",
-                {
-                    "status": "completed",
-                    "message": {"id": 2, "content": "Dein Plan ist fertig."},
-                },
-            )
-        )
-
-        registry = coach_streams.CHAT_STREAM_REGISTRY
-        with (
-            patch.object(
-                registry, "register", return_value=(operation_id, cancel_event)
-            ),
-            patch.object(registry, "unregister") as unregister,
-            patch.object(registry, "events", return_value=events),
-        ):
-            server.HTTP_API.chat_stream_transport.handle(
-                handler, {"csrf_hash": session_key}
-            )
-
-        events = [call.args[0] for call in handler.send_sse_event.call_args_list]
-        self.assertEqual(events, ["started", "delta", "delta", "completed"])
-        handler.send_sse_headers.assert_called_once_with(persistent=False)
-        self.assertTrue(handler.close_connection)
-        unregister.assert_called_once_with(session_key, operation_id)
-
-    def test_chat_stream_cancel_closes_the_active_provider_response(self):
-        session_key = "session-stream-close-test"
-        operation_id, cancel_event = coach_streams.CHAT_STREAM_REGISTRY.register(
-            session_key
-        )
-        response = Mock()
-        cancel_event._openai_response = response
-        try:
-            result = server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
-                session_key, operation_id
-            )
-            self.assertEqual(result["status"], "cancelling")
-            response.close.assert_called_once_with()
-            self.assertTrue(cancel_event.is_set())
-        finally:
-            coach_streams.CHAT_STREAM_REGISTRY.unregister(session_key, operation_id)
-
-    def test_chat_queue_is_bounded_instead_of_waiting_indefinitely(self):
-        gate = server.COACH_CONVERSATION_GATE
-        acquired = [gate._queue.acquire(blocking=False) for _ in range(3)]
-        self.assertTrue(all(acquired))
-        try:
-
-            @gate.wrap
-            def queued_operation():
-                return "completed"
-
-            with self.assertRaises(AppError) as raised:
-                queued_operation()
-            self.assertEqual(raised.exception.reason, "chat_queue_full")
-        finally:
-            for was_acquired in acquired:
-                if was_acquired:
-                    gate._queue.release()
-
     def test_public_state_and_usage_workers_do_not_deadlock(self):
         # Reproduce the AB/BA ordering: a state request owns DB_LOCK while a
         # worker starts reading/updating usage, then the request reads usage.
@@ -2371,6 +1679,80 @@ class ServerHttpTests(ServerTestCase):
                             thread.join(timeout=5)
                         self.assertFalse(thread.is_alive())
                         self.assertEqual(errors, [])
+
+    def test_activity_pagination_has_stable_cursor_without_duplicates(self):
+        today = server.ATHLETE_CLOCK.now().date()
+        store_garmin_activities(
+            server,
+            [
+                {
+                    "activityId": f"activity-{index}",
+                    "activityName": f"Activity {index}",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": f"{today.isoformat()} 08:0{index}:00",
+                }
+                for index in range(5)
+            ]
+            + [
+                {
+                    "activityId": "old",
+                    "activityName": "Old",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": "2000-01-01 08:00:00",
+                }
+            ],
+        )
+        service = server.ACTIVITY_READS.activity_read()
+        first = service.page(limit=2, days=1, today=today)
+        second = service.page(first["next_cursor"], 2, 1, today=today)
+        third = service.page(second["next_cursor"], 2, 1, today=today)
+        ids = [
+            item["record_ids"]["garmin"]
+            for page in (first, second, third)
+            for item in page["activities"]
+        ]
+        self.assertEqual(
+            ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]
+        )
+        self.assertIsNone(third["next_cursor"])
+
+    def test_intervals_public_state_adopts_an_export_from_before_the_stamps(self):
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
+        stamps = ("intervals_last_output_ok_at", "intervals_last_output_failed_at")
+
+        def clear():
+            for key in stamps:
+                server.key_value_service().set(key, "")
+            with server.database_manager().unit_of_work() as db:
+                db.execute("DELETE FROM remote_links WHERE provider = 'intervals'")
+
+        def link(local_id, synced_at):
+            with server.database_manager().unit_of_work() as db:
+                db.execute(
+                    "INSERT INTO remote_links(entity_kind, local_id, provider, "
+                    "remote_id, sync_state, last_synced_at) "
+                    "VALUES ('planned_unit', ?, 'intervals', ?, 'synced', ?)",
+                    (local_id, local_id, synced_at),
+                )
+
+        def read_state():
+            with patch.object(server.CONFIG_HOLDER, "value", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        clear()
+        self.addCleanup(clear)
+        link("stamp-old", "2026-10-02T08:00:00+00:00")
+        link("stamp-new", "2026-10-03T08:00:00+00:00")
+        self.assertEqual(read_state()["state"], "configured")
+        # The startup adopts the newest export once; a later failure still wins.
+        server.SYNC_PERSISTENCE.state_repository().adopt_intervals_export_time()
+        state = read_state()
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_used_at"], "2026-10-03T08:00:00+00:00")
+        server.key_value_service().set(
+            "intervals_last_output_failed_at", "2026-10-04T08:00:00+00:00"
+        )
+        self.assertEqual(read_state()["state"], "error")
 
 
 if __name__ == "__main__":

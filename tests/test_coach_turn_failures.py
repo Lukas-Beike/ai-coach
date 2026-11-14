@@ -284,6 +284,53 @@ class CoachTurnFailureTests(unittest.TestCase):
             self.assertIsNone(self.kv.get(db, "coach_pending_request"))
         self.assertEqual(self.events.since()["events"], [])
 
+    def test_response_keeps_confirmed_effects_clarification_and_cancellation(
+        self,
+    ) -> None:
+        saved = {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}}
+        asked = {
+            "tool": "clarify_coach_request",
+            "result": {"ok": True, "question": "Wie fühlst du dich?"},
+        }
+        sync = {
+            "tool": "start_intervals_plan_sync",
+            "result": {"ok": True, "status": "queued"},
+        }
+        status, text, question, cancelled = self.service._response(
+            AppError(429, "Provider limit", reason="rate_limit_exceeded"),
+            [sync],
+            [sync],
+            [],
+            ["start_intervals_plan_sync"],
+        )
+        self.assertEqual((status, question, cancelled), ("partial", None, False))
+        for expected in ("Anfragelimit", "bleibt bestehen", "Noch offen"):
+            self.assertIn(expected, text)
+
+        status, text, question, cancelled = self.service._response(
+            AppError(502, "Provider error", reason="provider_unavailable"),
+            [saved, asked],
+            [saved],
+            [],
+            [],
+        )
+        self.assertEqual(
+            (status, question, cancelled), ("completed", "Wie fühlst du dich?", False)
+        )
+        self.assertTrue(text.startswith("Wie fühlst du dich?"))
+        self.assertIn("Bereits erfolgreich ausgeführt", text)
+
+        status, _, question, cancelled = self.service._response(
+            AppError(499, "Cancelled", reason="chat_cancelled"),
+            [saved, asked],
+            [saved],
+            [],
+            [],
+        )
+        self.assertEqual(
+            (status, question, cancelled), ("partial", "Wie fühlst du dich?", True)
+        )
+
     def test_openai_configuration_failure_explanation(self) -> None:
         for reason, expected in (
             ("openai_not_configured", "OpenAI ist nicht eingerichtet"),

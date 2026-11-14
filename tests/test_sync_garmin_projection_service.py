@@ -408,6 +408,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
             "readiness": {"calendarDate": "2026-09-20", "score": 78},
             "errors": ["", *[secret + "x" * 350 for _ in range(22)]],
             "activities": [{"activityId": 5, "activityName": "private activity"}],
+            "race_predictions": {"5k": 1310},
         }
         battery = {"morning": {"value": 78}}
         service, _ = self._service(snapshot=snapshot, body_battery=battery)
@@ -448,6 +449,8 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertTrue(all(len(error) <= 300 for error in result["errors"]))
         self.assertNotIn(secret, "".join(result["errors"]))
         self.assertNotIn("activities", result)
+        self.assertNotIn("race_predictions", basic)
+        self.assertNotIn("race_predictions", result)
         self.assertNotIn("instruction", result["recovery"]["sleep"])
 
     def test_configured_tokenstore_path_is_checked_without_reading_token_data(self):

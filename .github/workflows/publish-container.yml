@@ -305,16 +305,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two shards for mobile and tablet-landscape (#2536); desktop, the last
-        # job in four of five runs after that, has three (#2616).
+        # Two shards per project (#2536); a third desktop shard did not lower
+        # the measured median (#2616, docs/testing.md).
         include:
           - { project: mobile, shard: 1, shards: 2 }
           - { project: mobile, shard: 2, shards: 2 }
           - { project: tablet-landscape, shard: 1, shards: 2 }
           - { project: tablet-landscape, shard: 2, shards: 2 }
-          - { project: desktop, shard: 1, shards: 3 }
-          - { project: desktop, shard: 2, shards: 3 }
-          - { project: desktop, shard: 3, shards: 3 }
+          - { project: desktop, shard: 1, shards: 2 }
+          - { project: desktop, shard: 2, shards: 2 }
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -416,7 +415,7 @@ jobs:
           fi
           python .github/scripts/aggregate_browser_results.py \
             --results browser-run-summaries \
-            --expected mobile:2 --expected tablet-landscape:2 --expected desktop:3
+            --expected mobile:2 --expected tablet-landscape:2 --expected desktop:2
           echo "All browser projects passed with complete shard evidence."
 
   build-and-push:

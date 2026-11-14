@@ -9,7 +9,7 @@ import unittest
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 from support import dispatch_route
 
@@ -625,7 +625,9 @@ class RouteTests(unittest.TestCase):
         service = Mock()
         service.adopt.return_value = {"profile": {}, "first_threshold_estimate": None}
         profile = Mock(mutation_coordinator=threading.RLock())
-        routes = FirstThresholdPostRoutes(lambda: service, lambda: profile)
+        routes = FirstThresholdPostRoutes(
+            lambda: service, lambda: profile, lambda: MagicMock(), threading.RLock()
+        )
         handler = Mock()
         handler.read_json.return_value = {"percent_lthr": 90.0}
         self.assertTrue(dispatch_route(routes, handler, ADOPT_PATH, method="POST"))

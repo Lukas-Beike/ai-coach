@@ -10,7 +10,9 @@ Needs the repository's Playwright install (`npm ci` and
 come from the session at run time. The secret file must lie in the T3 secret
 folder (`~/.t3/userdata/secrets`) or the system temp directory, and is only
 read; the output directory and the previous walk must lie in the system temp
-directory (the session scratchpad). The script refuses any other path.
+directory (the session scratchpad). The script refuses any other path. Each walk
+needs a fresh output directory: a file already at one of its names stops the
+walk with exit 2.
 
 ```powershell
 node scripts/ui_walk.mjs --url <app address> --password-file <secret file> --out-dir <scratchpad>/walk [--compare <previous walk>/ui-walk.json]
@@ -32,6 +34,14 @@ the repository.
 
 Look at every screenshot yourself; a view can render an error state without a
 console error. Screenshots stay in the scratchpad and are never committed.
+
+To check a change to the walk before a release, walk a disposable demo app
+instead (#2689): start it with
+`powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1 -Name fixture-walk -Port 8092`,
+write the fixture password from the script header to a scratchpad file, walk
+`http://127.0.0.1:8092`, and remove it with the same command plus `-Stop`. It
+uses only synthetic data, never the real data directory, `.env` or the token
+store.
 
 It presses no control that saves, synchronizes, deletes or sends. Exit 0 no
 error, 1 a view logged errors or logout failed, 2 bad input or the walk

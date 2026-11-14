@@ -255,89 +255,81 @@ class CoachJobSubmissionService:
         thinking_level: str,
     ) -> tuple[dict[str, Any] | None, int | None]:
         now = self._utc_now()
-        with self._database_lock:
-            database_manager = self._database_manager()
-            with database_manager.unit_of_work() as db:
-                existing = coach_store.command_row(
-                    db, client_turn_id, "status, receipt"
-                )
-                if existing:
-                    receipt = command_receipt(existing.get("receipt"))
-                    if receipt.get("session_key") != coach_session_key(
-                        session_csrf_hash
-                    ):
-                        raise AppError(
-                            403,
-                            "Dieser Coach-Auftrag gehört zu einer anderen Sitzung.",
-                            reason="command_scope_denied",
-                        )
-                    if receipt.get("mode") != "background":
-                        raise AppError(
-                            409,
-                            "Diese Coach-Nachricht wird bereits verarbeitet.",
-                            reason="client_turn_in_progress",
-                        )
-                    return {
-                        "status": "completed"
-                        if existing.get("status") == "completed"
-                        else "queued",
-                        "mode": "background",
-                        "operation_id": receipt.get("operation_id"),
-                        "plan_scope": receipt.get("plan_scope") or scope,
-                    }, None
-
-                if self._find_active(self._active_rows(db), session_key):
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            existing = coach_store.command_row(db, client_turn_id, "status, receipt")
+            if existing:
+                receipt = command_receipt(existing.get("receipt"))
+                if receipt.get("session_key") != coach_session_key(session_csrf_hash):
+                    raise AppError(
+                        403,
+                        "Dieser Coach-Auftrag gehört zu einer anderen Sitzung.",
+                        reason="command_scope_denied",
+                    )
+                if receipt.get("mode") != "background":
                     raise AppError(
                         409,
-                        "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
-                        reason="chat_already_running",
+                        "Diese Coach-Nachricht wird bereits verarbeitet.",
+                        reason="client_turn_in_progress",
                     )
-
-                user_message = self._chat_repository.add(
-                    db, "user", message, client_turn_id=client_turn_id
-                )
-                attachment_json = json.dumps(
-                    attachments, ensure_ascii=False, separators=(",", ":")
-                )
-                if (
-                    coach_store.stored_attachment_bytes(db)
-                    + len(attachment_json.encode("utf-8"))
-                    > self._max_attachment_storage_bytes
-                ):
-                    raise AppError(
-                        413,
-                        "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
-                        reason="attachment_storage_quota",
-                    )
-                coach_store.set_message_attachments(
-                    db, user_message["id"], attachment_json
-                )
-                receipt = {
-                    "status": "queued",
+                return {
+                    "status": "completed"
+                    if existing.get("status") == "completed"
+                    else "queued",
                     "mode": "background",
-                    "phase": "queued",
-                    "operation_id": operation_id,
-                    "session_key": session_key,
-                    "user_message_id": user_message["id"],
-                    "client_turn_id": client_turn_id,
-                    "plan_scope": scope,
-                    "ai_provider": turn_ai_provider(model),
-                    "model": model,
-                    "thinking_level": thinking_level,
-                    "request_kind": request_kind,
-                }
-                coach_store.insert_command(
-                    db,
-                    uuid.uuid4().hex,
-                    client_turn_id,
-                    None,
-                    # The stored athlete message started this turn, so it may
-                    # write locally; a resume reads this instead of assuming it.
-                    {"allow_mutations": True},
-                    target_system="local",
-                    status="queued",
-                    receipt=receipt,
-                    created_at=now,
-                    updated_at=now,
+                    "operation_id": receipt.get("operation_id"),
+                    "plan_scope": receipt.get("plan_scope") or scope,
+                }, None
+
+            if self._find_active(self._active_rows(db), session_key):
+                raise AppError(
+                    409,
+                    "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
+                    reason="chat_already_running",
                 )
+
+            user_message = self._chat_repository.add(
+                db, "user", message, client_turn_id=client_turn_id
+            )
+            attachment_json = json.dumps(
+                attachments, ensure_ascii=False, separators=(",", ":")
+            )
+            if (
+                coach_store.stored_attachment_bytes(db)
+                + len(attachment_json.encode("utf-8"))
+                > self._max_attachment_storage_bytes
+            ):
+                raise AppError(
+                    413,
+                    "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
+                    reason="attachment_storage_quota",
+                )
+            coach_store.set_message_attachments(db, user_message["id"], attachment_json)
+            receipt = {
+                "status": "queued",
+                "mode": "background",
+                "phase": "queued",
+                "operation_id": operation_id,
+                "session_key": session_key,
+                "user_message_id": user_message["id"],
+                "client_turn_id": client_turn_id,
+                "plan_scope": scope,
+                "ai_provider": turn_ai_provider(model),
+                "model": model,
+                "thinking_level": thinking_level,
+                "request_kind": request_kind,
+            }
+            coach_store.insert_command(
+                db,
+                uuid.uuid4().hex,
+                client_turn_id,
+                None,
+                # The stored athlete message started this turn, so it may
+                # write locally; a resume reads this instead of assuming it.
+                {"allow_mutations": True},
+                target_system="local",
+                status="queued",
+                receipt=receipt,
+                created_at=now,
+                updated_at=now,
+            )
         return None, user_message["id"]

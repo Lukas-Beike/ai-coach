@@ -77,64 +77,80 @@ class ProviderCouplingRatchetTests(unittest.TestCase):
 
 
 class ProviderCouplingScannerTests(unittest.TestCase):
-    def test_icu_identifier_rule_detects_identifiers_outside_adapters(self) -> None:
-        entries = _scan_files(
-            {
-                "backend/planning/sample.py": (
-                    'icu_eftp = 1\nvalue = {"icu_training_load": icu_eftp}\n'
-                )
-            }
-        )
-        self.assertEqual(
-            [
-                ("icu_identifier", "backend/planning/sample.py", "icu_eftp", 2),
+    def test_scanner_reports_each_rule_token_and_count_per_file(self) -> None:
+        # (path, source, [(rule, token, count)])
+        cases = (
+            # Identifiers outside the adapters.
+            (
+                "backend/planning/sample.py",
+                'icu_eftp = 1\nvalue = {"icu_training_load": icu_eftp}\n',
+                [
+                    ("icu_identifier", "icu_eftp", 2),
+                    ("icu_identifier", "icu_training_load", 1),
+                ],
+            ),
+            # Wire keys count only as quoted strings, not in comments.
+            (
+                "backend/performance/sample.py",
                 (
-                    "icu_identifier",
-                    "backend/planning/sample.py",
-                    "icu_training_load",
-                    1,
-                ),
-            ],
-            _summary(entries),
-        )
-
-    def test_garmin_wire_keys_are_detected_only_as_quoted_strings(self) -> None:
-        entries = _scan_files(
-            {
-                "backend/performance/sample.py": (
                     'row.get("calendarDate")\n'
                     "# calendarDate is documented here without quotes\n"
                     "name = 'weeklyAvg'\n"
                     'other = "intervalsOnly"\n'
-                )
-            }
-        )
-        self.assertEqual(
-            [
-                ("garmin_wire_key", "backend/performance/sample.py", "calendarDate", 1),
-                ("garmin_wire_key", "backend/performance/sample.py", "weeklyAvg", 1),
-            ],
-            _summary(entries),
-        )
-
-    def test_provider_literals_match_exact_values_case_insensitively(self) -> None:
-        entries = _scan_files(
-            {
-                "backend/sync/sample.py": (
+                ),
+                [
+                    ("garmin_wire_key", "calendarDate", 1),
+                    ("garmin_wire_key", "weeklyAvg", 1),
+                ],
+            ),
+            # Provider literals match exact values, case-insensitively.
+            (
+                "backend/sync/sample.py",
+                (
                     'source = "Intervals"\n'
                     "other = 'garmin'\n"
                     'same = "GARMIN"\n'
                     'not_exact = "garmin-sync"\n'
+                ),
+                [
+                    ("provider_literal", "garmin", 2),
+                    ("provider_literal", "intervals", 1),
+                ],
+            ),
+            # Python f-strings and implicit concatenation are scanned.
+            (
+                "backend/sync/evasion.py",
+                (
+                    'source = f"garmin"\n'
+                    'other = "gar" "min"\n'
+                    "# 'intervals' is only mentioned in a comment\n"
+                ),
+                [("provider_literal", "garmin", 2)],
+            ),
+            # JavaScript comments do not hide later literals.
+            (
+                "public/app.js",
+                (
+                    "// use ` for code and 'garmin' is mentioned here\n"
+                    'const label = "garmin";\n'
+                    "const tmpl = `tmpl`;\n"
+                    "/* garmin in a block comment */\n"
+                ),
+                [("provider_literal", "garmin", 1)],
+            ),
+            # JavaScript template interpolations are scanned.
+            (
+                "public/app.js",
+                "const t = `${flag ? \"garmin\" : ''}`;\n",
+                [("provider_literal", "garmin", 1)],
+            ),
+        )
+        for path, source, expected in cases:
+            with self.subTest(path=path, source=source):
+                self.assertEqual(
+                    [(rule, path, token, count) for rule, token, count in expected],
+                    _summary(_scan_files({path: source})),
                 )
-            }
-        )
-        self.assertEqual(
-            [
-                ("provider_literal", "backend/sync/sample.py", "garmin", 2),
-                ("provider_literal", "backend/sync/sample.py", "intervals", 1),
-            ],
-            _summary(entries),
-        )
 
     def test_adapters_and_canonical_model_are_allowlisted_for_every_rule(self) -> None:
         provider_source = (
@@ -207,46 +223,6 @@ class ProviderCouplingScannerTests(unittest.TestCase):
             _summary(entries),
         )
 
-    def test_python_f_strings_and_implicit_concatenation_are_scanned(self) -> None:
-        entries = _scan_files(
-            {
-                "backend/sync/evasion.py": (
-                    'source = f"garmin"\n'
-                    'other = "gar" "min"\n'
-                    "# 'intervals' is only mentioned in a comment\n"
-                )
-            }
-        )
-        self.assertEqual(
-            [("provider_literal", "backend/sync/evasion.py", "garmin", 2)],
-            _summary(entries),
-        )
-
-    def test_javascript_comments_do_not_hide_later_literals(self) -> None:
-        entries = _scan_files(
-            {
-                "public/app.js": (
-                    "// use ` for code and 'garmin' is mentioned here\n"
-                    'const label = "garmin";\n'
-                    "const tmpl = `tmpl`;\n"
-                    "/* garmin in a block comment */\n"
-                )
-            }
-        )
-        self.assertEqual(
-            [("provider_literal", "public/app.js", "garmin", 1)],
-            _summary(entries),
-        )
-
-    def test_javascript_template_interpolations_are_scanned(self) -> None:
-        entries = _scan_files(
-            {"public/app.js": "const t = `${flag ? \"garmin\" : ''}`;\n"}
-        )
-        self.assertEqual(
-            [("provider_literal", "public/app.js", "garmin", 1)],
-            _summary(entries),
-        )
-
     def test_missing_source_layout_is_rejected_instead_of_scanning_nothing(
         self,
     ) -> None:
@@ -312,33 +288,61 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
-    def test_relative_field_module_imports_are_resolved(self) -> None:
-        entries = _owner_reads(
-            {
-                "backend/performance/consumer.py": (
+    def test_owner_reads_report_each_rule_token_and_count_per_file(self) -> None:
+        # (path, source, [(rule, token, count)])
+        cases = (
+            # Relative field-module imports are resolved.
+            (
+                "backend/performance/consumer.py",
+                (
                     "from ..providers import garmin_fields\n"
                     "from ..providers.intervals_activity_fields import ACTIVITY_FIELDS\n"
                     "from . import load\n"
                 ),
-            }
-        )
-        self.assertEqual(
-            [
+                [
+                    ("field_module_import", "garmin_fields", 1),
+                    ("field_module_import", "intervals_activity_fields", 1),
+                ],
+            ),
+            # Snapshot keys inside strings are flagged, docstrings are not.
+            (
+                "backend/athlete/consumer.py",
                 (
-                    "field_module_import",
-                    "backend/performance/consumer.py",
-                    "garmin_fields",
-                    1,
+                    '"""Formerly read garmin_snapshot directly."""\n'
+                    "row = db.execute(\n"
+                    "    \"SELECT value FROM kv WHERE key='garmin_snapshot'\"\n"
+                    ").fetchone()\n"
+                    'note = f"intervals_snapshot:{day}"\n'
+                    'unrelated = "garmin_snapshots_total"\n'
                 ),
+                [
+                    ("snapshot_key", "garmin_snapshot", 1),
+                    ("snapshot_key", "intervals_snapshot", 1),
+                ],
+            ),
+            # Aliased and quoted snapshot-reader references are flagged.
+            (
+                "backend/performance/consumer.py",
                 (
-                    "field_module_import",
-                    "backend/performance/consumer.py",
-                    "intervals_activity_fields",
-                    1,
+                    "from backend.sync.state import latest_snapshot as read_raw\n"
+                    'reader = getattr(state, "latest_snapshot")\n'
+                    "raw = read_raw(db)\n"
                 ),
-            ],
-            entries,
+                [("snapshot_key", "latest_snapshot", 2)],
+            ),
+            # Athlete views are in the source-label scope.
+            (
+                "backend/athlete/consumer.py",
+                'item = {"source": "Garmin Connect"}\n',
+                [("source_label", "Garmin Connect", 1)],
+            ),
         )
+        for path, source, expected in cases:
+            with self.subTest(path=path, source=source):
+                self.assertEqual(
+                    [(rule, path, token, count) for rule, token, count in expected],
+                    _owner_reads({path: source}),
+                )
 
     def test_an_allowlisted_file_cannot_import_another_field_module(self) -> None:
         path = "backend/performance/consumer.py"
@@ -398,56 +402,6 @@ class OwnerReadGuardTests(unittest.TestCase):
                     2,
                 ),
                 ("snapshot_key", "server.py", "garmin_snapshot", 1),
-            ],
-            entries,
-        )
-
-    def test_aliased_and_quoted_snapshot_reader_references_are_flagged(self) -> None:
-        entries = _owner_reads(
-            {
-                "backend/performance/consumer.py": (
-                    "from backend.sync.state import latest_snapshot as read_raw\n"
-                    'reader = getattr(state, "latest_snapshot")\n'
-                    "raw = read_raw(db)\n"
-                ),
-            }
-        )
-        self.assertEqual(
-            [
-                (
-                    "snapshot_key",
-                    "backend/performance/consumer.py",
-                    "latest_snapshot",
-                    2,
-                )
-            ],
-            entries,
-        )
-
-    def test_snapshot_keys_embedded_in_strings_are_flagged_but_not_docstrings(
-        self,
-    ) -> None:
-        entries = _owner_reads(
-            {
-                "backend/athlete/consumer.py": (
-                    '"""Formerly read garmin_snapshot directly."""\n'
-                    "row = db.execute(\n"
-                    "    \"SELECT value FROM kv WHERE key='garmin_snapshot'\"\n"
-                    ").fetchone()\n"
-                    'note = f"intervals_snapshot:{day}"\n'
-                    'unrelated = "garmin_snapshots_total"\n'
-                ),
-            }
-        )
-        self.assertEqual(
-            [
-                ("snapshot_key", "backend/athlete/consumer.py", "garmin_snapshot", 1),
-                (
-                    "snapshot_key",
-                    "backend/athlete/consumer.py",
-                    "intervals_snapshot",
-                    1,
-                ),
             ],
             entries,
         )
@@ -571,15 +525,6 @@ class OwnerReadGuardTests(unittest.TestCase):
         self.assertEqual(
             [("legacy_read", "backend/nutrition/gone.py")],
             stale_owner_allowlist(entries, allowlist),
-        )
-
-    def test_athlete_views_are_in_the_source_label_scope(self) -> None:
-        entries = _owner_reads(
-            {"backend/athlete/consumer.py": 'item = {"source": "Garmin Connect"}\n'}
-        )
-        self.assertEqual(
-            [("source_label", "backend/athlete/consumer.py", "Garmin Connect", 1)],
-            entries,
         )
 
     def test_provider_display_names_are_flagged_only_as_exact_labels(self) -> None:

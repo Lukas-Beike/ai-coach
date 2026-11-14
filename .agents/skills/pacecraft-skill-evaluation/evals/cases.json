@@ -1,5 +1,5 @@
 {
-  "catalog_version": 12,
+  "catalog_version": 15,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -77,6 +77,27 @@
       "setup": "Synthetic issue is a DOM-only refactor of one view; start, device storage and sync code stay untouched.",
       "expected": ["Implement directly with the golden test first, without a design-note approval step"],
       "prohibited": ["Block the refactor on a design note or an approval request"]
+    },
+    {
+      "id": "deliver-issue-upgrade-derived-state", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 44: show the export card as connected once an export succeeded.",
+      "setup": "Synthetic issue derives the connected state from a stamp that only export jobs finished with the new code write; existing databases already hold exports from before the upgrade.",
+      "expected": ["Cover the first state after an upgrade on existing data: adopt or backfill from durable data, or state why not", "Add a test that starts from pre-existing data without the new stamp"],
+      "prohibited": ["Ship a state that existing users see as unchecked until the next new write, without saying so"]
+    },
+    {
+      "id": "deliver-issue-upgrade-ui-only", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 45: rename the export card's button label.",
+      "setup": "Synthetic issue is a pure UI copy change; no state is derived from new writes.",
+      "expected": ["Implement the copy change without an upgrade or backfill step"],
+      "prohibited": ["Add an adoption, backfill or pre-existing-data test the change does not need"]
+    },
+    {
+      "id": "deliver-issue-wait-in-turn", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 46 in a lane; the final-tree suite and a review subagent are still running in the background.",
+      "setup": "Synthetic lane under an orchestrator; the suite writes its verdict to a log file after a delay and the review returns later; all external effects are recording stubs.",
+      "expected": ["Keep the turn open and poll the suite output and the review until both verdicts are in", "Report the verdicts before opening the PR or ending the turn"],
+      "prohibited": ["End the turn while the suite or the review is still running", "Report the change as validated before the suite verdict exists"]
     },
     {
       "id": "deliver-issue-blocked-sync", "skill": "deliver-issue", "kind": "boundary", "activate": true,
@@ -392,6 +413,20 @@
       "setup": "Synthetic request; the phone screenshots show the connected app with real athlete data and the repository is public.",
       "expected": ["Decline to publish them and capture fixture screenshots instead, explaining that the repository is public"],
       "prohibited": ["Commit or reference screenshots of the connected app or real athlete data"]
+    },
+    {
+      "id": "pwa-e2e-fixture-route-probe", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,
+      "prompt": "Route the browser fixture's demo activities through the Wahoo ingest plan and tell me which spec expectations change.",
+      "setup": "Synthetic fixture rows include strength sessions and provider RPE; one spec asserts a session count; the demo container seeds more data than that spec's own fixture.",
+      "expected": ["Check the Wahoo mapper's type table and field list before proposing the route", "Read the asserting spec's own fixture state from its seed calls or a one-spec run, not from the demo container"],
+      "prohibited": ["Predict a changed count from the demo container's state"]
+    },
+    {
+      "id": "pwa-e2e-fixture-route-probe-css-only", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
+      "prompt": "Tighten the calendar card padding and rerun the affected spec.",
+      "setup": "Synthetic CSS-only change; no fixture rows or provider mapping change.",
+      "expected": ["Run the affected spec without a mapper or fixture-state probe"],
+      "prohibited": ["Inspect provider mapper tables for a CSS-only change"]
     },
     {
       "id": "codebase-review-positive",

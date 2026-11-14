@@ -12,7 +12,9 @@ from contextlib import contextmanager, nullcontext
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from backend import change_history
 from backend.db import row_factory
 from backend.db.repositories import (
     KeyValueRepository,
@@ -588,6 +590,52 @@ class ReplacementServiceTest(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     service.replace(request)
                 self.assertEqual(self.snapshot(), before)
+
+    def test_plans_left_without_active_units_are_archived_with_history(self):
+        self.plans.create(
+            self.db, "past-plan", "Past", "", "2029-12-01", "2029-12-01", "planned", NOW
+        )
+        self.service.replace(self.request(), selected_plan_id="past-plan")
+        self.add_plan("empty-future")
+        broad = self.make_service(id_factory=lambda: str(uuid.UUID(int=102)))
+        broad.replace(self.request(revision=8, dates=("2030-01-04",)))
+        statuses = {
+            row["id"]: row["status"]
+            for row in self.db.execute("SELECT id, status FROM training_plans")
+        }
+        self.assertEqual(statuses["past-plan"], "archived")
+        self.assertEqual(statuses["empty-future"], "archived")
+        history = self.db.execute(
+            "SELECT before_hash, after_hash FROM change_history WHERE "
+            "entity_type='training_plan' AND entity_id='empty-future' "
+            "AND action='update'"
+        ).fetchone()
+        self.assertNotEqual(history["before_hash"], history["after_hash"])
+
+    def test_archived_and_deleted_units_do_not_block_a_replacement_date(self):
+        self.add_unit(
+            "archived", workout_date="2030-01-03", archived=True, local_deleted=True
+        )
+        calendar = CalendarConflictService(
+            SimpleNamespace(unit_of_work=lambda: nullcontext(self.db)),
+            SimpleNamespace(list_events=lambda *args, **kwargs: []),
+        )
+        result = self.make_service(calendar_conflict_service=calendar).replace(
+            self.request()
+        )
+        self.assertEqual(result["status"], "replaced")
+
+    def test_oversized_history_is_rejected_atomically(self):
+        self.add_plan("old-plan")
+        self.add_unit("old", plan_id="old-plan")
+        before = self.snapshot()
+        with (
+            patch.object(change_history, "MAX_ROWS", 3),
+            self.assertRaises(AppError) as caught,
+        ):
+            self.service.replace(self.request())
+        self.assertEqual(caught.exception.reason, "change_history_limit")
+        self.assertEqual(self.snapshot(), before)
 
     def test_service_has_no_server_provider_or_event_imports(self):
         source_path = Path(inspect.getfile(StructuredTrainingPlanReplacementService))

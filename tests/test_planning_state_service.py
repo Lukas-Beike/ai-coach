@@ -214,6 +214,16 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
             {item["local_id"] for item in result["planned_units"]},
         )
 
+    def test_inactive_rows_are_filtered_before_the_page_limit(self):
+        with self.manager.unit_of_work() as db:
+            self._insert_planned(db, "early", "2026-09-20", "E", archived=True)
+
+        result = self.service.read(limit=2)
+
+        self.assertEqual(
+            ["first", "later"], [item["local_id"] for item in result["planned_units"]]
+        )
+
     def test_today_filter_excludes_past_rows(self):
         with self.manager.unit_of_work() as db:
             self._insert_planned(db, "past", "2026-09-19", "Past")

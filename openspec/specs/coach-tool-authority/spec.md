@@ -353,8 +353,7 @@ Evidence:
 - `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`
 - `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`
 - `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`
-- `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_different_workout_with_same_request`
-- `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`
+- `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_an_invalid_patch_of_another_effect`
 - `tests/test_coach_dialogue.py:test_profile_conflict_repair_does_not_hide_an_independent_field_failure`
 - `tests/test_coach_planning_action_tools.py:CoachPlanningActionToolServiceTests.test_create_undo_with_apply_is_only_offered_as_a_card`
 - `tests/test_coach_planning_action_tools.py:CoachUndoToolPersistenceTests.test_update_undo_with_apply_still_runs_directly`
@@ -660,7 +659,7 @@ Evidence:
 - `backend/coach/training_template_tools.py`
 - `tests/test_coach_athlete_record_tools.py:test_meal_template_tools_require_operation_and_nutrition_scope`
 - `tests/test_coach_athlete_record_tools.py:test_operation_and_scope_denials_block_each_tool`
-- `tests/test_coach_planning_change_tools.py:test_apply_rejects_update_outside_planned_unit_scope`
+- `tests/test_coach_planning_change_tools.py:test_a_wrong_operation_scope_or_changes_are_rejected_before_any_factory`
 - `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`
 
 ### Requirement: CA16 What a remote write binds

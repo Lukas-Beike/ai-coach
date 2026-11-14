@@ -38,24 +38,33 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(AppError):
                 normalize_activity_feedback("one", {"session_rpe": value})
 
-    def test_normalizes_id_and_known_text_fields(self) -> None:
-        result = normalize_activity_feedback(
-            "  activity-1  ",
-            {
-                "activity_name": "  Morning ride  ",
-                "activity_date": "  2026-09-20  ",
-                "notes": "  Felt good  ",
-            },
-        )
-        self.assertEqual(
-            result,
-            {
-                "activity_id": "activity-1",
-                "activity_name": "Morning ride",
-                "activity_date": "2026-09-20",
-                "notes": "Felt good",
-            },
-        )
+    def test_normalizes_id_and_known_text_fields_and_ignores_unknown_ones(self) -> None:
+        empty = {"activity_name": "", "activity_date": "", "notes": ""}
+        for activity_id, payload, expected in (
+            (
+                "  activity-1  ",
+                {
+                    "activity_name": "  Morning ride  ",
+                    "activity_date": "  2026-09-20  ",
+                    "notes": "  Felt good  ",
+                },
+                {
+                    "activity_name": "Morning ride",
+                    "activity_date": "2026-09-20",
+                    "notes": "Felt good",
+                },
+            ),
+            (
+                "activity-1",
+                {"notes": "kept", "unknown": "ignored", "activity_id": "spoofed"},
+                {**empty, "notes": "kept"},
+            ),
+        ):
+            with self.subTest(notes=expected["notes"]):
+                self.assertEqual(
+                    normalize_activity_feedback(activity_id, payload),
+                    {"activity_id": "activity-1", **expected},
+                )
 
     def test_id_and_value_errors_keep_existing_app_errors(self) -> None:
         with self.assertRaises(AppError) as empty_id:
@@ -93,21 +102,7 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(result["activity_date"], "20260920")
         self.assertEqual(len(result["notes"]), ACTIVITY_FEEDBACK_TEXT_LIMITS["notes"])
-
-    def test_unknown_fields_are_ignored(self) -> None:
-        result = normalize_activity_feedback(
-            "activity-1",
-            {"notes": "kept", "unknown": "ignored", "activity_id": "spoofed"},
-        )
-        self.assertEqual(
-            result,
-            {
-                "activity_id": "activity-1",
-                "activity_name": "",
-                "activity_date": "",
-                "notes": "kept",
-            },
-        )
+        self.assertEqual(len(result["notes"]), 4000)
 
     def test_input_is_not_mutated(self) -> None:
         value = {

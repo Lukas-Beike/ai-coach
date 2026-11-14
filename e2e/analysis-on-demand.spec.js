@@ -14,14 +14,15 @@ function trackReportRequests(page) {
   return () => Object.fromEntries(REPORT_PATHS.map((path) => [path, counts.get(path) || 0]));
 }
 
-async function mockReports(page) {
+// pending: answers that the all-time bests are still being read before the first real answer.
+async function mockReports(page, { pending = 0 } = {}) {
   await page.route(`**${ENDURANCE}`, (route) => route.fulfill({ json: { activities: [] } }));
-  await page.route(`**${POWER_PROFILES}`, (route) => route.fulfill({ json: {
-    windows: { "90": { power: [
+  await page.route(`**${POWER_PROFILES}`, (route) => (pending-- > 0 ? route.fulfill({ json: { all_time: { status: "pending" } } }) : route.fulfill({ json: {
+    all_time: { power: [
       ...[5, 60, 300, 1200].map((duration_seconds) => ({ sport: "Ride", duration_seconds, watts: 250, status: "ok", date: "2026-10-01", source: "Intervals.icu" })),
       { sport: "VirtualRide", duration_seconds: 3600, watts: 210, status: "ok", date: "2026-10-02", source: "Intervals.icu" },
-    ] } },
-  } }));
+    ] },
+  } })));
   await page.route(`**${TRAINING_RECORDS}`, (route) => route.fulfill({ json: {
     equipment: { items: [], garmin_items: [] },
   } }));
@@ -38,7 +39,7 @@ async function routeTo(page, hash) {
 }
 
 test("@responsive cycling power profile loads only on performance and keeps unknown durations empty", async ({ page }) => {
-  await mockReports(page);
+  await mockReports(page, { pending: 1 });
   const reportCounts = trackReportRequests(page);
   await waitForInitialState(page);
   expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 0, [TRAINING_RECORDS]: 0 });
@@ -47,11 +48,12 @@ test("@responsive cycling power profile loads only on performance and keeps unkn
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
   await expect(page.locator("#cyclingPowerProfile")).toBeVisible();
   await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
-  await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText("250 W");
-  await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText("210 W");
-  await expect(page.locator("#cyclingPowerProfile")).toContainText("letzte 90 Tage");
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText(["250 W", "01.10.2026"]);
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText(["210 W", "02.10.2026"]);
+  await expect(page.locator("#cyclingPowerProfile")).not.toContainText("90 Tage");
   expect(await page.locator("#cyclingPowerProfile").evaluate((element) => element.closest("[data-analysis-section]").dataset.analysisSection)).toBe("development-Rad");
-  expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
+  // The first answer said the all-time bests were still being read, so the card asked again.
+  expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 2, [TRAINING_RECORDS]: 0 });
 });
 
 test("@responsive cold start on performance fetches only the power profile", async ({ page }) => {

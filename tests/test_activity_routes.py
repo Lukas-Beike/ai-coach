@@ -404,6 +404,19 @@ class StageTests(StageCase):
         self.assertEqual("Strecke 2", other["label"])
         self.assertEqual((1, 1), (other["repeat_index"], other["repeat_count"]))
 
+    def test_a_stored_intervals_track_never_makes_a_route(self) -> None:
+        # Intervals.icu is output only (#1685, #2148): its stored track of a
+        # session is no route input, so the session stays without one.
+        add_outdoor_session(self.manager, 1, loop(seed=1))
+        add_outdoor_session(self.manager, 2, None)
+        add_session_record(self.manager, ProviderId.INTERVALS, "i2", "act_g2")
+        store_track(self.manager, "i2", loop(seed=2), provider=ProviderId.INTERVALS)
+
+        self._run_stage()
+
+        self.assertIsNotNone(self._block("act_g1"))
+        self.assertIsNone(self._block("act_g2"))
+
     def test_tracks_are_decoded_before_the_writer_is_taken(self) -> None:
         # #2311: the worker's prefetch decodes the tracks with a reader.
         add_outdoor_session(self.manager, 1, loop(seed=1))

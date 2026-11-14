@@ -11,13 +11,10 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
-from urllib.error import HTTPError
 
 import intervals_compaction
-import remote_reconcilers
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import SYNCED_AT, snapshot_metrics
 from server_test_support import (
@@ -35,15 +32,15 @@ from support import (
 
 from backend.errors import AppError
 from backend.http_api import server as http_server_module
+from backend.http_api import wiring as http_wiring
 from backend.http_api.static_assets import StaticAssetService
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
-from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
-from backend.sync import garmin_payload_metrics, garmin_service
+from backend.sync import garmin_service
 from backend.sync import queue as sync_queue
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.authority import PlanningAuthorityService
@@ -187,7 +184,7 @@ class ServerSyncTests(ServerTestCase):
         )
         http_server_factory.assert_called_once()
         address, handler_class = http_server_factory.call_args.args
-        self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
+        self.assertEqual(address, ("0.0.0.0", server.CONFIG_HOLDER.value.port))
         self.assertTrue(issubclass(handler_class, BaseHTTPRequestHandler))
         self.assertIsInstance(handler_class.static_asset_service, StaticAssetService)
         self.assertEqual(
@@ -594,7 +591,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set(
             "sync_operation_message", "Daten werden gelesen…"
         )
-        with patch.object(server.PUBLIC_STATE, "state_version_service") as versions:
+        with patch.object(http_wiring, "StateVersionService") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
             status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(status["operation_id"], "operation-test")
@@ -603,36 +600,6 @@ class ServerSyncTests(ServerTestCase):
         bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
-
-    def test_sync_status_projection_is_dependency_light(self):
-        from backend.sync.status import (
-            persist_sync_operation_state,
-            project_sync_status,
-        )
-
-        values = {}
-        persist_sync_operation_state(
-            "operation-test",
-            "running",
-            "fetching",
-            140,
-            "Daten werden gelesen",
-            "secret provider detail",
-            set_values=values.update,
-            redact=lambda value: f"redacted:{value}",
-        )
-        self.assertEqual(values["sync_operation_progress"], "100")
-        self.assertEqual(values["last_sync_error"], "redacted:secret provider detail")
-        status = project_sync_status(
-            running=True,
-            get_value=values.get,
-            state_versions={"activities": "v1"},
-            provider_freshness=[],
-            maintenance={"active": False, "running_operations": 0},
-        )
-        self.assertEqual(status["phase"], "fetching")
-        self.assertEqual(status["state_versions"], {"activities": "v1"})
-        self.assertNotIn("activities", json.dumps(status["message"]))
 
     def test_daily_sync_scheduler_uses_local_provider_markers(self):
         import inspect
@@ -654,11 +621,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("from server", module_source)
         self.assertNotIn("[:10]", daily_scheduler)
 
-    def test_sync_status_exposes_non_sensitive_maintenance_state(self):
-        status = server.PUBLIC_STATE.sync_public_state_service().state()
-        self.assertEqual(set(status["maintenance"]), {"active", "running_operations"})
-        self.assertFalse(status["maintenance"]["active"])
-
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
         server.ATHLETE_DATA.checkin().save({"illness": "Erkältung"})
         preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
@@ -671,7 +633,9 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 server.APP,
@@ -715,56 +679,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["recent_activities"][0]["icu_vo2max"], 52)
         self.assertEqual(result["recent_activities"][0]["vO2MaxValue"], 53)
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
-
-    def test_manual_competition_normalizes_intervals_event_fields(self):
-        competition = planning_competitions.normalize_competition(
-            {
-                "name": "Alpenbrevet",
-                "event_date": "2026-09-20",
-                "starts_at_local": "2026-09-20T06:30",
-                "sport": "Radfahren",
-                "category": "RACE_A",
-                "description": "Lange Bergetappe",
-                "planned_duration_s": "21600",
-                "distance": "250 km",
-                "target": "Finish",
-                "external_id": "alpenbrevet-2026",
-            }
-        )
-        self.assertEqual(competition["event_date"], "2026-09-20")
-        self.assertEqual(competition["starts_at_local"], "2026-09-20T06:30:00")
-        self.assertEqual(competition["category"], "RACE_A")
-        self.assertEqual(competition["planned_duration_s"], 21600)
-        self.assertEqual(competition["distance"], "250000")
-        self.assertEqual(
-            planning_competitions.competition_event_payload(competition)["type"], "Ride"
-        )
-        self.assertEqual(
-            planning_competitions.competition_event_payload(competition)["distance"],
-            250000,
-        )
-
-    def test_remote_competition_updates_all_intervals_event_fields(self):
-        data = planning_competitions.remote_competition_data(
-            {
-                "id": 42,
-                "category": "RACE_C",
-                "starts_at_local": "2026-09-20T07:15:00",
-                "type": "Run",
-                "name": "Remote Race",
-                "description": "Remote description",
-                "planned_duration_s": 7200,
-                "distance": 21097,
-                "target": "Sub 2:00",
-            }
-        )
-        self.assertEqual(data["intervals_event_id"], "42")
-        self.assertEqual(data["category"], "RACE_C")
-        self.assertEqual(data["priority"], "C")
-        self.assertEqual(data["starts_at_local"], "2026-09-20T07:15:00")
-        self.assertEqual(data["planned_duration_s"], 7200)
-        self.assertEqual(data["distance"], "21097")
-        self.assertEqual(data["target"], "Sub 2:00")
 
     def test_max_heart_rate_has_no_intervals_fallback(self):
         snapshot = {
@@ -867,77 +781,6 @@ class ServerSyncTests(ServerTestCase):
         # with the Intervals.icu 280 W.
         self.assertEqual(comparison["average"], 300)
 
-    def test_synced_library_template_must_be_archived_instead_of_deleted(self):
-        entry = remote_reconcilers.library_reconciler(server).reconcile(
-            [
-                {
-                    "id": "remote-1",
-                    "name": "Remote Vorlage",
-                    "type": "Ride",
-                    "description": "Easy ride",
-                }
-            ]
-        )[0]
-        with self.assertRaises(AppError) as error:
-            server.PLANNING_DATA.workout_library().update(
-                entry["id"], {"action": "delete"}
-            )
-        self.assertEqual(error.exception.status, 409)
-        archived = server.PLANNING_DATA.workout_library().update(
-            entry["id"], {"action": "archive"}
-        )
-        self.assertTrue(archived["library_entry"]["archived"])
-
-    def test_existing_intervals_coach_folder_is_reused(self):
-        client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(
-                server.CONFIG,
-                intervals_api_key="test-key",
-                intervals_athlete_id="athlete-1",
-            )
-        )
-        with (
-            patch.object(
-                client,
-                "get",
-                return_value=[{"id": 77, "name": "Intervals Coach", "type": "FOLDER"}],
-            ),
-            patch.object(client, "post", return_value={"id": "remote-1"}) as post,
-        ):
-            payload = planning_workouts.library_workout_payload(
-                {"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}
-            )
-            client.create_library_workouts([payload])
-        post.assert_called_once_with(
-            "/athlete/athlete-1/workouts",
-            {
-                "name": "Easy",
-                "description": "- 30m Z2",
-                "type": "Ride",
-                "folder_id": 77,
-                "target": "AUTO",
-            },
-        )
-
-    def test_pacecraft_folder_wins_over_the_legacy_folder(self):
-        client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(
-                server.CONFIG,
-                intervals_api_key="test-key",
-                intervals_athlete_id="athlete-1",
-            )
-        )
-        folders = [
-            {"id": 77, "name": "Intervals Coach", "type": "FOLDER"},
-            {"id": 9, "name": "Plans", "children": [{"id": 88, "name": "Pacecraft"}]},
-        ]
-        with (
-            patch.object(client, "get", return_value=folders),
-            patch.object(client, "post") as post,
-        ):
-            self.assertEqual(client.get_or_create_workout_folder(), 88)
-        post.assert_not_called()
-
     def test_library_sync_reconciles_remote_template_before_creating(self):
         entry = server.PLANNING_DATA.workout_library().create_local_entry(
             {
@@ -956,7 +799,9 @@ class ServerSyncTests(ServerTestCase):
         }
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 intervals_client_module.IntervalsClient,
@@ -1147,18 +992,6 @@ class ServerSyncTests(ServerTestCase):
                     ],
                 )
 
-    def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
-        observed_at = garmin_payload_metrics.garmin_source_observed_at(
-            {
-                "calendarDate": "invalid-date",
-                "nested": [
-                    {"summaryDate": "2026-09-03"},
-                    {"startTimeGMT": "2026-09-05T06:00:00+00:00"},
-                ],
-            }
-        )
-        self.assertEqual(observed_at, "2026-09-05")
-
     def test_garmin_range_collector_never_exceeds_two_parallel_calls(self):
         from backend.providers.garmin import collect_garmin_data
 
@@ -1202,18 +1035,6 @@ class ServerSyncTests(ServerTestCase):
             redact=lambda value: value,
         )
         self.assertEqual(fake.maximum, 2)
-
-    def test_intervals_collection_rejects_repeated_full_page(self):
-        client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(server.CONFIG, intervals_api_key="test-key")
-        )
-        page = [{"id": f"activity-{index}"} for index in range(500)]
-        with (
-            patch.object(client._api, "get", side_effect=[page, page]),
-            self.assertRaises(AppError) as raised,
-        ):
-            client.get_paged_collection("/athlete/0/activities", {}, "activities")
-        self.assertEqual(raised.exception.status, 502)
 
     def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
         local_id = str(uuid.uuid4())
@@ -1338,7 +1159,9 @@ class ServerSyncTests(ServerTestCase):
         client = RecordedIntervalsClient(recorder)
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 server.APP,
@@ -1372,9 +1195,9 @@ class ServerSyncTests(ServerTestCase):
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
         save_garmin({"old": True})
-        config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
+        config = replace(server.CONFIG_HOLDER.value, garmin_fixture_path="fixture.json")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 garmin_service.GarminSyncService,
                 "sync",
@@ -1390,7 +1213,9 @@ class ServerSyncTests(ServerTestCase):
         errors = []
         try:
             with patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ):
 
                 def attempt_sync():
@@ -1421,8 +1246,10 @@ class ServerSyncTests(ServerTestCase):
             fixture.write_text(
                 json.dumps({"activities": [], "errors": []}), encoding="utf-8"
             )
-            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
-            with patch.object(server, "CONFIG", config):
+            config = replace(
+                server.CONFIG_HOLDER.value, garmin_fixture_path=str(fixture)
+            )
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 result = server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
         self.assertEqual(read_garmin().get("source"), "fixture")
@@ -1480,7 +1307,9 @@ class ServerSyncTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
@@ -1530,7 +1359,9 @@ class ServerSyncTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
@@ -1632,35 +1463,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("activity_eftp_watts", estimates)
         self.assertEqual(estimates["activity_configured_ftp_watts"], 300)
 
-    def test_intervals_validation_error_includes_safe_provider_detail(self):
-        error_body = json.dumps({"error": {"message": "Invalid workout type"}}).encode(
-            "utf-8"
-        )
-        upstream_error = HTTPError(
-            "https://intervals.icu/api/v1/athlete/0/workouts",
-            422,
-            "Unprocessable Entity",
-            {},
-            BytesIO(error_body),
-        )
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "opener",
-                side_effect=upstream_error,
-            ),
-            self.assertRaises(AppError) as raised,
-        ):
-            server.PROVIDER_TRANSPORT.json_http_client().request(
-                "POST",
-                "https://intervals.icu/api/v1/athlete/0/workouts",
-                payload={},
-                service="intervals",
-            )
-        self.assertEqual(raised.exception.status, 502)
-        self.assertIn("422", raised.exception.message)
-        self.assertIn("Invalid workout type", raised.exception.message)
-
     def test_selected_library_sync_is_exact_and_reports_per_object(self):
         first = server.PLANNING_DATA.workout_library().create_local_entry(
             {
@@ -1678,9 +1480,11 @@ class ServerSyncTests(ServerTestCase):
                 "duration_minutes": 20,
             }
         )
-        config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
+        config = replace(
+            server.CONFIG_HOLDER.value, intervals_api_key="fake-intervals-key"
+        )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 WorkoutLibrarySyncService,
                 "sync_entry",
@@ -1709,9 +1513,13 @@ class ServerSyncTests(ServerTestCase):
 
     def test_garmin_sync_persists_fatal_error_status(self):
         config = replace(
-            server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
+            server.CONFIG_HOLDER.value,
+            garmin_fixture_path="missing-garmin-fixture.json",
         )
-        with patch.object(server, "CONFIG", config), self.assertRaises(AppError):
+        with (
+            patch.object(server.CONFIG_HOLDER, "value", config),
+            self.assertRaises(AppError),
+        ):
             server.GARMIN_ASSEMBLY.sync_service().sync()
         state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])
@@ -1729,9 +1537,14 @@ class ServerSyncTests(ServerTestCase):
         )
         for key, active in (("", False), ("synthetic-personal-key", True)):
             config = replace(
-                server.CONFIG, garmin_personal_api_key=key, garmin_fixture_path=""
+                server.CONFIG_HOLDER.value,
+                garmin_personal_api_key=key,
+                garmin_fixture_path="",
             )
-            with self.subTest(key=bool(key)), patch.object(server, "CONFIG", config):
+            with (
+                self.subTest(key=bool(key)),
+                patch.object(server.CONFIG_HOLDER, "value", config),
+            ):
                 self.assertEqual(active, check.active())
                 self.assertIs(
                     server.GARMIN_ASSEMBLY.change_personal_client(),
@@ -1752,39 +1565,6 @@ class ServerSyncTests(ServerTestCase):
             )
         self.assertFalse(markers.is_due("calendar", local_day))
         self.assertTrue(markers.is_due("calendar", local_day + timedelta(hours=1)))
-
-    def test_daily_sync_marker_module_is_dependency_light(self):
-        from backend.sync.daily import (
-            daily_sync_is_due,
-            mark_daily_sync,
-            mark_daily_sync_attempt,
-        )
-
-        values = {}
-        current = datetime(2026, 3, 30, 0, 30, tzinfo=UTC)
-
-        self.assertTrue(daily_sync_is_due("wahoo", current, get_value=values.get))
-        mark_daily_sync("wahoo", current, set_value=values.__setitem__)
-        self.assertEqual(values["sync_wahoo_last_success_at"], current.isoformat())
-        self.assertFalse(daily_sync_is_due("wahoo", current, get_value=values.get))
-        self.assertTrue(
-            daily_sync_is_due(
-                "wahoo", current + timedelta(hours=1), get_value=values.get
-            )
-        )
-        mark_daily_sync_attempt(
-            "wahoo", current + timedelta(hours=2), set_value=values.__setitem__
-        )
-        self.assertFalse(
-            daily_sync_is_due(
-                "wahoo", current + timedelta(hours=2), get_value=values.get
-            )
-        )
-        self.assertTrue(
-            daily_sync_is_due(
-                "wahoo", current + timedelta(hours=3), get_value=values.get
-            )
-        )
 
 
 if __name__ == "__main__":

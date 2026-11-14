@@ -157,6 +157,10 @@ class IssueUpdateTests(unittest.TestCase):
                 },
                 "open PR #5",
             ),
+            (
+                {"body": "## Acceptance criteria\n- [ ] works\n## Parts\n- [ ] two\n"},
+                "open checkbox: two",
+            ),
         ):
             with self.subTest(expect=expect):
                 code, out, _, fake = self.run_script(
@@ -198,6 +202,25 @@ class IssueUpdateTests(unittest.TestCase):
         self.assertIn("#12 was already closed", out)
         self.assertEqual(
             fake.writes(), [["issue", "comment", "12"], ["issue", "edit", "12"]]
+        )
+        # #2691: unticked acceptance criteria do not refuse; the summary covers
+        # them and close ticks them, boxes above the criteria stay unchanged.
+        body = "- [x] done\n## Acceptance criteria\n- [ ] works\r\n* [ ] fast\n"
+        code, _, _, fake = self.run_script(
+            "close", "12", "--body-file", str(self.file), body=body, state="CLOSED"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(  # ticks first: a rerun after a failed edit posts once
+            fake.writes(),
+            [
+                ["issue", "edit", "12"],
+                ["issue", "comment", "12"],
+                ["issue", "edit", "12"],
+            ],
+        )
+        self.assertEqual(
+            fake.edited_body,
+            "- [x] done\n## Acceptance criteria\n- [x] works\r\n* [x] fast\n",
         )
 
     def test_failed_gh_call_exits_2(self):

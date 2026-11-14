@@ -251,6 +251,7 @@ class StartupSyncScheduler:
 
     def schedule(self) -> None:
         """Queue startup work in the provider table's startup rank order."""
+        self._sync_state.adopt_intervals_export_time()
         for provider_id in DEFAULT_PROVIDER_REGISTRY.startup_order():
             policy = self._policies.get(provider_id)
             if policy is not None:

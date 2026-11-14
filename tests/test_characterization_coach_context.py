@@ -29,12 +29,17 @@ from performance_day_support import (
 from backend.canonical.vocabulary import Sport, ZoneConfigurationMetric
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
+    COACH_PLANNED_EVENT_LIMIT,
     CoachIntervalsContextService,
     CoachPerformanceContextReader,
     CoachPlanningContextReader,
     CoachStructuredContextService,
     bounded_coach_context_sections,
+    bounded_coach_context_value,
     coach_context_json_size,
+    compact_coach_activity,
+    compact_coach_local_planned_workouts,
+    future_coach_planned_workouts,
 )
 from backend.coach.context_selection import CoachContextSelection
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
@@ -640,6 +645,66 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
         # Feel is a number in the summary: it passes through, not truncated as text.
         self.assertEqual(row["feel"], 4.0)
 
+    def test_projection_helpers_bound_ids_order_and_size(self) -> None:
+        select = lambda value, fields: {
+            key: value[key] for key in fields if key in value
+        }
+        activity = compact_coach_activity(
+            {"id": "a" * 300, "name": "n" * 300, "secret": "must not pass"},
+            select=select,
+        )
+        self.assertEqual(len(activity["id"]), 200)
+        self.assertNotIn("secret", activity)
+        workouts = compact_coach_local_planned_workouts(
+            [
+                {"id": "2", "date": "2026-09-02", "name": "later"},
+                {"id": "1", "date": "2026-09-01", "name": "earlier"},
+            ],
+            limit=1,
+            select=select,
+        )
+        self.assertEqual([item["id"] for item in workouts], ["1"])
+        bounded = bounded_coach_context_value({"text": "x" * 1000}, 100)
+        self.assertLessEqual(coach_context_json_size(bounded), 100)
+
+    def test_future_planned_workouts_exclude_invalid_and_past_dates(self) -> None:
+        planned = future_coach_planned_workouts(
+            [
+                {"name": "Later", "date": "2026-05-06"},
+                {"name": "Invalid", "date": "not-a-date"},
+                {"name": "Past", "starts_at_local": "2026-05-03"},
+                {"name": "Today", "date": "2026-05-04"},
+            ],
+            TODAY,
+        )
+        self.assertEqual([item["name"] for item in planned], ["Today", "Later"])
+
+    def test_planned_workouts_stop_at_the_event_limit(self) -> None:
+        events = [
+            {"id": f"event-{index}", "name": "Workout", "starts_at_local": "2026-05-05"}
+            for index in range(COACH_PLANNED_EVENT_LIMIT + 5)
+        ]
+        result = CoachIntervalsContextService().project(events, TODAY)
+        self.assertEqual(len(result["planned_workouts"]), COACH_PLANNED_EVENT_LIMIT)
+
+    def test_equal_start_times_and_unclassified_sports_project_deterministically(
+        self,
+    ) -> None:
+        rows = [
+            {"id": "b", "sport": "ride", "name": "B"},
+            {"id": "a", "sport": "ride", "name": "A"},
+            {"id": "other", "sport": "other", "name": "Unclassified"},
+        ]
+        activities = [{**row, "started_at_local": "2026-05-04"} for row in rows]
+        first = CoachIntervalsContextService().project([], TODAY, activities)
+        second = CoachIntervalsContextService().project(
+            [], TODAY, list(reversed(activities))
+        )
+        self.assertEqual(first, second)
+        by_sport = first["recent_activities_by_sport"]
+        self.assertEqual([item["id"] for item in by_sport["Radfahren"]], ["b", "a"])
+        self.assertEqual(by_sport["Sonstiges"][0]["name"], "Unclassified")
+
     def test_activity_without_id_is_kept_without_an_identifier(self) -> None:
         activity = {
             "sport": "run",
@@ -666,7 +731,9 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
                 "date": "2026-05-05",
                 "name": "Date only",
                 "type": "Run",
+                "status": "planned",
                 "description": "private",
+                "athlete_detail": "must not be projected",
                 "target": "T" * 1200,
             },
             {
@@ -684,6 +751,8 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in planned], ["date-only"])
         self.assertNotIn("date", planned[0])
         self.assertNotIn("description", planned[0])
+        self.assertNotIn("athlete_detail", planned[0])
+        self.assertEqual(planned[0]["status"], "planned")
         self.assertEqual(len(planned[0]["target"]), 1000)
 
     def test_synced_at_is_passed_through_and_missing_planned_units_are_empty(

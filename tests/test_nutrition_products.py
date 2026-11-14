@@ -582,6 +582,24 @@ class NutritionProductContractTests(unittest.TestCase):
             "archived",
         )
 
+    def test_archived_products_cannot_be_calculated_or_logged(self):
+        catalog = self.library.product_catalog
+        product = catalog.save_product(
+            self.product_payload(name="Synthetic whey", brand="Synthetic")
+        )
+        catalog.archive_product(product["id"])
+
+        for operation in (
+            lambda: catalog.calculate_product(product["id"], 50, "g"),
+            lambda: self.diary.log_product(product["id"], 50, "g"),
+        ):
+            with (
+                self.subTest(operation=operation),
+                self.assertRaises(AppError) as caught,
+            ):
+                operation()
+            self.assertEqual(caught.exception.reason, "nutrition_product_archived")
+
     def test_product_edit_keeps_extraction_confidence(self):
         saved = self.library.product_catalog.save_product(
             self.product_payload(confidence=0.8)

@@ -982,7 +982,7 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
         config = make_config(
             openai_api_key=api_key, openai_base_url=base_url, openai_model=model
         )
-        stack.enter_context(patch.object(server, "CONFIG", config))
+        stack.enter_context(patch.object(server.CONFIG_HOLDER, "value", config))
         stack.enter_context(isolated_server(server, Path(root)))
         stack.enter_context(canonical_backfill_stopped(server))
         stack.enter_context(metric_export_stopped(server))

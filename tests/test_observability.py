@@ -454,6 +454,8 @@ class ObservabilityTests(unittest.TestCase):
             "invalid key": "secret",
         }
         shape = diagnostic_response_shape(value)
+        self.assertEqual(shape["type"], "object")
+        self.assertNotIn("Ada", json.dumps(shape))
         self.assertEqual(shape["field_count"], 3)
         self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
         self.assertEqual(shape["sample"], {"type": "string", "length": 3})

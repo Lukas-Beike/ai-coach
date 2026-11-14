@@ -203,14 +203,18 @@ class FakeFetch:
         return self.response
 
 
-def store_track(manager: Any, provider_activity_id: str = "g1") -> None:
+def store_track(
+    manager: Any,
+    provider_activity_id: str = "g1",
+    provider: ProviderId = ProviderId.GARMIN,
+) -> None:
     with manager.unit_of_work() as db:
         replace_detail_set(
             db,
             ActivityStreamSet(
                 provider_activity_id=provider_activity_id,
                 provenance=Provenance(
-                    provider=ProviderId.GARMIN,
+                    provider=provider,
                     source_kind=SourceKind.PROVIDER_REPORTED,
                     source_record_id=None,
                     recorded_by=RecordingOrigin.GARMIN,
@@ -356,6 +360,17 @@ class StageTests(StageCase):
         self.assertEqual(
             {"Open-Meteo Modell, Wohnort"}, {r["label"] for r in self._rows()}
         )
+
+    def test_a_stored_intervals_track_is_no_start_position(self) -> None:
+        # Intervals.icu is output only (#1685, #2148): the session is looked up
+        # at home, as if it had no track.
+        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_g1")
+        store_track(self.manager, "i1", ProviderId.INTERVALS)
+        self._run_once()
+        self.assertEqual(
+            [(51.12, 6.57, date(2026, 9, 10), date(2026, 9, 10))], self.fetch.calls
+        )
+        self.assertEqual("home", self.block()["location_kind"])
 
     def test_without_position_and_home_nothing_is_fetched_until_a_home_exists(
         self,

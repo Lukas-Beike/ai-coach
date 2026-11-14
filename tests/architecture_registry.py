@@ -380,9 +380,6 @@ FORBIDDEN_SERVER_SYMBOLS = (
 
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
-        "database_manager",
-        "sync_job_worker",
-        "apply_runtime_config",
         "initialise_database",
         "main",
     }

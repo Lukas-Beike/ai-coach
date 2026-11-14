@@ -35,7 +35,6 @@ class RestoreDependencies:
     validation: DatabaseRestoreValidationService
     backup: DatabaseBackupService
     database_manager: Callable[[], DatabaseManager]
-    database_lock: Any
     maintenance_gate: MaintenanceGate
     profile_mutation_coordinator: Any
     sync_jobs: SyncJobQueueService
@@ -63,12 +62,15 @@ class DatabaseRestoreService:
     def _replace(self, temporary_path: Path) -> str | None:
         database_path = self._dependencies.config.database_path
         previous_backup_name: str | None = None
-        with self._dependencies.database_lock:
-            self._dependencies.backup.checkpoint()
-            with self._dependencies.database_manager().restore_drain():
-                if database_path.exists():
-                    previous_backup_name = self._copy_previous(database_path)
-                self._swap(temporary_path, database_path)
+        # The caller holds the maintenance gate, which refuses new operations and
+        # waits for running ones. restore_drain then waits for every running
+        # writer and reader and makes later ones wait until the swap is done, so
+        # no lock is needed besides the checkpoint's own unit of work.
+        self._dependencies.backup.checkpoint()
+        with self._dependencies.database_manager().restore_drain():
+            if database_path.exists():
+                previous_backup_name = self._copy_previous(database_path)
+            self._swap(temporary_path, database_path)
         return previous_backup_name
 
     def _copy_previous(self, database_path: Path) -> str:

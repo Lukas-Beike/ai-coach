@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -60,6 +61,32 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
+# The tables the fixture ingest fills (#2121); the domain, detail and update
+# paths of the store helpers are pinned by their own store tests.
+CANONICAL_TABLES = (
+    "provider_records",
+    "activity_records",
+    "activity_sessions",
+    "observations",
+)
+# Columns holding generated session ids, which differ on every run.
+GENERATED_IDS = frozenset({"activity_id", "merged_into", "merged_into_retained"})
+# Row digests per table after the fixture ingest and after a re-projection at
+# bumped mapper versions, taken on the code before the helpers were shared.
+PINNED_ROW_DIGESTS = [
+    {
+        "provider_records": "48cd921ba14bafbbb3736ed987ca126497a9728f235880efb63400ce598dbbee",
+        "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
+        "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
+        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+    },
+    {
+        "provider_records": "5aae914b346d01814e28bf563a7f0a913cb0bca0ca0be57216849a3a0af71e52",
+        "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
+        "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
+        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+    },
+]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
 INTERVALS = ProviderId.INTERVALS.value
@@ -1036,9 +1063,8 @@ class ReprojectionTests(BackfillFixture):
         )
         self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 0)
 
-    def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
-        self,
-    ) -> None:
+    def ingest_fixture_records(self) -> Any:
+        """Ingest every fixture record kind with a mapper and link the sessions."""
         snapshot = intervals_fixture_snapshot()
         # Every Intervals.icu record kind with a mapper, the power curve included.
         snapshot["cycling_power_profile"] = {
@@ -1077,6 +1103,41 @@ class ReprojectionTests(BackfillFixture):
                 zone=ZONE,
                 now=NOW,
             )
+        return backfill
+
+    def test_fixture_ingest_and_reprojection_write_the_pinned_rows(self) -> None:
+        # #2121: the shared store row helpers write exactly these rows.
+        backfill = self.ingest_fixture_records()
+        digests = [self.table_digest()]
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(backfill)
+        digests.append(self.table_digest())
+        self.assertEqual(digests, PINNED_ROW_DIGESTS)
+
+    def table_digest(self) -> dict[str, str]:
+        """SHA-256 per table of its rows without generated session ids."""
+        return {
+            table: hashlib.sha256(
+                json.dumps(
+                    sorted(
+                        json.dumps(
+                            {k: v for k, v in row.items() if k not in GENERATED_IDS},
+                            sort_keys=True,
+                        )
+                        for row in self.rows(f"SELECT * FROM {table}")
+                    )
+                ).encode()
+            ).hexdigest()
+            for table in CANONICAL_TABLES
+        }
+
+    def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
+        self,
+    ) -> None:
+        backfill = self.ingest_fixture_records()
         original = self.canonical_snapshot()
 
         bumped = {

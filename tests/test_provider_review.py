@@ -45,10 +45,10 @@ class ProviderReviewTests(unittest.TestCase):
         root = Path(self.directory.name)
         self.patches = [
             patch.object(
-                server,
-                "CONFIG",
+                server.CONFIG_HOLDER,
+                "value",
                 replace(
-                    server.CONFIG,
+                    server.CONFIG_HOLDER.value,
                     app_password="",
                     garmin_fixture_path="",
                     garmin_email="synthetic@example.invalid",
@@ -199,7 +199,9 @@ class ProviderReviewTests(unittest.TestCase):
             with (
                 self.subTest(kind="utf8"),
                 patch.object(
-                    server, "CONFIG", replace(server.CONFIG, app_password=password)
+                    server.CONFIG_HOLDER,
+                    "value",
+                    replace(server.CONFIG_HOLDER.value, app_password=password),
                 ),
                 patch.object(
                     server.app_config, "security_configuration_error", return_value=None
@@ -224,7 +226,11 @@ class ProviderReviewTests(unittest.TestCase):
                 self.assertNotIn(password, error.exception.message)
 
     def manager_for_login(self):
-        with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="")):
+        with patch.object(
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, app_password=""),
+        ):
             return server.database_manager()
 
     def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(
@@ -364,15 +370,18 @@ class ProviderReviewTests(unittest.TestCase):
         for length in (11, 12):
             with (
                 patch.object(
-                    server,
-                    "CONFIG",
-                    replace(server.CONFIG, app_password="\U0001f6b4" * length),
+                    server.CONFIG_HOLDER,
+                    "value",
+                    replace(
+                        server.CONFIG_HOLDER.value, app_password="\U0001f6b4" * length
+                    ),
                 ),
                 patch.object(server, "SQLCIPHER_AVAILABLE", True),
             ):
                 self.assertEqual(
                     server.app_config.security_configuration_error(
-                        server.CONFIG, sqlcipher_available=server.SQLCIPHER_AVAILABLE
+                        server.CONFIG_HOLDER.value,
+                        sqlcipher_available=server.SQLCIPHER_AVAILABLE,
                     )
                     is None,
                     length == 12,
@@ -386,11 +395,11 @@ class ProviderReviewTests(unittest.TestCase):
         DATABASE_MANAGER_CACHE.reset()
         encrypted_path = Path(self.directory.name) / "encrypted.db"
         configured = replace(
-            server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123"
+            server.CONFIG_HOLDER.value, app_password="synthetic-\u00e4-\U0001f6b4-123"
         )
         with (
             patch.object(server, "DB_PATH", encrypted_path),
-            patch.object(server, "CONFIG", configured),
+            patch.object(server.CONFIG_HOLDER, "value", configured),
             patch.object(
                 RateLimiter, "allow", autospec=True, return_value=(True, 0)
             ) as rate_limit,

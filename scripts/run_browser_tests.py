@@ -27,13 +27,22 @@ import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
+# Each run holds an OS lock on <run id>.lock here for its whole life; the OS
+# releases it even when the runner is killed, so a lock file nobody holds marks
+# a run whose containers a later run may remove (#2721).
+LOCK_DIR = Path(tempfile.gettempdir()) / "pacecraft-browser-runs"
+# A sweep leaves younger lock files alone, so a run that has just created its
+# file and not locked it yet never loses it to a parallel sweep.
+LOCK_GRACE_SECONDS = 120
 FAKE_PASSWORD = "e2e-fixture-password-1234"
+# The fixture's other fake credential (e2e/fixture_runtime.py); redacted like the password.
+FAKE_OPENAI_KEY = "e2e-fixture-openai-key"
 MAX_JOBS = 2
 # Chromium's error when the host ran out of socket buffers (seen on Windows Docker
 # hosts). A child whose every failing test names it hit the machine's limits, not a
@@ -42,10 +51,13 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
-    """Safe diagnostics never contain child stdout or provider/environment text.
+    """Diagnostics never contain provider/environment text or credentials.
 
-    The only report text is a failing test's bounded first error line, which CI
-    already publishes with the failure artifacts.
+    Report text is a failing test's bounded first error line; for a failed
+    required tool/container command, its program and subcommand words plus the
+    last 10 lines of its stdout and stderr (#2656); and for a fixture that never
+    got ready, the last 20 lines of each of its log streams (#2674). Every line is
+    cut at 300 characters with the fixture credentials redacted.
     """
 
 
@@ -225,12 +237,15 @@ class Processes:
         self.stop = stop or threading.Event()
         self.lock = threading.Lock()
         self.active = set()
+        # The last captured error output per thread, for `checked` (#2656).
+        self.errors = threading.local()
 
     def run(
         self, command, *, cwd=ROOT, env=None, timeout=60, capture=True, cleanup=False
     ):
         if self.stop.is_set() and not cleanup:
             raise InterruptedError
+        self.errors.last = b""
         options = (
             {
                 "creationflags": subprocess.CREATE_NO_WINDOW
@@ -245,7 +260,7 @@ class Processes:
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
             **options,
         )
         with self.lock:
@@ -254,7 +269,8 @@ class Processes:
         try:
             while True:
                 try:
-                    output, _ = process.communicate(timeout=0.2)
+                    output, error = process.communicate(timeout=0.2)
+                    self.errors.last = error or b""
                     return process.returncode, (output or b"").decode(
                         "utf-8", errors="replace"
                     )
@@ -305,10 +321,34 @@ class Processes:
                 self.terminate(process)
 
 
+def _tail(text, lines=10):
+    """The last lines of a stream, each cut short, with the fixture credentials hidden."""
+    for secret in (FAKE_PASSWORD, FAKE_OPENAI_KEY):
+        text = text.replace(secret, "[redacted]")
+    return [line[:300] for line in text.strip().splitlines()[-lines:]]
+
+
+def _stream_tail(processes, output, lines=10):
+    """The bounded, redacted end of a run's stdout and stderr as message lines."""
+    error = getattr(getattr(processes, "errors", None), "last", b"") or b""
+    tail = _tail(output, lines) + _tail(error.decode("utf-8", errors="replace"), lines)
+    return "".join(f"\n{line}" for line in tail)
+
+
 def checked(processes, command, **kwargs):
     code, output = processes.run(command, **kwargs)
     if code:
-        raise RunnerError(f"Required tool/container command failed (exit {code})")
+        # Name the program and its subcommand words only (no options, paths or
+        # scripts) and show the end of each stream, so a failure is visible (#2656).
+        words = [Path(str(command[0])).name]
+        for word in map(str, command[1:4]):
+            if word.startswith("-") or "/" in word or "\\" in word or "\n" in word:
+                break
+            words.append(word)
+        raise RunnerError(
+            f"Required tool/container command failed (exit {code}): {' '.join(words)}"
+            + _stream_tail(processes, output)
+        )
     return output
 
 
@@ -567,6 +607,96 @@ class Containers:
             except RunnerError, OSError:
                 errors.append("Owned container cleanup failed")
         return errors
+
+
+def _lock(handle, take=True):
+    """Take (non-blocking) or drop the exclusive lock of an open run lock file."""
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            mode = msvcrt.LK_NBLCK if take else msvcrt.LK_UNLCK
+            msvcrt.locking(handle.fileno(), mode, 1)
+        else:
+            import fcntl
+
+            flags = fcntl.LOCK_EX | fcntl.LOCK_NB if take else fcntl.LOCK_UN
+            fcntl.flock(handle.fileno(), flags)
+    except OSError:
+        return False
+    return True
+
+
+def hold_run_lock(run_id):
+    """Hold this run's lock file until release_run_lock or the process ends."""
+    LOCK_DIR.mkdir(exist_ok=True)
+    path = LOCK_DIR / f"{run_id}.lock"
+    for _ in range(5):
+        handle = path.open("a+b")
+        # A write refreshes the file time that the sweep's grace period reads.
+        handle.write(b"1")
+        handle.flush()
+        if _lock(handle):
+            # The locked file must still be the one at the path: a sweep may
+            # have unlinked it between our open and lock.
+            with suppress(FileNotFoundError):
+                if os.path.samestat(os.fstat(handle.fileno()), path.stat()):
+                    return handle
+            _lock(handle, take=False)
+        handle.close()
+        time.sleep(0.2)
+    raise RunnerError("Browser run lock unavailable")
+
+
+def release_run_lock(handle, run_id):
+    _lock(handle, take=False)
+    handle.close()
+    # A leftover unheld file is harmless: the next sweep removes it.
+    with suppress(OSError):
+        (LOCK_DIR / f"{run_id}.lock").unlink(missing_ok=True)
+
+
+def sweep_stale(processes):
+    """Remove the containers of runs whose lock nobody holds any more (#2721).
+
+    Best effort: a failure leaves the lock file for the next sweep and never
+    stops the calling run. Runs without a lock file (older runners, another
+    host or namespace) are never touched; network namespaces go last.
+    """
+    removed = 0
+    for path in sorted(LOCK_DIR.glob("*.lock")) if LOCK_DIR.is_dir() else []:
+        if not re.fullmatch(r"[a-f0-9]{32}", path.stem):
+            continue
+        with suppress(OSError):
+            if time.time() - path.stat().st_mtime < LOCK_GRACE_SECONDS:
+                continue
+        with path.open("a+b") as handle:
+            if not _lock(handle):
+                continue  # a live run holds it
+            try:
+                code, rows = processes.run(
+                    ["docker", "ps", "-a", "--filter", f"label={LABEL}={path.stem}",
+                     "--format", "{{.ID}} {{.Names}}"],
+                    cleanup=True,
+                )  # fmt: skip
+                found = sorted(
+                    (name.find("-net-") >= 0, name, cid)
+                    for cid, _, name in (row.partition(" ") for row in rows.split("\n"))
+                    if re.fullmatch(r"[a-f0-9]{12,64}", cid)
+                )
+                if code == 0 and found:
+                    code, _ = processes.run(
+                        ["docker", "rm", "--force", *(cid for *_, cid in found)],
+                        cleanup=True,
+                    )
+            except RunnerError, OSError:
+                code = 1
+            _lock(handle, take=False)
+        if code == 0:
+            removed += len(found)
+            path.unlink(missing_ok=True)
+    return removed
 
 
 def image_identity(processes, image):
@@ -1060,6 +1190,24 @@ class Execution:
                 child, ended_at=stamp(), elapsed_seconds=time.monotonic() - started
             )
 
+    def await_ready(self, slot, cid):
+        """Wait for a fixture; if it never gets ready, show its last log lines,
+        bounded and redacted (#2674). A failed log read keeps the original error."""
+        try:
+            ready(self.slots[slot][1], self.processes.stop)
+        except RunnerError as error:
+            try:
+                code, output = self.processes.run(
+                    ["docker", "logs", "--tail", "20", cid], timeout=15
+                )
+            except RunnerError, OSError, InterruptedError:
+                raise error from None
+            if code:
+                raise
+            raise RunnerError(
+                str(error) + _stream_tail(self.processes, output, 20)
+            ) from None
+
     def lane(self, index, children):
         if not children:
             return
@@ -1068,7 +1216,7 @@ class Execution:
             for offset, child in enumerate(children):
                 slot = index * 2 + offset % 2
                 wait_started = time.monotonic()
-                ready(self.slots[slot][1], self.processes.stop)
+                self.await_ready(slot, current)
                 child["phases"]["readiness_wait_seconds"] = (
                     time.monotonic() - wait_started
                 )
@@ -1184,6 +1332,11 @@ def parser():
         action="store_true",
         help="resolve identical selection without Docker/browser fixtures",
     )
+    result.add_argument(
+        "--cleanup-stale",
+        action="store_true",
+        help="only remove the containers of browser runs whose runner is gone",
+    )
     return result
 
 
@@ -1219,6 +1372,10 @@ def main(argv=None):
     if args.print_image:
         print(args.image)
         return 0
+    if args.cleanup_stale:
+        removed = sweep_stale(Processes())
+        print(f"Removed {removed} container(s) of stopped browser runs")
+        return 0
     if not args.project:
         parser().error("--project is required")
     run_id = uuid.uuid4().hex
@@ -1232,6 +1389,7 @@ def main(argv=None):
         flush=True,
     )
     processes = Processes()
+    run_lock = hold_run_lock(run_id)
     started = time.monotonic()
     old_handlers = {}
 
@@ -1315,6 +1473,7 @@ def main(argv=None):
                     code = 0
                 else:
                     with evidence.phase("prerequisites"):
+                        evidence.update(stale_containers_removed=sweep_stale(processes))
                         image = image_identity(processes, args.image)
                         current = image_matches_source(
                             processes, containers, image, ROOT
@@ -1409,6 +1568,7 @@ def main(argv=None):
         if isinstance(error, RunnerError):
             print("Browser run failed: " + str(error), file=sys.stderr, flush=True)
     finally:
+        release_run_lock(run_lock, run_id)
         for number, handler in old_handlers.items():
             signal.signal(number, handler)
         if evidence.data["status"] != "interrupted":

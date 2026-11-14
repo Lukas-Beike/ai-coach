@@ -377,6 +377,46 @@ def _canonical_stdlib_violations(package_root: Path) -> list[str]:
     return sorted(violations)
 
 
+DATABASE_LOCK_NAMES = frozenset(
+    {"database_lock", "_database_lock", "_db_lock", "DB_LOCK", "DATABASE_LOCK"}
+)
+UNIT_OF_WORK_NAMES = frozenset({"unit_of_work", "reader", "read_snapshot"})
+
+
+def _lock_without_unit_of_work(source: str, relative: str) -> list[str]:
+    """Return ``with`` statements naming the database lock but no unit of work.
+
+    It matches the lock by these names only: a lock held through a local alias
+    (``lock = ...``), a guard callable or a bare ``acquire()`` is not seen.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.With, ast.AsyncWith)):
+            continue
+        names = {
+            name
+            for item in node.items
+            for part in ast.walk(item.context_expr)
+            if (name := part.id if isinstance(part, ast.Name) else None)
+            or (name := part.attr if isinstance(part, ast.Attribute) else None)
+        }
+        if names & DATABASE_LOCK_NAMES and not names & UNIT_OF_WORK_NAMES:
+            found.append(f"{relative}:{node.lineno}")
+    return found
+
+
+def _database_lock_violations(root: Path) -> list[str]:
+    paths = [*sorted((root / "backend").rglob("*.py")), root / "server.py"]
+    return [
+        site
+        for path in paths
+        if path.is_file()
+        for site in _lock_without_unit_of_work(
+            path.read_text(encoding="utf-8"), path.relative_to(root).as_posix()
+        )
+    ]
+
+
 class BackendLayerContractTests(unittest.TestCase):
     def test_athlete_has_no_domain_package_dependencies(self) -> None:
         self.assertEqual(
@@ -668,6 +708,25 @@ class BackendLayerContractTests(unittest.TestCase):
                 _import_violations(root),
             )
 
+    def test_database_lock_is_always_paired_with_a_unit_of_work(self) -> None:
+        self.assertEqual([], _database_lock_violations(REPOSITORY_ROOT))
+
+    def test_database_lock_guard_detects_unpaired_with_statements(self) -> None:
+        source = (
+            "def f(self, m):\n"
+            "    with self._database_lock:\n"
+            "        pass\n"
+            "    with self._database_lock(), m.unit_of_work():\n"
+            "        pass\n"
+            "    with a, self._database_lock or nullcontext():\n"
+            "        pass\n"
+            "    with DB_LOCK, m.reader():\n"
+            "        pass\n"
+        )
+        self.assertEqual(
+            ["x.py:2", "x.py:6"], _lock_without_unit_of_work(source, "x.py")
+        )
+
     def test_http_sql_execute_sites_match_pending_baseline(self) -> None:
         calls = _http_execute_calls(REPOSITORY_ROOT)
         self.assertEqual(
@@ -696,6 +755,17 @@ class BackendLayerContractTests(unittest.TestCase):
                 "backend/db/coach_store.py",
                 "backend/db/repositories.py",
                 "backend/db/bootstrap.py",
+                "backend/db/schema.py",
+            },
+        )
+        # #2120: the sync domain owns its job tables. The export keeps its column
+        # lists, which the export coverage test scans; the dialogue scope check and
+        # the privacy purge name tables in catalogues, not statements.
+        self._assert_only_in(
+            r"(?i:sync_jobs|sync_job_items)",
+            {
+                "backend/sync/jobs.py",
+                "backend/backup/export.py",
                 "backend/db/schema.py",
             },
         )

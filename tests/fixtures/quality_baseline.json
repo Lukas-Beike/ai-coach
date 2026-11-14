@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "396b68d52428ced14527d99614e351ebd8188e87",
+  "base": "6e19694d5e7c54d373c011f6796181f34ab2727d",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -521,12 +521,6 @@
       "path": "tests/test_planning_competitions.py",
       "code": "arg-type",
       "message_sha256": "6bdfc527ea2aa8643aa6c1dd61c05ab2d2aa7585b9e9bd8a949be56564aebc74"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/assembly.py",
-      "code": "arg-type",
-      "message_sha256": "6e2a1d5f101c98ee36bc390fe96e5331bf2154a28467c6d499d7a3153e35cda9"
     },
     {
       "tool": "mypy",
@@ -1133,12 +1127,6 @@
       "path": "tests/test_coach_tool_preparation.py",
       "code": "index",
       "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
-    },
-    {
-      "tool": "mypy",
-      "path": "e2e/fixture_runtime.py",
-      "code": "method-assign",
-      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
     },
     {
       "tool": "mypy",

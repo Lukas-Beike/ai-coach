@@ -17,6 +17,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from backend.config import Config
 from backend.errors import DatabaseBusyError
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
@@ -613,3 +614,55 @@ class DatabaseManagerCache:
 
 
 DATABASE_MANAGER_CACHE = DatabaseManagerCache()
+
+
+class DatabaseHolder:
+    """The live database manager for the active path and security configuration.
+
+    Callable: every use reads the data directory, path, configuration and cipher
+    availability again, so a credential swap, a restore or a changed path opens
+    the matching manager and none of the holders' users caches one.
+    """
+
+    def __init__(
+        self,
+        *,
+        data_dir: Callable[[], Path],
+        database_path: Callable[[], Path],
+        config: Callable[[], Config],
+        sqlcipher_available: Callable[[], bool],
+        encrypted_backend: Any,
+        plain_backend: Any,
+        configure: Callable[[Any, str], None],
+        row_factory: Callable[[Any, tuple[Any, ...]], Any],
+    ) -> None:
+        self._data_dir = data_dir
+        self._database_path = database_path
+        self._config = config
+        self._sqlcipher_available = sqlcipher_available
+        self._encrypted_backend = encrypted_backend
+        self._plain_backend = plain_backend
+        self._configure = configure
+        self._row_factory = row_factory
+
+    def __call__(self) -> DatabaseManager:
+        self._data_dir().mkdir(parents=True, exist_ok=True)
+        path = self._database_path()
+        password = self._config().app_password
+        available = self._sqlcipher_available()
+        if password and not available:
+            DATABASE_MANAGER_CACHE.reset()
+            raise RuntimeError(
+                "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
+            )
+        return DATABASE_MANAGER_CACHE.get(
+            (str(path.resolve()), password, available),
+            path,
+            self._encrypted_backend if password else self._plain_backend,
+            password=password,
+            configure=self._configure,
+            row_factory=self._row_factory,
+            reader_count=4,
+            timeout=20,
+            persist_connections=bool(password),
+        )

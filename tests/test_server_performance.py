@@ -7,35 +7,22 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import intervals_compaction
-from canonical_recovery_support import RecordingReader, recovery_only_inputs
+from canonical_recovery_support import RecordingReader
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
     SYNCED_AT,
     canonical_from_snapshot,
     garmin_metrics_from_payload,
-    snapshot_metrics,
 )
-from server_test_support import (
-    ServerTestCase,
-    _current_performance_context,
-    _garmin_metrics,
-    server,
-)
-from support import (
-    complete_canonical_backfill,
-    store_garmin_activities,
-)
+from server_test_support import ServerTestCase, _current_performance_context, server
+from support import store_garmin_activities
 
-from backend.performance import activity_validation
 from backend.performance import context as performance_context
-from backend.performance import load as performance_load
-from backend.performance import morning_battery as performance_morning_battery
 from backend.performance import planning_recovery as performance_planning_recovery
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.providers import garmin as garmin_provider
 from backend.runtime import clock as runtime_clock
-from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
 
 
@@ -74,319 +61,6 @@ class ServerPerformanceTests(ServerTestCase):
         load = result["performance"]["history"]["session_rpe_load"]
         self.assertEqual(load["totals"]["value"], 300.0)
         self.assertIsNotNone(load["computed_at"])
-
-    def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
-        latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
-        earlier = latest - timedelta(days=1)
-        save_garmin(
-            {
-                # Canonical reads (#1416): a fetch time lets the canonical rows exist.
-                "synced_at": runtime_clock.utc_now(),
-                "sleep": [
-                    {
-                        "calendarDate": earlier.isoformat(),
-                        "sleepTimeSeconds": 25200,
-                        "sleepScore": 70,
-                    },
-                    {
-                        "calendarDate": latest.isoformat(),
-                        "sleepTimeSeconds": 27000,
-                        "sleepScore": 82,
-                    },
-                ],
-                "hrv": [
-                    {"calendarDate": earlier.isoformat(), "weeklyAvg": 51},
-                    {
-                        "calendarDate": latest.isoformat(),
-                        "weeklyAvg": 54,
-                        "lastNightAvg": 57,
-                    },
-                ],
-                "readiness": {
-                    "calendarDate": latest.isoformat(),
-                    "score": 78,
-                    "level": "GREEN",
-                },
-                "body_battery": [
-                    {"calendarDate": latest.isoformat(), "charged": 76, "drained": 31}
-                ],
-                "activities": [{"activityId": 1, "activityName": "Should not be sent"}],
-                "race_predictions": {"5k": 1310},
-            }
-        )
-        complete_canonical_backfill(server)
-        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
-        # Canonical reads (#1416): the latest canonical record, neutral fields.
-        self.assertEqual(
-            result["recovery"]["sleep"],
-            {"date": latest.isoformat(), "sleep_seconds": 27000, "sleep_score": 82},
-        )
-        self.assertEqual(result["recovery"]["hrv"]["last_night_avg_ms"], 57)
-        self.assertEqual(result["recovery"]["hrv"]["weekly_avg_ms"], 54)
-        self.assertEqual(
-            result["recovery"]["readiness"],
-            {"date": latest.isoformat(), "score": 78, "level": "GREEN"},
-        )
-        self.assertNotIn("activities", result)
-        self.assertNotIn("performance", result)
-        self.assertNotIn("race_predictions", result)
-
-    def test_garmin_coach_context_extracts_nested_latest_recovery_record(self):
-        # Canonical reads (#1416): the recovery window ends today and the rows need
-        # a fetch time, so the record is dated yesterday.
-        day = (server.ATHLETE_CLOCK.now().date() - timedelta(days=1)).isoformat()
-        save_garmin(
-            {
-                "synced_at": runtime_clock.utc_now(),
-                "sleep": [
-                    {
-                        "id": "wrapper-z",
-                        "dailySleepDTO": {
-                            "calendarDate": day,
-                            "sleepTimeSeconds": 27000,
-                            "sleepScore": 82,
-                        },
-                    }
-                ],
-                "readiness": {
-                    "trainingReadiness": {
-                        "calendarDate": day,
-                        "trainingReadinessScore": 78,
-                    }
-                },
-            }
-        )
-
-        complete_canonical_backfill(server)
-        result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
-
-        # Canonical reads (#1416): the mapper reads the nested sleep record; the
-        # synthetic "trainingReadiness" wrapper maps to no observation, so the
-        # readiness section stays empty instead of showing the raw record.
-        self.assertEqual(result["recovery"]["sleep"]["sleep_score"], 82)
-        self.assertEqual(result["recovery"]["readiness"], {})
-
-    def test_garmin_performance_metrics_are_normalized_and_source_marked(self):
-        result = _garmin_metrics(
-            {
-                "max_metrics": {
-                    "running": {"vo2MaxPreciseValue": 57.4},
-                    "cycling": {"vo2MaxValue": 61},
-                },
-                "race_predictions": {
-                    "racePredictions": [
-                        {"raceDistance": "5K", "raceTime": 1310},
-                        {"raceDistance": "halfMarathon", "raceTime": "01:42:30"},
-                    ],
-                    "10k": {"predictedTime": 2740},
-                },
-            }
-        )
-        self.assertEqual(
-            result["running_vo2max_ml_kg_min"],
-            {
-                "value": 57.4,
-                "unit": "ml/kg/min",
-                "source": "Garmin Connect",
-                "source_provider": "garmin",
-                "note": "Garmin Connect max metrics",
-                "freshness": "unknown",
-                "fetched_at": None,
-                "observed_at": None,
-                "measurement_status": "unknown",
-                "measurement_age_days": None,
-            },
-        )
-        self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 61)
-        self.assertEqual(result["run_5k_seconds"]["value"], 1310)
-        self.assertEqual(result["run_10k_seconds"]["value"], 2740)
-        self.assertEqual(result["run_half_marathon_seconds"]["value"], 6150)
-        self.assertEqual(result["run_5k_seconds"]["source"], "Garmin Connect")
-
-    def test_garmin_duration_parser_normalizes_colon_delimited_times(self):
-        self.assertEqual(
-            garmin_payload_metrics.garmin_duration_seconds("01:42:30"), 6150
-        )
-        self.assertEqual(garmin_payload_metrics.garmin_duration_seconds("42:30"), 2550)
-        self.assertIsNone(garmin_payload_metrics.garmin_duration_seconds("01:02:03:04"))
-        self.assertIsNone(garmin_payload_metrics.garmin_duration_seconds("00:00"))
-
-    def test_garmin_values_have_priority_in_performance_metrics(self):
-        save_garmin(
-            {
-                "max_metrics": {"running": {"vo2Max": 55}},
-                "race_predictions": {"5k": 1320},
-            }
-        )
-        snapshot = {
-            "athlete": {"sport_settings": [{"types": ["Run"], "vo2max": 48}]},
-            "recent_activities": [],
-            "recent_wellness": [],
-        }
-        metrics = snapshot_metrics(
-            snapshot,
-            server.ATHLETE_DATA.profile().get(),
-            _garmin_metrics(read_garmin()),
-        )
-        self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
-        self.assertEqual(
-            metrics["running_vo2max_ml_kg_min"]["source"], "Garmin Connect"
-        )
-        self.assertEqual(metrics["run_5k_seconds"]["value"], 1320)
-
-    def test_garmin_uses_latest_vo2max_value_from_range_payload(self):
-        result = _garmin_metrics(
-            {
-                "max_metrics": [
-                    {"generic": {"vo2MaxValue": 51}},
-                    {"generic": {"vo2MaxValue": 55}},
-                ],
-            }
-        )
-        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 55)
-
-    def test_garmin_extracts_weight_and_sport_specific_max_heart_rate(self):
-        result = _garmin_metrics(
-            {
-                "weight": {
-                    "dailyWeightSummaries": [
-                        {
-                            "summaryDate": "2026-08-28",
-                            "latestWeight": {"weight": 73500},
-                        },
-                        {
-                            "summaryDate": "2026-08-29",
-                            "latestWeight": {"weight": 72800},
-                        },
-                    ]
-                },
-                "activities": [
-                    {"activityType": "cycling", "maxHR": 181},
-                    {"activityType": "running", "maxHeartRate": 194},
-                ],
-            }
-        )
-        self.assertEqual(result["weight_kg"]["value"], 72.8)
-        # Activity maxima are a read-time fallback over canonical records (#1686).
-        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
-        self.assertIsNone(result["running_max_hr_bpm"]["value"])
-        self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
-
-    def test_garmin_profile_max_heart_rate_overrides_activity_values(self):
-        zones = [{"sport": "DEFAULT", "maxHeartRateUsed": 186}]
-        metrics = _garmin_metrics(
-            {
-                "heart_rate_zones": zones,
-                "sport_max_hr": {"cycling": 178, "running": 181},
-                "activities": [
-                    {"activityType": "cycling", "maxHR": 178},
-                    {"activityType": "running", "maxHR": 181},
-                ],
-            }
-        )
-        self.assertEqual(
-            garmin_payload_metrics.garmin_profile_max_hr({"heart_rate_zones": zones}),
-            {"generic": 186},
-        )
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 186)
-        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 186)
-        self.assertEqual(
-            metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen"
-        )
-
-    def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
-        save_garmin(
-            {
-                "cycling_ftp": {"functionalThresholdPower": 302},
-                "running_threshold": {
-                    "speed_and_heart_rate": {
-                        "speed": 3.8,
-                        "heartRate": 176,
-                        "heartRateCycling": 169,
-                    },
-                    "power": {"functionalThresholdPower": 328},
-                },
-            }
-        )
-        snapshot = {
-            "athlete": {
-                "icu_ftp": 250,
-                "sport_settings": [
-                    {"types": ["Ride"], "ftp": 250, "eftp": 260, "lthr": 160},
-                    {"types": ["Run"], "ftp": 280, "threshold_pace": 4.0, "lthr": 165},
-                ],
-            },
-            "recent_activities": [],
-            # A wellness day (without values) lets the canonical inputs read the
-            # athlete record.
-            "recent_wellness": [{"id": server.ATHLETE_CLOCK.now().date().isoformat()}],
-        }
-        metrics = snapshot_metrics(
-            snapshot,
-            server.ATHLETE_DATA.profile().get(),
-            _garmin_metrics(read_garmin()),
-            canonical=recovery_only_inputs(snapshot=snapshot).current,
-        )
-        # Garmin's FTP is the value; the Intervals.icu setting is no source.
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
-        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
-        self.assertNotIn("alternatives", metrics["cycling_ftp_watts"])
-        # Intervals.icu eFTP is no longer read (#1727).
-        self.assertNotIn("cycling_eftp_watts", metrics)
-        self.assertEqual(metrics["run_threshold_watts"]["value"], 328)
-        self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 263)
-        self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 169)
-        self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 176)
-
-    def test_garmin_threshold_pace_accepts_speed_alias_and_clock_format(self):
-        for key, value, expected in (
-            ("speedInMetersPerSecond", 3.8, 263),
-            ("thresholdPace", "4:27", 267),
-            ("speed", 0.35833233, 279),
-        ):
-            metrics = _garmin_metrics({"running_threshold": {key: value}})
-            self.assertEqual(
-                metrics["run_threshold_pace_seconds_per_km"]["value"], expected
-            )
-            self.assertEqual(
-                metrics["run_threshold_pace_seconds_per_km"]["source"], "Garmin Connect"
-            )
-
-    def test_garmin_recovery_values_take_precedence_and_keep_provenance(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        save_garmin(
-            {
-                "sleep": [
-                    {
-                        "id": "sleep-wrapper",
-                        "dailySleepDTO": {
-                            "calendarDate": today,
-                            "sleepTimeSeconds": 28800,
-                            "sleepScore": 91,
-                        },
-                    }
-                ],
-                "resting_hr": [{"calendarDate": today, "restingHeartRate": 49}],
-                "hrv": [{"calendarDate": today, "lastNightAvg": 63}],
-            }
-        )
-        performance = _current_performance_context(
-            {
-                "synced_at": "now",
-                "athlete": {},
-                "recent_activities": [],
-                "recent_wellness": [
-                    {"id": today, "sleepSecs": 18000, "restingHR": 70, "hrv": 35}
-                ],
-            }
-        )
-        recovery = performance["recovery"]
-        self.assertEqual(recovery["sleep_hours"], 8.0)
-        self.assertEqual(recovery["sleep_source"], "Garmin Connect")
-        self.assertEqual(recovery["resting_hr_bpm"], 49)
-        self.assertEqual(recovery["resting_hr_bpm_source"], "Garmin Connect")
-        self.assertEqual(recovery["hrv_ms"], 63)
-        self.assertEqual(recovery["hrv_ms_source"], "Garmin Connect")
 
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
         # The fixture maps the undated Garmin prediction to its fixed sync day,
@@ -439,54 +113,6 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -50)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
 
-    def test_performance_does_not_use_eftp_as_ftp_history(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        snapshot = intervals_compaction.compact_snapshot(
-            {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
-            [],
-            [
-                {
-                    "id": today,
-                    "restingHR": 50,
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
-                }
-            ],
-            [],
-            all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=runtime_clock.utc_now(),
-        )
-
-        performance = _current_performance_context(snapshot)
-
-        # Neither the Intervals.icu FTP nor its eFTP is a current value or history.
-        self.assertIsNone(performance["metrics"]["cycling_ftp_watts"]["value"])
-        self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
-
-    def test_morning_body_battery_uses_timestamped_levels_not_daily_charge(self):
-        record = performance_morning_battery.morning_body_battery_record(
-            date(2026, 9, 4),
-            {
-                "dailySleepDTO": {
-                    "sleepStartTimestampGMT": "2026-09-03T21:30:00+00:00",
-                    "sleepEndTimestampGMT": "2026-09-04T05:45:00+00:00",
-                }
-            },
-            [
-                {
-                    "charged": 100,
-                    "bodyBatteryValuesArray": [
-                        ["2026-09-03T21:25:00+00:00", 57],
-                        ["2026-09-04T05:45:00+00:00", 78],
-                    ],
-                }
-            ],
-            attempted_at="2026-09-04T07:00:00+00:00",
-        )
-
-        self.assertEqual(record["status"], "ready")
-        self.assertEqual(record["before_sleep"]["value"], 57)
-        self.assertEqual(record["morning"]["value"], 78)
-
     def test_morning_body_battery_loads_once_for_the_sleep_window(self):
         class FakeGarmin:
             sleep_calls: ClassVar = []
@@ -519,10 +145,12 @@ class ServerPerformanceTests(ServerTestCase):
                 ]
 
         config = replace(
-            server.CONFIG, garmin_email="test@example.invalid", garmin_password="test"
+            server.CONFIG_HOLDER.value,
+            garmin_email="test@example.invalid",
+            garmin_password="test",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 garmin_provider.GarminClientFactory, "available", return_value=True
             ),
@@ -564,91 +192,6 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(
             recovery["2026-09-04"]["sources"]["body_battery"], "Garmin Connect"
         )
-
-    def test_activity_rollup_ignores_invalid_values_and_outside_dates(self):
-        anchor = date(2026, 9, 12)
-        rollup = performance_load.activity_rollup(
-            [
-                {
-                    "started_at_local": "2026-09-12",
-                    "moving_duration_s": "3600",
-                    "training_load": "42.5",
-                },
-                {
-                    "started_at_local": "2026-09-11",
-                    "moving_duration_s": "invalid",
-                    "training_load": None,
-                },
-                {
-                    "started_at_local": "not-a-date",
-                    "moving_duration_s": 7200,
-                    "training_load": 90,
-                },
-                {
-                    "started_at_local": "2026-09-01",
-                    "moving_duration_s": 7200,
-                    "training_load": 90,
-                },
-            ],
-            2,
-            anchor,
-        )
-        self.assertEqual(
-            rollup,
-            {
-                "days": 2,
-                "sessions": 2,
-                "duration_hours": 1.0,
-                "training_load": 42.5,
-                "load_missing_sessions": 1,
-            },
-        )
-
-    def test_activity_validation_exposes_running_evidence_against_provider_values(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        snapshot = intervals_compaction.compact_snapshot(
-            {
-                "sportSettings": [
-                    {
-                        "types": ["Run"],
-                        "threshold_pace": 4.0,
-                        "zone2_pace": 3.0,
-                        "lthr": 170,
-                        "vo2max": 55,
-                    }
-                ],
-            },
-            [
-                {
-                    "id": "latest-run",
-                    "type": "Run",
-                    "name": "Tempo",
-                    "start_date_local": f"{today}T08:00:00",
-                    "moving_time": 3600,
-                    "distance": 12_000,
-                    "average_speed": 3.2,
-                    "average_heartrate": 166,
-                    "icu_training_load": 90,
-                }
-            ],
-            [],
-            [],
-            all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=runtime_clock.utc_now(),
-        )
-
-        validation = _current_performance_context(snapshot)["activity_validation"]
-
-        self.assertTrue(validation["available"])
-        self.assertEqual(validation["activity"]["activity_id"], "act_latest-run")
-        self.assertEqual(validation["activity"]["sport"], "Laufen")
-        self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
-        self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
-        # The Intervals.icu sport settings give no provider reference value.
-        self.assertTrue(
-            all(item["value"] is None for item in validation["provider_references"])
-        )
-        self.assertIn("direct_support", validation["validation_outcome_enum"])
 
     def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
@@ -692,208 +235,6 @@ class ServerPerformanceTests(ServerTestCase):
             validation["direct_activity_estimates"].get("activity_ftp_watts"), 300
         )
 
-    def test_activity_validation_omits_implausible_provider_references(self):
-        validation = activity_validation.activity_performance_validation(
-            [
-                {
-                    "id": "invalid-provider",
-                    "sport": "run",
-                    "started_at_local": "2026-09-12T08:00:00",
-                }
-            ],
-            {
-                "running_vo2max_ml_kg_min": {
-                    "value": 500,
-                    "unit": "ml/kg/min",
-                    "source": "Intervals.icu",
-                },
-                "run_threshold_pace_seconds_per_km": {
-                    "value": 9999,
-                    "unit": "s/km",
-                    "source": "Intervals.icu",
-                },
-                "run_threshold_hr_bpm": {
-                    "value": 9999,
-                    "unit": "bpm",
-                    "source": "Intervals.icu",
-                },
-            },
-            {},
-        )
-
-        reference_metrics = {
-            item["metric"] for item in validation["provider_references"]
-        }
-        self.assertNotIn("running_vo2max_ml_kg_min", reference_metrics)
-        self.assertNotIn("run_threshold_pace_seconds_per_km", reference_metrics)
-        self.assertNotIn("run_threshold_hr_bpm", reference_metrics)
-
-    def test_activity_validation_omits_power_ratio_for_invalid_or_implausible_ftp(self):
-        activity = {
-            "id": "invalid-ftp",
-            "sport": "ride",
-            "started_at_local": "2026-09-12T08:00:00",
-            "normalized_power": 270,
-        }
-        for ftp in (-1, 10):
-            with self.subTest(ftp=ftp):
-                validation = activity_validation.activity_performance_validation(
-                    [activity],
-                    {"cycling_ftp_watts": {"value": ftp}},
-                    {},
-                )
-                self.assertNotIn(
-                    "power_as_percent_of_current_ftp", validation["activity"]
-                )
-
-    def test_activity_validation_omits_malformed_or_oversized_direct_estimates(self):
-        validation = activity_validation.activity_performance_validation(
-            [
-                {
-                    "id": "invalid-estimates",
-                    "sport": "ride",
-                    "started_at_local": "2026-09-12T08:00:00",
-                    "vo2max": {"value": 60},
-                    "ftp": "999999999999999999999999999999999999999999",
-                    "eftp_w": [300],
-                    "ftp_w": 300,
-                }
-            ],
-            {},
-            {},
-        )
-
-        self.assertEqual(
-            validation["direct_activity_estimates"],
-            {"activity_configured_ftp_watts": 300},
-        )
-
-    def test_activity_validation_omits_implausible_measured_evidence(self):
-        validation = activity_validation.activity_performance_validation(
-            [
-                {
-                    "id": "invalid-evidence",
-                    "sport": "ride",
-                    "started_at_local": "2026-09-12T08:00:00",
-                    "moving_duration_s": 3600,
-                    "avg_hr": 9999,
-                    "avg_power": -10,
-                    "rpe": 100,
-                    "intensity": 999,
-                }
-            ],
-            {},
-            {},
-        )
-
-        evidence = validation["activity"]
-        self.assertEqual(evidence["duration_seconds"], 3600)
-        self.assertNotIn("average_heart_rate_bpm", evidence)
-        self.assertNotIn("average_power_watts", evidence)
-        self.assertNotIn("rpe", evidence)
-        self.assertNotIn("intensity", evidence)
-
-    def test_no_actual_atl_is_reconstructed_from_intervals_atl(self):
-        today = server.ATHLETE_CLOCK.now().date()
-        wellness = [
-            {
-                "id": (today - timedelta(days=offset)).isoformat(),
-                "atl": 60.0,
-                "ctl": 55.0,
-                "weight": 70,
-            }
-            for offset in range(7)
-        ]
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_wellness": wellness,
-            "recent_activities": [
-                {
-                    "start_date_local": today.isoformat() + "T08:00:00",
-                    "icu_training_load": 60,
-                }
-            ],
-        }
-        performance = _current_performance_context(snapshot)
-        # #1726: the Intervals-anchored actual ATL mixed sources and is gone.
-        self.assertNotIn("actual_load", performance)
-        self.assertNotIn("fatigue_atl_actual", performance.get("comparisons", {}))
-
-    def test_performance_reads_sport_settings_and_wellness_aliases(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        snapshot = intervals_compaction.compact_snapshot(
-            {
-                "weight": 72.3,
-                "sportSettings": [
-                    {
-                        "types": ["Ride", "VirtualRide"],
-                        "ftp": 285,
-                        "lthr": 168,
-                        "vo2max": 62,
-                    },
-                    {
-                        "types": ["Run"],
-                        "ftp": 315,
-                        "lthr": 174,
-                        "threshold_pace": 3.5,
-                        "vo2max": 58,
-                    },
-                ],
-            },
-            [],
-            [
-                {
-                    "id": today,
-                    "ctLoad": 68,
-                    "atlLoad": 74,
-                    "form": -6,
-                    "readiness": 82,
-                    "weight": 72,
-                }
-            ],
-            [],
-            all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=runtime_clock.utc_now(),
-        )
-        performance = _mapped_performance_context(snapshot)
-        metrics = performance["metrics"]
-        # Intervals.icu sport settings are no source, whatever their aliases.
-        for key in (
-            "cycling_ftp_watts",
-            "run_threshold_watts",
-            "run_threshold_pace_seconds_per_km",
-            "run_threshold_hr_bpm",
-            "cycling_vo2max_ml_kg_min",
-        ):
-            self.assertIsNone(metrics[key]["value"], key)
-        self.assertNotIn("intervals_load_history", performance)
-
-    def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        snapshot = intervals_compaction.compact_snapshot(
-            {
-                "sportSettings": [
-                    {
-                        "types": ["Ride"],
-                        "ftp": 300,
-                        "eFTPSupported": True,
-                        "mmp_model": {"ftp": 309},
-                    }
-                ],
-            },
-            [],
-            [{"id": today, "restingHR": 50}],
-            [],
-            all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=runtime_clock.utc_now(),
-        )
-
-        metrics = _current_performance_context(snapshot)["metrics"]
-        self.assertIsNone(metrics["cycling_ftp_watts"]["value"])
-        # Intervals.icu eFTP is no longer read (#1727).
-        self.assertNotIn("cycling_eftp_watts", metrics)
-
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
         server.ATHLETE_DATA.profile().save(
             {"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"}
@@ -927,6 +268,54 @@ class ServerPerformanceTests(ServerTestCase):
         )["metrics"]["height_cm"]
         # The Intervals.icu athlete height is no source; the profile's stands.
         self.assertEqual(metric["value"], 181)
+
+    def test_performance_does_not_use_eftp_as_ftp_history(self):
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
+        snapshot = intervals_compaction.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
+            [],
+            [
+                {
+                    "id": today,
+                    "restingHR": 50,
+                    "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
+                }
+            ],
+            [],
+            all_sync_days=server.ALL_SYNC_DAYS,
+            synced_at=runtime_clock.utc_now(),
+        )
+
+        performance = _current_performance_context(snapshot)
+
+        # Neither the Intervals.icu FTP nor its eFTP is a current value or history.
+        self.assertIsNone(performance["metrics"]["cycling_ftp_watts"]["value"])
+        self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
+
+    def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
+        snapshot = intervals_compaction.compact_snapshot(
+            {
+                "sportSettings": [
+                    {
+                        "types": ["Ride"],
+                        "ftp": 300,
+                        "eFTPSupported": True,
+                        "mmp_model": {"ftp": 309},
+                    }
+                ],
+            },
+            [],
+            [{"id": today, "restingHR": 50}],
+            [],
+            all_sync_days=server.ALL_SYNC_DAYS,
+            synced_at=runtime_clock.utc_now(),
+        )
+
+        metrics = _current_performance_context(snapshot)["metrics"]
+        self.assertIsNone(metrics["cycling_ftp_watts"]["value"])
+        # Intervals.icu eFTP is no longer read (#1727).
+        self.assertNotIn("cycling_eftp_watts", metrics)
 
 
 if __name__ == "__main__":

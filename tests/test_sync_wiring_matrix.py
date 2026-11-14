@@ -509,15 +509,15 @@ class ConfiguredCheckTests(unittest.TestCase):
             keyword.value
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and getattr(node.func, "id", "") == "HttpSyncServices"
+            and getattr(node.func, "id", "") == "build_http_api"
             for keyword in node.keywords
             if keyword.arg == "provider_configured"
         ]
         self.assertEqual(1, len(wired))
         self.assertEqual(
-            "PROVIDER_CONFIGURED[provider_id]()",
-            ast.unparse(cast(ast.Lambda, wired[0]).body),
-            "HttpSyncServices must take provider_configured from PROVIDER_CONFIGURED",
+            "PROVIDER_CONFIGURED",
+            ast.unparse(wired[0]),
+            "build_http_api must take provider_configured from PROVIDER_CONFIGURED",
         )
 
 
@@ -544,7 +544,7 @@ class RunningProbeWiringTests(unittest.TestCase):
             keyword.value
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and getattr(node.func, "id", "") == "PublicStateAssembly"
+            and getattr(node.func, "id", "") == "build_public_state"
             for keyword in node.keywords
             if keyword.arg == "running_probes"
         ]

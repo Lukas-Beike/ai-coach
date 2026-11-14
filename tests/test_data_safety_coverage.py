@@ -10,6 +10,7 @@ kinds seeded by ``DataKindFixture``.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import re
 import sqlite3
@@ -642,7 +643,7 @@ class CoverageGuardTests(DataKindFixture):
         self.assertNotIn(b"synthetic-token-hash", exported)
 
     def test_explicit_export_columns_cover_every_column_but_the_listed_ones(self):
-        source = Path(export_module.__file__).read_text(encoding="utf-8")
+        source = _export_source()
         joined = re.sub(r'"\s*\n\s*"', "", source)
         checked = set()
         for match in re.finditer(r'"SELECT (.*?) FROM (\w+)', joined):
@@ -663,8 +664,20 @@ class CoverageGuardTests(DataKindFixture):
         for table, columns in EXPORT_COLUMNS_NOT_EXPORTED.items():
             if table in checked:
                 self.assertLessEqual(set(columns), CURRENT_DATABASE_SCHEMA[table])
+        # #2710: column lists that moved into the persistence owners stay checked.
         self.assertLessEqual(
-            {"observations", "activity_records", "provider_sync_cursors"}, checked
+            {
+                "observations",
+                "activity_records",
+                "provider_sync_cursors",
+                "messages",
+                "coach_commands",
+                "planned_units",
+                "workout_library",
+                "activity_stream_channels",
+                "activity_detail_analysis",
+            },
+            checked,
         )
 
     def test_delete_scope_lists_every_table_exactly_as_the_schema_does(self):
@@ -938,6 +951,22 @@ class BackupRestoreRoundTripTests(DataKindFixture):
             ],
             0,
         )
+
+
+def _export_source() -> str:
+    """The export module plus every *_export_rows function it calls (#2710)."""
+    source = Path(export_module.__file__).read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            owner, name = node.value.id, node.attr
+        elif isinstance(node, ast.Name):
+            owner, name = None, node.id
+        else:
+            continue
+        if name.endswith("export_rows"):
+            module = getattr(export_module, owner) if owner else export_module
+            source += inspect.getsource(getattr(module, name))
+    return source
 
 
 if __name__ == "__main__":

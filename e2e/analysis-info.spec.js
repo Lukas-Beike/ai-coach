@@ -97,7 +97,7 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await expect(running).toBeHidden();
   const powerProfile = cycling.locator("#cyclingPowerProfile");
   await expect(powerProfile.locator("tbody tr")).toHaveCount(5);
-  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
+  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => [/^\d+(?:,\d+)? W$/, /^\d{2}\.\d{2}\.\d{4}$/]).flat());
   await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
   await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toBeVisible();
   await expect(cycling.locator(".analysis-group-title")).toHaveText("Entwicklung");

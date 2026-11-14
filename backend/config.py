@@ -202,9 +202,37 @@ class Config:
         )
 
     @property
+    def intervals_export_configured(self) -> bool:
+        """The Intervals.icu export needs an API key and the athlete id."""
+        return bool(self.intervals_api_key and self.intervals_athlete_id)
+
+    @property
     def yazio_configured(self) -> bool:
         """Yazio is usable only when the account email and password are set."""
         return bool(self.yazio_email.strip() and self.yazio_password.strip())
+
+
+class ConfigHolder:
+    """The live runtime configuration: environment overlaid with stored credentials.
+
+    Saving provider credentials replaces it through ``apply``; every service
+    holds the holder (it is callable) and asks on each use, so none caches a
+    value. The generation lets a cached service notice a replacement.
+    """
+
+    def __init__(self, config: Config) -> None:
+        self.value = config
+        self.generation = 0
+
+    def __call__(self) -> Config:
+        return self.value
+
+    def apply(self, config: Config) -> None:
+        """Swap the configuration; readers see the new value at once."""
+        if config is self.value:
+            return
+        self.value = config
+        self.generation += 1
 
 
 def security_configuration_error(

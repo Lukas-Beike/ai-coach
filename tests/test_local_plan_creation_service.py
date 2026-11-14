@@ -250,6 +250,13 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(created[0]["source"], "library")
+        self.assertIsNone(created[0]["external_id"])
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) AS n FROM workout_library").fetchone()[
+                "n"
+            ],
+            1,
+        )
         self.assertEqual(created[0]["name"], "Easy ride")
         self.assertEqual(created[0]["duration_minutes"], 35)
         self.assertEqual(created[0]["target"], "HR")

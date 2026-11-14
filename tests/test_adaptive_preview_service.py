@@ -568,6 +568,8 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["changes"][0]["blocking_triggers"], ["weather"])
+        self.assertEqual(result["changes"][0]["after"]["duration_minutes"], 90)
+        self.assertIn("Wetterprognose", result["changes"][0]["after"]["rationale"])
         expected = {
             "state": "ready",
             "provider": "Open-Meteo",

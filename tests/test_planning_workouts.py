@@ -75,6 +75,43 @@ class PlanningWorkoutTests(unittest.TestCase):
             reason="ambiguous_workout_step",
         )
 
+    def test_ambiguous_quantity_bullets_require_explicit_steps_or_plain_notes(self):
+        for description in (
+            "- If feeling fresh extend to 8 km",
+            "- Bei Bedarf insgesamt 8,5km laufen",
+            "- Optional another 10min",
+            "- Walk for 5' if needed",
+            "- 6-8km Z1 HR",
+            "- 6km Z1 HR; if fresh extend to 8km",
+            "- 6km-8km Z1 HR",
+            "- Recovery 30s 50%",  # Rewrite valid provider cue-first syntax too.
+        ):
+            with self.subTest(description=description):
+                self.assert_app_error(
+                    lambda description=description: validate_workout_description(
+                        {"type": "Run", "description": description}
+                    )
+                )
+
+    def test_quantity_first_steps_and_plain_optional_totals_are_preserved(self):
+        descriptions = (
+            "Optional bis insgesamt 8km verlaengern.\n\n- 6km Z1 HR\n\nBei Beschwerden auslassen.",
+            "Warmup\n- 1km Z1 HR\n\nMain Set\n- 4km Z1-Z2 HR\n\nCooldown\n- 1km Z1 HR",
+            "Warmup\n- 10m Z2\n\nMain Set 6x\n- 4m 100%\n- 30s 50%\n\n- 5m Z1",
+            "- 1h30m Z2\n- 5' Z1\n- 30\" Z1",
+            "- 500mtr Z2 Pace\n- 1mi Z2 Pace",
+        )
+        for description, minutes in zip(descriptions, (40, 40, 42, 96, 40)):
+            with self.subTest(description=description):
+                normalized = normalize_workout(
+                    workout(description, sport="Run", duration_minutes=minutes),
+                    today=TODAY,
+                )
+                self.assertEqual(normalized["description"], description)
+        validate_workout_description(
+            {"sport": "WeightTraining", "description": "- Squats 3x8, pause 60s"}
+        )
+
     def test_endurance_parser_preserves_missing_step_and_target_reasons(self):
         self.assert_app_error(
             lambda: validate_workout_description(workout("Easy endurance ride")),
@@ -113,6 +150,8 @@ class PlanningWorkoutTests(unittest.TestCase):
         payload = workout_event_payload("run-1", run, today=TODAY)
         self.assertEqual(payload["moving_time"], 1800)
         self.assertEqual(payload["external_id"], "intervals-coach-run-1")
+        self.assertEqual(payload["category"], "WORKOUT")
+        self.assertTrue(payload["start_date_local"].endswith("T00:00:00"))
         self.assert_app_error(
             lambda: validate_workout_description({**run, "duration_minutes": 5}),
             reason="workout_duration_mismatch",

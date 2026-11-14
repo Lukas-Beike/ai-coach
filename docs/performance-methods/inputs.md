@@ -69,7 +69,7 @@ Consumer trace:
   or measurement context (#1428); no raw provider row or payload is read.
 - Report/context: `current_performance_context` (`backend/performance/context.py`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py`) and the
-  report services (`backend/http_api/assembly.py`).
+  report services (`backend/http_api/wiring.py`).
 - UI: `renderPersonalRecovery` (`public/analysis.js`, called from
   `public/performance-view.js`).
 - Coach: `personal_recovery` projection (`coach_performance_projection` in `backend/coach/context.py`).
