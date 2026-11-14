@@ -490,7 +490,7 @@ The calendar card of a completed session SHALL carry its single-session analysis
 
 #### Scenario: Feedback and Coach actions
 - **WHEN** the athlete taps "Feedback" or "Mit dem Coach analysieren" on an opened completed session
-- **THEN** "Feedback" opens the dialog with the session type, session RPE, deviation reason, notes and the confirm, split and delete actions, and the Coach button starts one turn that names the session by date, sport, time, duration and id, never by its stored name.
+- **THEN** "Feedback" opens the dialog with the session type, session RPE, deviation reason, notes and the confirm, split and delete actions, and the Coach button starts one session-analysis turn (`session_analysis`, on the planning model; off without that model's key) that names the session by date, sport, time, duration and id, never by its stored name.
 
 #### Scenario: No sessions segment in Analyse
 - **WHEN** the athlete opens the Analyse tab or an old `#analysis/sessions` link

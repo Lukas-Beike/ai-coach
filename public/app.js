@@ -91,6 +91,8 @@ $("#profileForm").addEventListener("invalid", (event) => {
   const editor = event.target.closest?.(".zone-editor[hidden]");
   if (editor) editor.hidden = false;
 }, true);
+// Each task heading's "i" says when its model is used (#2744).
+for (const button of document.querySelectorAll("[data-model-info]")) bindAnalysisPopover(button, document.getElementById(button.getAttribute("popovertarget")));
 for (const [task, label] of [["conversation", "Gespräch"], ["planning", "Planen & Analysieren"], ["nutrition", "Ernährung"]]) {
   $(taskSelectId(task, "Model")).addEventListener("change", (event) => saveSelectSetting(event, "model", "model", label));
   $(taskSelectId(task, "ThinkingLevel")).addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", `${label}: Thinking`));
