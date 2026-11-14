@@ -47,6 +47,24 @@ def _job(workflow, name, following):
     return workflow.split(f"  {name}:\n", 1)[1].split(f"  {following}:\n", 1)[0]
 
 
+def _first_runner_python(lines):
+    """Index of the first job line that starts python on the runner, else None.
+
+    A python word continuing a folded `docker run` runs in the 3.14 image.
+    """
+    style = None
+    for n, line in enumerate(lines):
+        step = re.match(r"\s*(?:- )?run:\s*(.*)$", line)
+        command = step[1] if step else line if style in ("|", ">") else ""
+        if step:
+            style = command[:1] if command[:1] in ("|", ">") else None
+        elif style == ">" and line.strip():
+            style = "done"  # a folded command starts on its first line
+        if re.match(r"\s*python3?\s", command):
+            return n
+    return None
+
+
 class WorkflowSourceTests(unittest.TestCase):
     def test_ai_docs_requires_guidance_before_discovery(self):
         workflow = (
@@ -456,6 +474,20 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("docker tag pacecraft:ci", publish)
         self.assertIn("cosign attest --type spdxjson", publish)
         self.assertIn("org.opencontainers.image.source=", workflow)
+
+    def test_jobs_set_up_python_314_before_running_repository_python(self):
+        # #2796: ruff targets py314 syntax; the runner's system Python is older.
+        root = Path(__file__).resolve().parents[1]
+        for path in sorted((root / ".github/workflows").glob("*.yml")):
+            jobs = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[-1]
+            for job in re.split(r"\n(?=  [A-Za-z0-9_-]+:\n)", jobs):
+                lines = job.splitlines()
+                first = _first_runner_python(lines)
+                setup = [
+                    n for n, x in enumerate(lines) if "python-version: '3.14'" in x
+                ]
+                with self.subTest(workflow=path.name, job=lines[0].strip()):
+                    self.assertTrue(first is None or (setup and setup[0] < first))
 
     def test_pull_request_runs_cancel_only_their_own_older_run(self):
         workflow = (
