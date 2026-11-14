@@ -181,6 +181,34 @@ class BrowserRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.RunnerError, "e2e/<name>.spec.js"):
             runner.select(listing, "desktop", ["absent.spec.js"], 1, 1, timing)
 
+    def test_changed_project_follows_the_ci_classifier(self):
+        # --project changed reuses .github/scripts/ci_changes.py (#2759, #2748).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                subprocess.run(
+                    ["git", "-C", str(root), *args], check=True, capture_output=True
+                )
+
+            git("init", "-q", "-b", "base")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            (root / "server.py").write_text("", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-q", "-m", "base")
+            git("switch", "-q", "-c", "work")
+            (root / "server.py").write_text("x = 1\n", encoding="utf-8")
+            self.assertEqual(runner.changed_project("base", root)[0], "desktop")
+            # An untracked client file counts as a UI change.
+            (root / "public").mkdir()
+            (root / "public" / "app.js").write_text("", encoding="utf-8")
+            project, reason = runner.changed_project("base", root)
+            self.assertEqual(project, "all")
+            self.assertIn("public/app.js", reason)
+        args = runner.parser().parse_args(["--project", "changed"])
+        self.assertEqual((args.project, args.base), ("changed", "origin/develop"))
+
     def test_spec_a_project_does_not_list_is_skipped_with_a_note(self):
         data = report()
         data["suites"][0]["specs"][0]["tests"].append(

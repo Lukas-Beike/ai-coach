@@ -12,12 +12,16 @@ The runner gives every spec its own disposable SQLCipher fixture; do not call
 install the locked Chromium and build the app image.
 
 ```powershell
-python scripts/run_browser_tests.py --project all --list
+python scripts/run_browser_tests.py --project changed --list
 python scripts/run_browser_tests.py --project <project> --spec e2e/<name>.spec.js
 python scripts/run_browser_tests.py --project all --keep-going
 ```
 
-- `--project` is required (one project name or `all`); `--spec` repeats. Run the
+- `--project` is required (one project name, `all`, or `changed`); `--spec`
+  repeats. `changed` picks what CI picks for the diff against `--base`
+  (default `origin/develop`): `desktop` without a UI change, otherwise `all`,
+  from `.github/scripts/ci_changes.py` (#2759). One project takes 28-32 min
+  locally with `--jobs 1`. Run the
   smallest selection that covers the change: the affected spec on the affected
   project, then the other viewports for layout changes. `--list` resolves the
   selection without Docker or a browser. A spec a selected project does not

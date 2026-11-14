@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import inspect
 import json
 import math
@@ -1289,7 +1290,12 @@ def parser():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     result.add_argument(
-        "--project", help="exact configured project name, or all (required)"
+        "--project",
+        help="exact configured project name, all, or changed: desktop unless the "
+        "diff against --base touches the UI, as CI decides (required)",
+    )
+    result.add_argument(
+        "--base", default="origin/develop", help="ref --project changed compares with"
     )
     result.add_argument(
         "--spec",
@@ -1367,6 +1373,28 @@ def source_hashes(root, durations):
     }
 
 
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def changed_project(base, root=ROOT):
+    """The CI choice (#2748) for the local diff: desktop without a UI change.
+
+    Paths come from the Python test selector (committed, staged, unstaged and
+    untracked files since the merge base) and the decision from CI's single
+    classifier, so local and pull-request runs pick the same projects (#2759).
+    """
+    paths = _load("changed_tests", "tests/changed_tests.py").changed_paths(base, root)
+    ui = _load("ci_changes", ".github/scripts/ci_changes.py")
+    touched = [path for path in paths if ui.touches_ui(path)]
+    if ui.ui(paths):
+        return "all", f"UI paths changed: {', '.join(touched[:5]) or 'no diff'}"
+    return "desktop", f"no UI path among {len(paths)} changed paths"
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     if args.print_image:
@@ -1378,6 +1406,12 @@ def main(argv=None):
         return 0
     if not args.project:
         parser().error("--project is required")
+    if args.project == "changed":
+        try:
+            args.project, reason = changed_project(args.base)
+        except OSError, subprocess.CalledProcessError:
+            parser().error(f"--project changed cannot diff against {args.base}")
+        print(f"--project changed: {args.project} ({reason})", file=sys.stderr)
     run_id = uuid.uuid4().hex
     args.results_dir = args.results_dir.resolve()
     directory = args.results_dir / run_id
