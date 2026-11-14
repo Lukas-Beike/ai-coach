@@ -14,8 +14,8 @@ The client SHALL provide Coach, plan, nutrition, analysis, and more navigation w
 - **THEN** the matching panel and segment render once, inactive panels stay hidden, and navigation exposes the current page.
 
 #### Scenario: Keyboard shortcuts for the main views
-- **WHEN** the athlete presses Alt+1 to Alt+5 while no text field has focus and no dialog is open
-- **THEN** Coach, Kalender, Analyse, Ernährung or Mehr opens as if its navigation item were selected; with Ctrl or AltGr, while typing or behind a dialog nothing changes; the navigation items name their key in `aria-keyshortcuts`, and Mehr › Darstellung lists the keys in a collapsed "Tastenkürzel" section on screens at least 768 px wide.
+- **WHEN** the athlete presses Alt+1 to Alt+5 while no text field has focus and no dialog or popover menu is open
+- **THEN** Coach, Kalender, Analyse, Ernährung or Mehr opens as if its navigation item were selected; with Ctrl or AltGr, while typing or behind a dialog or menu nothing changes; the navigation items name their key in `aria-keyshortcuts`, and Mehr › Darstellung lists the keys in a collapsed "Tastenkürzel" section on screens at least 768 px wide.
 
 #### Scenario: Unsaved profile form
 - **WHEN** navigation would leave a dirty profile panel

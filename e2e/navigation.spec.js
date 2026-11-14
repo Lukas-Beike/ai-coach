@@ -116,10 +116,17 @@ test("@responsive Alt+1 to Alt+5 switch the main views outside text fields and a
   await page.keyboard.press("Alt+Digit2");
   await page.locator("#messageInput").blur();
   await page.keyboard.press("Control+Alt+Digit2");
-  // An open dialog keeps the view behind it.
-  await page.evaluate(() => document.body.appendChild(document.createElement("dialog")).showModal());
-  await page.keyboard.press("Alt+Digit2");
-  await page.evaluate(() => document.querySelector("body > dialog:last-of-type").remove());
+  // An open dialog or popover menu keeps the view behind it.
+  for (const open of ["showModal", "showPopover"]) {
+    await page.evaluate((method) => {
+      const layer = document.body.appendChild(document.createElement(method === "showModal" ? "dialog" : "div"));
+      layer.id = "shortcutProbe";
+      if (method === "showPopover") layer.popover = "manual";
+      layer[method]();
+    }, open);
+    await page.keyboard.press("Alt+Digit2");
+    await page.evaluate(() => document.getElementById("shortcutProbe").remove());
+  }
   await expect(page).toHaveURL(/#coach/);
   await page.evaluate(async () => { await AppRouter.navigate("more/appearance", { historyMode: "replace" }); });
   const help = page.locator(".shortcut-help");
