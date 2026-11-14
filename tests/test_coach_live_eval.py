@@ -1730,7 +1730,7 @@ class CommandLineTests(unittest.TestCase):
             ):
                 code, text = run_main(*argv, *priced)
             self.assertEqual(code, 2)
-            self.assertIn(f"no {label} key", text)
+            self.assertIn(f"needs a {label} key", text)
             self.assertNotIn(key, text)
             models.assert_not_called()
 

@@ -137,8 +137,9 @@ estimated 5 USD (`--max-cost-usd`, from the response token counts and the
 model's prices per million tokens given as `--price-input` and
 `--price-output`), and lists the cases not run. `--provider` names the model
 API explicitly, `openai` (Responses) or `anthropic` (Messages), with no default
-and no fallback: only that provider gets the key, and only a loopback endpoint
-or that provider's API is accepted. For Anthropic, `--model` is the Claude
+and no fallback: only that provider gets the key (an Anthropic key, `sk-ant-`,
+is required for Anthropic's API and refused for OpenAI's), and only a loopback
+endpoint or that provider's API is accepted. For Anthropic, `--model` is the Claude
 family setting the app uses (`claude-opus`, `claude-sonnet` or `claude-haiku`);
 the preflight resolves it to the newest model of the family, every case uses that
 model and the report names it. Claude's usage counts cache reads and writes as

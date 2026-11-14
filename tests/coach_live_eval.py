@@ -50,16 +50,14 @@ MAX_CALLS = 300
 MAX_COST_USD = 5.0
 OPENAI_HOST = "api.openai.com"
 ANTHROPIC_HOST = "api.anthropic.com"
-# Each provider's API host and name.
+# Each provider's API host, name, and the factors on the base input price for
+# uncached and cached input tokens. Claude's usage counts cache writes and reads
+# as input: a write costs 1.25 and a read 0.1 times the base price, so reads are
+# priced as reads and every other input token as a write, and the ceiling holds.
 PROVIDERS = {
-    "openai": (OPENAI_HOST, "OpenAI"),
-    "anthropic": (ANTHROPIC_HOST, "Anthropic"),
+    "openai": (OPENAI_HOST, "OpenAI", 1.0, 1.0),
+    "anthropic": (ANTHROPIC_HOST, "Anthropic", 1.25, 0.1),
 }
-# Claude's usage counts cache writes and reads as input. A write costs 1.25 and
-# a read 0.1 times the base input price: reads are priced as reads and every
-# other input token as a write, so the ceiling holds.
-ANTHROPIC_INPUT_PRICE_FACTOR = 1.25
-ANTHROPIC_CACHE_READ_PRICE_FACTOR = 0.1
 SAMPLE_CASES = 5
 FTP_WATTS = 250
 EASY_CAP_PERCENT = 87.0  # backend.activities.hr_cap.HR_CAP_PERCENT["easy"]
@@ -1299,13 +1297,12 @@ def _preflight(args: argparse.Namespace) -> str | None:
     from backend.errors import AppError
     from backend.providers.claude_models import family_setting, setting_family
 
-    api_host, label = PROVIDERS[args.provider]
+    api_host, label, _, _ = PROVIDERS[args.provider]
     anthropic = args.provider == "anthropic"
     if anthropic != bool(setting_family(args.model)):
         return (
-            "The Anthropic model must be claude-opus, claude-sonnet or claude-haiku."
-            if anthropic
-            else "A Claude model needs --provider anthropic."
+            "A Claude family (claude-opus, claude-sonnet or claude-haiku) needs "
+            "--provider anthropic, and --provider anthropic needs one."
         )
     try:
         args.base_url = validated_base_url(args.base_url, f"{label} base URL")
@@ -1316,16 +1313,17 @@ def _preflight(args: argparse.Namespace) -> str | None:
         return (
             f"Only a loopback endpoint or the {label} API is used for this evaluation."
         )
+    # An Anthropic key has its own prefix: a key never goes to the other provider.
     if host == api_host and not (
-        args.api_key and args.price_input > 0 and args.price_output > 0
+        args.api_key
+        and args.api_key.startswith("sk-ant-") == anthropic
+        and args.price_input > 0
+        and args.price_output > 0
     ):
         return (
-            f"The {label} API needs COACH_EVAL_API_KEY and both --price-input and "
-            "--price-output; nothing was run."
+            f"The {label} API needs a {label} key in COACH_EVAL_API_KEY and both "
+            "--price-input and --price-output; nothing was run."
         )
-    # An Anthropic key has its own prefix: a key never goes to the other provider.
-    if host == api_host and args.api_key.startswith("sk-ant-") != anthropic:
-        return f"COACH_EVAL_API_KEY is no {label} key; nothing was run."
     try:
         models = fetch_model_ids(args.base_url, args.api_key, provider=args.provider)
     except urllib.error.HTTPError as error:
@@ -1335,12 +1333,16 @@ def _preflight(args: argparse.Namespace) -> str | None:
         return f"Endpoint at {host} answered HTTP {error.code}; nothing was run."
     except OSError, ValueError, KeyError, TypeError, urllib.error.URLError:
         return f"Endpoint at {host} is unreachable; nothing was run."
-    if anthropic:
-        args.resolved_model = next(
-            (model for model in models if family_setting(model) == args.model), None
-        )
-    listed = args.resolved_model if anthropic else args.model in models
-    if not listed:
+    # A Claude family resolves to its newest listed model; any other id to itself.
+    args.resolved_model = next(
+        (
+            model
+            for model in models
+            if (family_setting(model) if anthropic else model) == args.model
+        ),
+        None,
+    )
+    if not args.resolved_model:
         return f"Model {args.model} is not listed by the endpoint; nothing was run."
     return None
 
@@ -1359,11 +1361,7 @@ def render_report(
         "# Coach live evaluation",
         "",
         f"- Provider: {args.provider}",
-        *(
-            [f"- Resolved model: {args.resolved_model}"]
-            if getattr(args, "resolved_model", None)
-            else []
-        ),
+        f"- Resolved model: {args.resolved_model}",
         f"- Provider host: {urlsplit(args.base_url).hostname}",
         f"- Model: {args.model}",
         f"- Thinking level: {args.thinking}",
@@ -1451,19 +1449,16 @@ def main(argv: list[str] | None = None) -> int:
         print(problem)
         return 2
     selected = [c for c in cases if not chosen or c["id"] in chosen]
-    anthropic = args.provider == "anthropic"
+    _, _, uncached, cached = PROVIDERS[args.provider]
     counter = CallCounter(
         args.max_calls,
         args.max_cost_usd,
-        (
-            args.price_input * (ANTHROPIC_INPUT_PRICE_FACTOR if anthropic else 1.0),
-            args.price_output,
-        ),
-        args.price_input * ANTHROPIC_CACHE_READ_PRICE_FACTOR if anthropic else None,
+        (args.price_input * uncached, args.price_output),
+        args.price_input * cached,
     )
     settings = {
         "provider": args.provider,
-        "resolved_model": getattr(args, "resolved_model", None),
+        "resolved_model": args.resolved_model,
         "base_url": args.base_url,
         "model": args.model,
         "thinking": args.thinking,
