@@ -161,7 +161,7 @@ class TrainingProfileSelectionService:
         canonical: CanonicalPerformanceSource | None = None,
         curves: SessionCurveReader | None = None,
         pause: Callable[[float], None] = time.sleep,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.thread_time,
     ) -> None:
         self._today = today
         self._canonical = canonical
@@ -228,8 +228,10 @@ class TrainingProfileSelectionService:
         waits for a cold read of the whole history: the records with whether
         they are current, None before the first build finished, RuntimeError
         after a failed one. After each session, outside its snapshot, the build
-        pauses as long as that session took: its pure-Python work would
-        otherwise hold the interpreter and stall every request thread (#2757).
+        pauses as long as that session's own work took (its thread time, so a
+        wait for the interpreter or a reader does not lengthen it): its
+        pure-Python work would otherwise hold the interpreter and stall every
+        request thread (#2757).
         """
         canonical, curve_reader = self._sources()
         manager = canonical.database_manager()

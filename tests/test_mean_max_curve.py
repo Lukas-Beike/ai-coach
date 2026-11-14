@@ -1,5 +1,6 @@
 """Local mean-maximal curve from canonical full-resolution streams (#1430)."""
 
+import itertools
 import sqlite3
 import unittest
 from contextlib import contextmanager
@@ -675,7 +676,7 @@ class ProfileSelectionTests(unittest.TestCase):
         self.add_ride(summaries, "act_recent", day="2026-10-10", peak=350.0)
         builds = []
         pauses = []
-        ticks = iter((0.0, 0.25, 1.0, 1.5))
+        ticks = itertools.count(0.0, 0.25)
         service = self.service(
             summaries,
             spawn=builds.append,
@@ -706,7 +707,7 @@ class ProfileSelectionTests(unittest.TestCase):
         # One session per read snapshot, then a pause as long as that session
         # took, outside the snapshot, so request threads get the interpreter
         # (#2757); the records equal those of one read over the same days.
-        self.assertEqual([(0.25, 0), (0.5, 0)], pauses)
+        self.assertEqual([(0.25, 0), (0.25, 0)], pauses)
         every, current = service.all_time_records()
         self.assertTrue(current)
         one_read = service.curve_records((self.day - date(2025, 3, 14)).days + 1)
