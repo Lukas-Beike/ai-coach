@@ -53,6 +53,11 @@ jobs:
           # Release validation must come from protected main, never the requested tag.
           ref: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)) && 'refs/heads/main' || github.sha }}
           fetch-depth: 0
+      # The repository scripts below may use Python 3.14 syntax.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
       - name: Resolve source and release contract
         id: source
         env:
@@ -114,12 +119,15 @@ jobs:
     env:
       # Fail on a missing AGENTS.md instead of silently skipping the AI docs contract.
       AI_DOCS_REQUIRED: '1'
-      DOCS_ONLY: ${{ needs.source.outputs.docs_only }}
-    # The steps, not the job, skip on a docs-only pull request: a skipped
-    # matrix job would not report the required "Test shard N/4" names.
+      # full: this shard's share of the suite. On a docs-only pull request,
+      # shard 1 runs the affected Python tests and the Node unit tests (docs):
+      # the e2e job that normally runs them is skipped; the others are idle.
+      # The steps, not the job, skip: a skipped matrix job would not report the
+      # required "Test shard N/4" names.
+      MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' || matrix.shard == 1 && 'docs' || 'idle' }}
     steps:
       - name: Check out repository
-        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
+        if: env.MODE != 'idle'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -127,24 +135,36 @@ jobs:
           # The base parent of the merge commit, for the changed-test selection.
           fetch-depth: 2
       - name: Set up Python
-        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
+        if: env.MODE != 'idle'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - name: Install dependencies
-        if: env.DOCS_ONLY != 'true' || matrix.shard == 1
+        if: env.MODE != 'idle'
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Run unit tests
-        if: env.DOCS_ONLY != 'true'
+        if: env.MODE == 'full'
         run: coverage run tests/run_tests.py --shard "${{ matrix.shard }}" --total "$PYTHON_TEST_SHARDS"
-      - name: Run the tests the documentation change affects
-        if: env.DOCS_ONLY == 'true' && matrix.shard == 1
-        run: python tests/run_tests.py --changed --base HEAD^1
+      - name: Run the Python tests the documentation change affects
+        if: env.MODE == 'docs'
+        run: python tests/run_tests.py --changed --base HEAD^1 --with-heavy
+      - name: Set up Node.js
+        if: env.MODE == 'docs'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install Node test dependencies
+        if: env.MODE == 'docs'
+        run: npm ci --ignore-scripts
+      - name: Run Node unit tests
+        if: env.MODE == 'docs'
+        run: node --test tests/*.cjs
       - name: Report the docs-only skip
-        if: env.DOCS_ONLY == 'true' && matrix.shard != 1
-        run: 'echo "docs-only: suites skipped; shard 1 runs the changed-test selection."'
+        if: env.MODE == 'idle'
+        run: 'echo "docs-only: suites skipped; shard 1 runs the affected tests."'
       - name: Upload shard coverage
-        if: env.DOCS_ONLY != 'true'
+        if: env.MODE == 'full'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-coverage-${{ matrix.shard }}

@@ -1155,11 +1155,22 @@ class DocsOnlyClassifierTests(unittest.TestCase):
         # Required "Test shard N/4" names need the matrix job itself to run.
         shards = _job(workflow, "test_shards", "syntax")
         self.assertNotRegex(shards.split("steps:", 1)[0], r"\n    if:")
-        self.assertIn("if: env.DOCS_ONLY != 'true'\n        run: coverage run", shards)
         self.assertIn(
-            "if: env.DOCS_ONLY == 'true' && matrix.shard == 1\n"
-            "        run: python tests/run_tests.py --changed --base HEAD^1",
+            "MODE: ${{ needs.source.outputs.docs_only != 'true' && 'full' "
+            "|| matrix.shard == 1 && 'docs' || 'idle' }}",
             shards,
+        )
+        for mode, command in (
+            ("full", "coverage run tests/run_tests.py --shard"),
+            ("docs", "python tests/run_tests.py --changed --base HEAD^1 --with-heavy"),
+            # The skipped e2e job runs them otherwise; docs-only runs need them.
+            ("docs", "node --test tests/*.cjs"),
+        ):
+            self.assertIn(f"if: env.MODE == '{mode}'\n        run: {command}", shards)
+        # The scripts may use Python 3.14 syntax; the runner's own Python is older.
+        self.assertLess(
+            source.index("python-version: '3.14'"),
+            source.index("run: python .github/scripts/release_source.py"),
         )
         # Aggregators accept a skip only when the run is docs-only.
         test = _job(workflow, "test", "quality")

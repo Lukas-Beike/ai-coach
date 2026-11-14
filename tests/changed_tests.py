@@ -1,6 +1,7 @@
 """Select the Python test modules a local change can affect.
 
-Local runs use this to skip unaffected modules; CI still runs every shard. A test
+Local runs use this to skip unaffected modules. CI runs every shard, except on a
+documentation-only pull request, where this selection is all it runs. A test
 module is selected when its own file changed, when it transitively imports a
 changed repository module, or when a string literal in it (or in a test support
 module it imports) names the changed path, a parent directory of it, its file
@@ -42,7 +43,8 @@ FULL_SUITE_PATHS = (
     "pyproject.toml",
 )
 # Slow tooling modules run locally only when one of their own inputs changed;
-# CI runs them on every PR. Each maps to the path prefixes it guards.
+# CI runs them on every PR (on a docs-only one when selected, via --with-heavy).
+# Each maps to the path prefixes it guards.
 HEAVY_MODULES = {
     "test_fixture_standard_data": (
         "e2e/",

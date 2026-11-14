@@ -132,7 +132,7 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 
 #### Scenario: Documentation-only pull request
 - **WHEN** `.github/scripts/ci_changes.py` finds that the pull request's merge commit changes documentation alone
-- **THEN** the native shards run only the changed-test selection, the container, browser and quality jobs are skipped, the image, syntax and SBOM jobs still run, and the `test` and `Browser checks` aggregates pass with "docs-only: suites skipped"; they accept a skipped job only in that case
+- **THEN** shard 1 runs only the changed-test selection and the Node unit tests, the container, browser and quality jobs are skipped, the image, syntax and SBOM jobs still run, and the `test` and `Browser checks` aggregates pass with "docs-only: suites skipped"; they accept a skipped job only in that case
 
 #### Scenario: Push, release and dispatch never skip
 - **WHEN** the workflow runs for anything but a pull request, or the checkout is not a merge commit

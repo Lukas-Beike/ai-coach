@@ -61,9 +61,10 @@ A pull request that changes documentation alone skips the suites (#2747).
 documentation is Markdown or text under `docs/`, `.agents/skills/` (outside
 `scripts/`) or `openspec/`, plus `README.md`, `REVIEW.md`, `AGENTS.md` and
 first-level `AGENTS.md` files outside `public/`. Shard 1 then runs
-`--changed --base HEAD^1`, the other shards report without tests, and the
-container, browser and quality jobs are skipped; image, syntax and SBOM still
-run. The `test` and `Browser checks` aggregates print "docs-only: suites
+`--changed --base HEAD^1 --with-heavy` (slow tooling modules stay in when
+selected) and the Node unit tests, the other shards report without tests, and
+the container, browser and quality jobs are skipped; image, syntax and SBOM
+still run. The `test` and `Browser checks` aggregates print "docs-only: suites
 skipped". Push, release and dispatch runs never classify and always run
 everything.
 
