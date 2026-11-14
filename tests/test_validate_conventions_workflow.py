@@ -214,5 +214,104 @@ class IssueLinkStepTests(unittest.TestCase):
         self.assertIn("if: github.event.pull_request.user.type != 'Bot'", step)
 
 
+# server.py at the base and head commits, as the contents API returns it raw.
+FAKE_VERSION_GH = (
+    "gh() {\n"
+    '  [[ "${FAKE_GH_MODE:-ok}" == fail ]] && { echo "synthetic gh api failure" >&2; return 1; }\n'
+    '  if [[ "$*" == *compare/base-sha...head-sha* ]]; then echo fork-sha; return 0; fi\n'
+    '  [[ "$*" == *contents/server.py?ref=* ]] || { echo "bad gh call" >&2; return 1; }\n'
+    '  if [[ "$*" == *ref=base-sha* ]]; then printf "%s\\n" "${FAKE_BASE:-}";\n'
+    '  elif [[ "$*" == *ref=fork-sha* ]]; then printf "%s\\n" "${FAKE_FORK:-}";\n'
+    '  else printf "%s\\n" "${FAKE_HEAD:-}"; fi\n'
+    "}\n"
+)
+
+
+@unittest.skipUnless(BASH, "a working bash is required to run the workflow step")
+class AppVersionStepTests(unittest.TestCase):
+    def run_step(self, base, head, mode="ok", forked=None):
+        # By default the branch starts at the base tip, as right after a rebase.
+        with tempfile.TemporaryDirectory() as temp:
+            script = Path(temp) / "version.sh"
+            script.write_text(
+                FAKE_VERSION_GH
+                + validation_script("Keep APP_VERSION at or above the base branch"),
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                [BASH, "--noprofile", "--norc", str(script)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env={
+                    **os.environ,
+                    "GH_TOKEN": "synthetic-token",
+                    "REPOSITORY": "example/ai-coach",
+                    "BASE_SHA": "base-sha",
+                    "HEAD_SHA": "head-sha",
+                    "FAKE_BASE": base,
+                    "FAKE_HEAD": head,
+                    "FAKE_FORK": base if forked is None else forked,
+                    "FAKE_GH_MODE": mode,
+                },
+                timeout=60,
+            )
+
+    @staticmethod
+    def server(version):
+        return f'"""Server."""\n\nAPP_NAME = "Pacecraft"\nAPP_VERSION = "{version}"\n'
+
+    def test_a_lower_version_fails(self):
+        for base, head in (
+            ("2.1.10", "2.1.9"),
+            ("2.1.0", "1.9.9"),
+            ("3.0.0", "2.10.0"),
+        ):
+            with self.subTest(base=base, head=head):
+                result = self.run_step(self.server(base), self.server(head))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"APP_VERSION {head} is lower than {base}", result.stdout)
+
+    def test_an_equal_or_higher_version_passes(self):
+        for base, head in (
+            ("2.1.10", "2.1.10"),
+            ("2.1.9", "2.1.10"),
+            ("2.1.10", "3.0.0"),
+        ):
+            with self.subTest(base=base, head=head):
+                result = self.run_step(self.server(base), self.server(head))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_branch_older_than_a_later_bump_passes_until_it_changes_the_version(
+        self,
+    ):
+        # Branched at 2.1.10; a release then bumped the base to 2.1.11.
+        stale = self.run_step(
+            self.server("2.1.11"), self.server("2.1.10"), forked=self.server("2.1.10")
+        )
+        self.assertEqual(stale.returncode, 0, stale.stdout + stale.stderr)
+        self.assertIn("APP_VERSION unchanged by this PR (2.1.10)", stale.stdout)
+        # The same branch lowering the version itself still fails.
+        lowered = self.run_step(
+            self.server("2.1.11"), self.server("2.1.9"), forked=self.server("2.1.10")
+        )
+        self.assertNotEqual(lowered.returncode, 0)
+        self.assertIn("APP_VERSION 2.1.9 is lower than 2.1.11", lowered.stdout)
+
+    def test_a_missing_version_or_gh_failure_fails(self):
+        result = self.run_step(self.server("2.1.10"), '"""Server."""\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("APP_VERSION not found", result.stdout)
+        result = self.run_step("", "", mode="fail")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("synthetic gh api failure", result.stderr)
+
+    def test_the_step_reads_both_files_through_the_api(self):
+        # pull_request_target must not check out or run pull-request code.
+        step = validation_script("Keep APP_VERSION at or above the base branch")
+        self.assertIn("contents/server.py?ref=", step)
+        self.assertNotIn("checkout", step)
+
+
 if __name__ == "__main__":
     unittest.main()
