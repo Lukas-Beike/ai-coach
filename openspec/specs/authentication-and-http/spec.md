@@ -308,7 +308,7 @@ Evidence: `backend/http_api/handler.py::RequestHandler.handle_one_request`; `bac
 - **WHEN** the readiness write probe cannot create its file
 - **THEN** `checks.data_directory` is false, the status is 503 and no probe file remains; every readiness call creates and removes one probe file
 
-Evidence: `backend/http_api/public_get.py::PublicGetRoutes`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_auth_status_uses_optional_authenticated_session_and_live_gate`; `tests/test_server_http.py::test_readiness_fails_when_data_directory_is_read_only`; `tests/test_server_http.py::test_readiness_cleans_up_probe_after_write_failure`.
+Evidence: `backend/http_api/public_get.py::PublicGetRoutes`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_auth_status_uses_optional_authenticated_session_and_live_gate`; `tests/test_http_readiness.py::test_a_read_only_data_directory_is_not_ready`; `tests/test_http_readiness.py::test_the_probe_is_removed_after_a_write_failure`.
 
 ### Requirement: State event stream transport
 
