@@ -95,6 +95,7 @@ from backend.performance.source_policy import (
 )
 from backend.planning import season as planning_season
 from backend.planning.compact_activities import ActivitySummarySource
+from backend.planning.race_plan import read_race_plan
 from backend.planning.race_results import with_race_results
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -465,6 +466,11 @@ def _read_routes(
                 activity_read().summaries_on_days,
             ),
             first_threshold_service=athlete.first_threshold,
+            race_plan=partial(
+                read_race_plan,
+                ctx.planning.competition,
+                public.performance_state_service,
+            ),
         ),
         DiagnosticsGetRoutes(
             ctx.diagnostics.recent_log_entries_service,

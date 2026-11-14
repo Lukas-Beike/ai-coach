@@ -2163,6 +2163,110 @@ function renderLibrary(workouts) {
 
 
 
+// One race-plan read per saved competition state; an edit reads again (#2803).
+const competitionRacePlans = new Map();
+const RACE_PLAN_WEEKDAY = new Intl.DateTimeFormat("de-DE", { weekday: "short", timeZone: "UTC" });
+const RACE_PLAN_KM = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+const RACE_PLAN_UNAVAILABLE = { distance: "Distanz fehlt", duration: "Zielzeit oder erwartete Dauer fehlt" };
+
+function racePlanRange(values, unit) {
+  return Array.isArray(values) ? `${values[0]}–${values[1]} ${unit}` : null;
+}
+
+function racePlanDay(eventDate, daysBack) {
+  const start = Date.parse(`${String(eventDate).slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(start) ? null : RACE_PLAN_WEEKDAY.format(new Date(start - daysBack * 86_400_000));
+}
+
+function racePlanDays(eventDate, count) {
+  const days = Array.from({ length: count }, (_, index) => racePlanDay(eventDate, count - index));
+  if (days.every(Boolean)) return days.join(" + ");
+  return count === 1 ? "1 Tag davor" : `${count} Tage davor`;
+}
+
+// "+4 %", "−2 %" or the zero form; the minus is typographic.
+function racePlanSigned(value, zero = "") {
+  if (value > 0) return `+${RACE_PLAN_KM.format(value)} %`;
+  if (value < 0) return `−${RACE_PLAN_KM.format(-value)} %`;
+  return `${zero}0 %`;
+}
+
+function racePlanMealTime(startsAtLocal, hours) {
+  const time = /T(\d{2}):(\d{2})/.exec(String(startsAtLocal || ""));
+  if (!time || (time[1] === "00" && time[2] === "00")) return `${hours[0]}–${hours[1]} h vor dem Start`;
+  const minutes = Number(time[1]) * 60 + Number(time[2]);
+  const clock = (offset) => { const value = (minutes - offset * 60 + 1440) % 1440; return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`; };
+  return `${clock(hours[0])}–${clock(hours[1])}`;
+}
+
+function racePlanDuring(during) {
+  if (!during) return null;
+  if (during.step === "none") return "keine nötig";
+  if (during.step === "mouth_rinse") return "kleine Mengen oder Mund spülen";
+  const range = `${during.low_g}–${during.high_g} g/h`;
+  return during.established_max_g ? `${range} · Glukose + Fruktose · über ${during.established_max_g} g/h unbelegt` : range;
+}
+
+function racePlanHeading(text, badge) {
+  return h("h5", null, text, badge ? h("span", "planned-badge", badge) : null);
+}
+
+function racePlanPacing(pacing) {
+  if (pacing.status !== "ready") return RACE_PLAN_UNAVAILABLE[pacing.reason] ? [racePlanHeading("Tempo"), h("p", "race-plan-gap", RACE_PLAN_UNAVAILABLE[pacing.reason])] : [];
+  const ride = pacing.method === "power_variation";
+  const badge = [ride ? "± 5 % Leistung" : "gleiche Anstrengung", pacing.profile_rejected ? "Streckenprofil nicht erkannt" : null].filter(Boolean).join(" · ");
+  const rows = pacing.sections.map((section) => {
+    const grade = racePlanSigned(section.grade_pct);
+    const span = `km ${RACE_PLAN_KM.format(section.from_km)}–${RACE_PLAN_KM.format(section.to_km)}`;
+    if (ride) return [span, grade, section.power_w == null ? racePlanSigned(section.power_pct, "±") : `${section.power_w} W`];
+    return [span, grade, `${AppFormat.clock(section.pace_s_per_km)}/km`, AppFormat.clock(section.time_s)];
+  });
+  const columns = ride ? ["Abschnitt", "Steigung", "Leistung"] : ["Abschnitt", "Steigung", "Tempo", "Zeit"];
+  return [racePlanHeading("Tempo", badge), table(columns, rows, { className: "race-plan-table" })];
+}
+
+function racePlanCarbohydrates(carbohydrates, competition) {
+  const weight = carbohydrates.weight?.source ? `Gewicht ${carbohydrates.weight.source}` : null;
+  const rows = carbohydrates.before.map((entry) => entry.kind === "meal"
+    ? [[racePlanDay(competition.event_date, 0), racePlanMealTime(competition.starts_at_local, entry.hours_before)].filter(Boolean).join(" "), racePlanRange(entry.grams, "g") || racePlanRange(entry.g_per_kg, "g/kg")]
+    : [racePlanDays(competition.event_date, entry.days_before), racePlanRange(entry.grams, "g/Tag") || racePlanRange(entry.g_per_kg, "g/kg/Tag")]);
+  const during = racePlanDuring(carbohydrates.during);
+  rows.push(["Im Rennen", during || RACE_PLAN_UNAVAILABLE.duration]);
+  return [
+    racePlanHeading("Kohlenhydrate", [carbohydrates.source, weight].filter(Boolean).join(" · ")),
+    h("div", "race-plan-rows", rows.map(([label, value]) => h("div", null, h("span", null, label), h("strong", null, value)))),
+  ];
+}
+
+function racePlanRead(competition) {
+  const key = JSON.stringify(competition);
+  let read = competitionRacePlans.get(key);
+  if (!read) {
+    read = api(`/api/competitions/${encodeURIComponent(competition.id)}/race-plan`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
+    read.catch(() => { if (competitionRacePlans.get(key) === read) competitionRacePlans.delete(key); });
+    competitionRacePlans.set(key, read);
+  }
+  return read;
+}
+
+function loadRacePlan(section, competition) {
+  if (section.dataset.state === "loading" || section.dataset.state === "ready") return;
+  section.dataset.state = "loading";
+  const status = h("output", null, "Rennplan wird berechnet …");
+  section.replaceChildren(h("h4", null, "Rennplan"), status);
+  racePlanRead(competition).then((payload) => {
+    const plan = payload.race_plan;
+    section.dataset.state = "ready";
+    section.replaceChildren(h("h4", null, "Rennplan"), ...racePlanPacing(plan.pacing), ...racePlanCarbohydrates(plan.carbohydrates, competition));
+  }).catch(() => {
+    section.dataset.state = "failed";
+    const retry = h("button", { type: "button", className: "secondary-button" }, "Erneut laden");
+    retry.addEventListener("click", () => loadRacePlan(section, competition));
+    status.textContent = "Rennplan konnte nicht geladen werden.";
+    section.append(retry);
+  });
+}
+
 function competitionCard(competition, todayKey, openIds) {
   const sport = competition.sport_detail || competitionSportLabel(competition.sport, competition.environment);
   const when = AppFormat.relativeDay(competition.event_date, todayKey);
@@ -2181,8 +2285,15 @@ function competitionCard(competition, todayKey, openIds) {
     ["Notizen", competition.notes],
   ];
   const facts = optional.filter(([, value]) => value != null && String(value).trim() !== "").map(([label, value]) => competitionFact(label, value));
-  return h("details", { className: "competition-card", dataset: { competitionId: String(competition.id) }, open: openIds.has(String(competition.id)) },
-    summary, source, facts.length ? h("div", "competition-card-facts", facts) : null);
+  const upcoming = competitionDate(competition, todayKey) && competition.event_date >= todayKey;
+  const plan = upcoming ? h("section", "race-plan") : null;
+  const card = h("details", { className: "competition-card", dataset: { competitionId: String(competition.id) }, open: openIds.has(String(competition.id)) },
+    summary, source, facts.length ? h("div", "competition-card-facts", facts) : null, plan);
+  if (plan) {
+    card.addEventListener("toggle", () => { if (card.open) loadRacePlan(plan, competition); });
+    if (card.open) loadRacePlan(plan, competition);
+  }
+  return card;
 }
 
 function renderCompetitions(competitions) {

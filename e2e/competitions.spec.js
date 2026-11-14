@@ -18,6 +18,20 @@ async function overview(page) {
     const data = await response.json();
     return route.fulfill({ json: { ...data, competitions: events } });
   });
+  const racePlans = [];
+  await page.route("**/api/competitions/*/race-plan", (route) => {
+    racePlans.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { ok: true, race_plan: {
+      pacing: { status: "ready", method: "equal_effort", profile_rejected: false, sections: [
+        { from_km: 0, to_km: 10, grade_pct: 0, pace_s_per_km: 330, time_s: 3300 },
+        { from_km: 10, to_km: 12.5, grade_pct: 4, pace_s_per_km: 408, time_s: 1020 },
+      ] },
+      carbohydrates: { source: "Thomas, Erdman und Burke 2016", weight: { kg: 70, source: "Profil" }, during: { step: "moderate", low_g: 30, high_g: 60 }, before: [
+        { kind: "daily", days_before: 1, g_per_kg: [7, 12], grams: [490, 840] },
+        { kind: "meal", hours_before: [4, 1], g_per_kg: [1, 4], grams: [70, 280] },
+      ] },
+    } } });
+  });
   // Use the athlete-local day supplied by the disposable fixture.
   await page.goto("/#coach");
   await expect.poll(() => page.evaluate(() => !state.loadPromise && Boolean(state.data?.profile))).toBe(true);
@@ -31,7 +45,7 @@ async function overview(page) {
   ];
   await page.evaluate(async () => { await load("/api/bootstrap?local=1", ["profile"]); await AppRouter.navigate("plan/season"); });
   await expect(page.locator("#competitionList > .competition-card")).toHaveCount(3);
-  return { reads, writes, setEvents(value) { events = value; }, fail(value) { fail = value; } };
+  return { reads, writes, racePlans, setEvents(value) { events = value; }, fail(value) { fail = value; } };
 }
 
 test("@responsive competition summaries, saved details and archive stay compact and safe", async ({ page }) => {
@@ -51,12 +65,20 @@ test("@responsive competition summaries, saved details and archive stay compact 
   await expect(alpha).toContainText("Lokal geändert");
   await expect(alpha).toContainText("<img src=x onerror=alert(1)>");
   await expect(alpha.locator("img")).toHaveCount(0);
+  const plan = alpha.locator(".race-plan");
+  await expect(plan).toContainText("gleiche Anstrengung");
+  await expect(plan.locator("tbody tr").nth(1)).toHaveText(/km 10–12,5\s*\+4 %\s*6:48\/km\s*17:00/);
+  await expect(plan).toContainText("490–840 g/Tag");
+  await expect(plan).toContainText("04:30–07:30");
+  await expect(plan).toContainText("30–60 g/h");
+  expect(tracked.racePlans).toEqual(["/api/competitions/a/race-plan"]);
   await expect(beta).not.toHaveAttribute("open", "");
   const archive = root.locator(".competition-archive");
   await expect(archive).not.toHaveAttribute("open", "");
   await archive.locator(":scope > summary").click();
   await expect(archive.locator(".competition-card").first()).toHaveAttribute("data-competition-id", "old");
   await expect(archive.locator("summary").filter({ hasText: "Alt" }).first()).toContainText("0 km");
+  await expect(archive.locator(".race-plan")).toHaveCount(0);
   await expect(root.locator("svg, form, .season-evidence")).toHaveCount(0);
   await expect(root).not.toContainText(/Wochenumfang|Szenarien vergleichen|Zieldistanzvergleich|Taper/);
   for (const theme of ["dark", "light"]) {
