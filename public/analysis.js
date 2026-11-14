@@ -771,7 +771,7 @@ function runningBestEffortRow(kind, point) {
   let text = null;
   if (kind === "speed" && point.speed_mps > 0) text = formatPace(1000 / Number(point.speed_mps));
   else if (kind === "distance" && point.seconds > 0) text = AppFormat.clock(point.seconds);
-  return { label, text, key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
+  return { label, text, date: text && dateLabel(point.date), key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
 }
 
 function renderRunningBestEfforts(result) {
@@ -782,10 +782,10 @@ function renderRunningBestEfforts(result) {
   let values = 0;
   for (const kind of ["speed", "distance"]) {
     for (const point of running[kind] || []) {
-      const { label, text, key } = runningBestEffortRow(kind, point);
+      const { label, text, date, key } = runningBestEffortRow(kind, point);
       const cell = h("td", { title: text ? point.source : null }, text);
       if (text) values += 1; else markValueMissing(cell);
-      body.append(h("tr", { dataset: { runningBest: key } }, h("th", { scope: "row" }, label), cell, h("td", null, text ? dateLabel(point.date) : null)));
+      body.append(h("tr", { dataset: { runningBest: key } }, h("th", { scope: "row" }, label), cell, h("td", null, date)));
     }
   }
   if (values) {

@@ -343,11 +343,15 @@ class TrainingProfileSelectionService:
         }
         if all_time:
             every = self.all_time_records()
-            result["all_time"] = (
-                {"status": "pending"}
-                if every is None
-                else self._profile_window(list(every), today, None)
-            )
+            result["all_time"] = {"status": "pending"}
+            if every is not None:
+                rows = [dict(row) for row in every]
+                # The window starts on the day of the oldest stored session.
+                first = min(
+                    (str(row["date"]) for row in rows), default=today.isoformat()
+                )
+                days = (today - date.fromisoformat(first)).days + 1
+                result["all_time"] = self._profile_window(rows, today, max(days, 1))
         return result
 
     def _power_meter_changes(self) -> list[dict[str, Any]]:
@@ -395,14 +399,13 @@ class TrainingProfileSelectionService:
 
     @staticmethod
     def _profile_window(
-        records: Sequence[Mapping[str, Any]], today: date, days: int | None
+        records: list[dict[str, Any]], today: date, days: int
     ) -> dict[str, Any]:
-        """The window's best values and coverage; ``days`` None takes every record."""
-        start = "" if days is None else (today - timedelta(days=days - 1)).isoformat()
+        start = today - timedelta(days=days - 1)
         eligible = [
             row
             for row in records
-            if start <= str(row.get("date") or "") <= today.isoformat()
+            if start.isoformat() <= str(row.get("date") or "") <= today.isoformat()
         ]
         source = "local full-resolution activity streams"
         usable = [
@@ -418,8 +421,7 @@ class TrainingProfileSelectionService:
             if (row.get("power_profile") or {}).get("status") == "ok"
         ]
         result: dict[str, Any] = {
-            "date_start": start
-            or min((str(row.get("date")) for row in eligible), default=None),
+            "date_start": start.isoformat(),
             "date_end": today.isoformat(),
             "source": source,
             "cache_coverage": {
