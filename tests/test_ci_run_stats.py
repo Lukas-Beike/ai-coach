@@ -70,6 +70,7 @@ class CiRunStatsTests(unittest.TestCase):
             run(3, 2),
             run(4, 9, "failure"),  # counted only with --all-conclusions
             {**run(6, 140), "run_attempt": 2},  # a re-run two hours later
+            {**run(7, 30, "failure"), "run_attempt": 2},  # dropped, not counted
             run(5, 7, created="11:30"),  # after the window
         ]
         jobs = {1: FULL, 2: DESKTOP, 3: DOCS, 6: FULL}

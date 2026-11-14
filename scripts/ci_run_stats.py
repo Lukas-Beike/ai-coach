@@ -133,13 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--queue", action="store_true")
     args = parser.parse_args(argv)
     try:
-        found = fetch_runs(args.since, args.until, args.event)
-        reruns = sum(r.get("run_attempt", 1) > 1 for r in found)
-        first = [
-            r for r in found if not args.first_attempts or r.get("run_attempt", 1) == 1
+        found = [
+            r
+            for r in fetch_runs(args.since, args.until, args.event)
+            if args.all_conclusions or r["conclusion"] == "success"
         ]
+        # Re-runs among the runs the conclusion filter keeps (Gitar finding).
+        reruns = sum(r.get("run_attempt", 1) > 1 for r in found)
         runs = [
-            r for r in first if args.all_conclusions or r["conclusion"] == "success"
+            r for r in found if not args.first_attempts or r.get("run_attempt", 1) == 1
         ]
         jobs = {
             r["id"]: fetch_jobs(r["id"]) for r in runs if r["conclusion"] == "success"
