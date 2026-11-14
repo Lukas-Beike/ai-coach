@@ -2,6 +2,7 @@
 
 import itertools
 import sqlite3
+import threading
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -356,6 +357,41 @@ class SessionExecutionCurveTests(unittest.TestCase):
         add_record(self.db, GARMIN, "g-1", "act_1")
         store_streams(self.db, GARMIN, "g-1", interval_power(), StreamResolution.FULL)
 
+    def test_a_curve_missed_by_two_threads_is_computed_once(self):
+        # Parallel view loads after a start computed the same cold curve in
+        # every request (#2783); a second miss now waits for the first.
+        shared = sqlite3.connect(":memory:", check_same_thread=False)
+        shared.row_factory = row_factory
+        self.addCleanup(shared.close)
+        self.db.commit()
+        self.db.backup(shared)
+        entered, release = threading.Event(), threading.Event()
+        compute = mean_max_curve._session_curve
+
+        def gated(*args):
+            entered.set()
+            release.wait(5)
+            return compute(*args)
+
+        results = {}
+        with patch.object(mean_max_curve, "_session_curve", side_effect=gated) as spy:
+            first = threading.Thread(
+                target=lambda: results.update(a=self.reader.curves(shared, ["act_1"]))
+            )
+            first.start()
+            self.assertTrue(entered.wait(5))
+            second = threading.Thread(
+                target=lambda: results.update(b=self.reader.curves(shared, ["act_1"]))
+            )
+            second.start()
+            second.join(0.2)
+            self.assertTrue(second.is_alive(), "the second miss waits")
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(1, spy.call_count)
+        self.assertIs(results["a"]["act_1"], results["b"]["act_1"])
+
     def test_lap_sets_are_read_by_key_and_alone(self):
         store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS)
         keys = lap_set_keys(self.db, ["act_1"])
@@ -703,7 +739,13 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertEqual(1, len(builds))
         read = {call.args[1] for call in self.session_records.call_args_list}
         self.assertNotIn("act_old", read)
+        self.session_records.reset_mock()
         builds.pop()()
+        # Newest first, so the recent windows requests read warm first (#2783).
+        self.assertEqual(
+            ["act_recent", "act_old"],
+            [call.args[1] for call in self.session_records.call_args_list],
+        )
         # One session per read snapshot, then a pause as long as that session
         # took, outside the snapshot, so request threads get the interpreter
         # (#2757); the records equal those of one read over the same days.

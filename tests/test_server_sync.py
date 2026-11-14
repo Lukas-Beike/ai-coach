@@ -145,6 +145,14 @@ class ServerSyncTests(ServerTestCase):
                     daily_loop=daily_loop_factory,
                 ),
             ),
+            patch.object(
+                server,
+                "PERFORMANCE",
+                replace(
+                    server.PERFORMANCE,
+                    all_time_records=lambda: order.append("all-time-build"),
+                ),
+            ),
             patch.object(server.threading, "Thread") as thread_factory,
             patch.object(server.signal, "signal") as install_signal_handler,
             patch.object(server.DIAGNOSTIC_CAPTURE, "close") as capture_close,
@@ -206,6 +214,9 @@ class ServerSyncTests(ServerTestCase):
                 "sync-worker",
                 "coach-worker",
                 "canonical-backfill",
+                # The paced all-time curve build starts once at start-up, so the
+                # first views find their session curves warm (#2783).
+                "all-time-build",
             ],
         )
         daily_loop.stop.assert_called_once_with()
